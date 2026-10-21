@@ -1,0 +1,53 @@
+{:id "0010-dev-seed"
+ :title "Dev seed: a signed-in human, their agent, and a first conversation on the emulators"
+ :lupa/deps #{"0005-worker"}
+ :lupa/area :dev
+ :lupa/risk :low
+ :goal "One command fills running emulators with what a developer needs to
+        try the app: an Auth emulator user whose uid is \"ben\" and who can
+        sign in with an email and password, the matching human member, his
+        agent \"scout\", and a conversation \"first\" between them. Safe to run
+        twice."
+ :scope ["src/halfahead/dev/seed.clj" "src/halfahead/worker/store.clj"
+         "test/halfahead/dev/seed_test.clj" "test/halfahead/worker/store_test.clj"]
+ :design "halfahead.worker.store gains two public writers alongside the
+          existing ones, same style and the same demo- guard:
+            (write-member! cfg member) and (write-conversation! cfg c)
+
+          halfahead.dev.seed (Babashka):
+            (plan {:now inst :email s :password s}) -> pure: a map of
+              {:auth-user {...} :members [...] :conversations [...]} with
+              valid domain maps (ben: human \"Ben\"; scout: agent \"Scout\"
+              owned by ben; conversation \"first\", title \"First light\",
+              member-ids [\"ben\" \"scout\"], created-by ben)
+            (auth-user-request plan-auth-user) -> pure: the request map for
+              the Auth emulator's create-account endpoint
+              POST http://<FIREBASE_AUTH_EMULATOR_HOST or 127.0.0.1:9099>
+              /identitytoolkit.googleapis.com/v1/projects/demo-halfahead/accounts
+              with \"Authorization: Bearer owner\" and JSON
+              {localId \"ben\", email, password, displayName \"Ben\"}
+            (-main & args) -> runs the plan: creates the auth user (an
+              EMAIL_EXISTS or DUPLICATE_LOCAL_ID error counts as done), then
+              upserts members and conversations through store. Defaults:
+              email ben@halfahead.test, password from env HALFAHEAD_DEV_PASSWORD
+              or \"halfahead-dev\". Prints what it did.
+          Never touches a non-demo project (store already refuses)."
+ :acceptance
+ ["plan returns valid :ha/member and :ha/conversation maps (assert with
+   halfahead.schema/valid?) and the agent's owner-id is \"ben\""
+  "auth-user-request builds the URL, header, and body exactly as above,
+   honouring FIREBASE_AUTH_EMULATOR_HOST when given (pass env in as an
+   argument so the test is pure)"
+  "write-member! and write-conversation! build PATCH requests to
+   members/<id> and conversations/<id> (assert via store's :send-fn) and
+   refuse a non-demo project"
+  "-main treats an EMAIL_EXISTS response from the auth endpoint as success
+   (test with an injected send function)"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit bb.edn (run it as `bb -m halfahead.dev.seed`), the schema,
+   worker.main, or worker.engine"
+  "No messages in the seed; no real project; no secrets committed"]
+ :context ["src/halfahead/worker/store.clj" "test/halfahead/worker/store_test.clj"
+           "docs/SCHEMA.md" "DESIGN.md"]
+ :budget-usd 8.0}

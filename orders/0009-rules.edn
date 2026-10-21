@@ -1,0 +1,81 @@
+{:id "0009-rules"
+ :title "Firestore rules for members, conversations, messages and presence, tested on the emulator in the gate"
+ :lupa/area :security
+ :lupa/risk :high
+ :goal "Signed-in members can read the conversations they belong to and
+        write their own messages and presence, and nobody else can read or
+        write anything. The rules are tested against the Firestore emulator
+        as part of `bb test`, on a free port so parallel factory worktrees
+        never collide."
+ :scope ["firestore.rules" "bb.edn" "src/halfahead/dev/emulator.clj"
+         "test-rules/halfahead/rules_test.clj"]
+ :design "firestore.rules (rules_version 2), deny by default:
+          - members/{memberId}: read if signed in and a members document
+            exists for request.auth.uid. No client writes.
+          - conversations/{cid}: read if request.auth.uid is in
+            resource.data.memberIds. No client writes.
+          - conversations/{cid}/messages/{mid}: read if the uid is in the
+            parent conversation's memberIds (get()). create only if: the uid
+            is in memberIds; request.resource.data.authorId ==
+            request.auth.uid; request.resource.data.id == mid;
+            request.resource.data.conversationId == cid;
+            request.resource.data.sentAt == request.time; keys().hasOnly the
+            message wire keys (id, conversationId, authorId, text, delivery,
+            emphasis, sentAt, inReplyTo); text is a string of size 1..4000;
+            delivery is one of plain typed headline aside credits; emphasis
+            is a list of size <= 8. No update or delete.
+          - conversations/{cid}/presence/{memberId}: read if a member of the
+            conversation; write only if memberId == request.auth.uid and the
+            uid is a member.
+          The worker writes through the emulator's admin bypass, so agent
+          messages and presence are not constrained here (a later order
+          gives agents real credentials).
+
+          Tests: Babashka, over the Firestore REST API, in
+          test-rules/halfahead/rules_test.clj (a separate root, so the
+          offline runner never picks them up). Seed fixtures with the admin
+          header \"Authorization: Bearer owner\"; act as a user with an
+          unsigned emulator ID token (JWT with header {\"alg\":\"none\"}, an
+          empty signature, and claims sub/user_id = uid, aud and iss for
+          project demo-halfahead, iat/exp/auth_time, and
+          firebase.sign_in_provider \"password\"). Read the emulator host
+          from FIRESTORE_EMULATOR_HOST, which `firebase emulators:exec` sets.
+
+          halfahead.dev.emulator (Babashka): (run-rules-tests!) finds a free
+          TCP port for each emulator listener, writes a temporary firebase
+          config (a copy of firebase.json whose firestore emulator port is a
+          free port, with \"hub\" and \"logging\" also on free ports and
+          \"ui\" disabled, because those default to fixed ports 4400 and
+          4500 and collide across parallel runs; the rules path absolute),
+          and runs
+          `npx firebase emulators:exec --only firestore --project
+          demo-halfahead --config <tmp> \"bb test:rules\"`, exiting non-zero
+          when the tests fail.
+
+          bb.edn: `test:rules` runs clojure.test over the test-rules
+          namespaces (requires FIRESTORE_EMULATOR_HOST); `test` gains a
+          final step calling halfahead.dev.emulator/run-rules-tests!; add
+          \"test-rules\" to :paths. Keep every existing task working."
+ :acceptance
+ ["Allowed: a member reads their conversation, its messages, and members;
+   a member creates a valid message as themselves with sentAt =
+   request.time (use the REST serverValue transform REQUEST_TIME); a member
+   writes their own presence"
+  "Denied: a non-member reads the conversation or its messages; a signed-out
+   request reads anything; a member creates a message with another
+   authorId, an extra key, blank text, an unknown delivery, or a client
+   sentAt; a member updates or deletes a message; a member writes another
+   member's presence; any client writes members or conversations"
+  "Two `bb test` runs at once (from two directories) both pass: the port is
+   chosen per run (assert in a unit test of the free-port and config
+   functions, which are pure or nearly so)"
+  "`bb test` runs the offline suites, then the rules suite, and fails if
+   any fails"]
+ :non-goals
+ ["Do not edit src/halfahead (except the new dev/emulator.clj), the
+   schema, or firebase.json"
+  "No Storage rules; no auth providers; no client code"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/codec.cljc"
+           "src/halfahead/worker/store.clj" "firebase.json" "firestore.rules"
+           "bb.edn"]
+ :budget-usd 12.0}
