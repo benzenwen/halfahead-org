@@ -48,6 +48,15 @@
              :requires ([halfahead.dev.e2e])
              :task     (halfahead.dev.e2e/inner!)}
 
+  play    {:doc      "Try Half Ahead locally: emulators, seed, worker (real claude engine by default) and the app, then the URL. Ctrl-C stops everything. bb play [--engine mock|claude] [--port n]"
+           :depends  [deps]
+           :requires ([halfahead.dev.play])
+           :task     (apply halfahead.dev.play/-main *command-line-args*)}
+
+  play:inner {:doc      "The part of bb play that runs inside the emulators; not meant to be run by hand"
+              :requires ([halfahead.dev.play])
+              :task     (halfahead.dev.play/inner! *command-line-args*)}
+
   dev     {:doc     "Watch the app and serve public/ at http://localhost:8000"
            :depends [deps]
            :task    (shell "npx shadow-cljs watch app")}
