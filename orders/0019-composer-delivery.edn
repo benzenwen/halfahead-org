@@ -1,0 +1,44 @@
+{:id "0019-composer-delivery"
+ :title "Humans choose how their lines are delivered, too"
+ :lupa/deps #{"0004-conversation-core" "0016-look-title-sequence"}
+ :lupa/area :flair
+ :lupa/risk :medium
+ :goal "Flair is not only the agent's: the composer offers the same five
+        deliveries, so a person can send a line as an aside, a headline, a
+        typed beat, or a credit roll. Plain stays the default and resets
+        after each send, so flair stays an exception."
+ :scope ["src/halfahead/app/core.cljc" "test/halfahead/app/core_test.cljc"
+         "src/halfahead/app/views.cljc" "test/halfahead/app/views_test.cljc"
+         "public/css/halfahead.css"]
+ :design "Core: state :composer gains :delivery (default :plain). New action
+          [:composer/delivery-chosen {:delivery d}] sets it when d is one of
+          the schema's deliveries (anything else: state unchanged).
+          :composer/sent uses it for the message, then resets the composer
+          to {:text \"\" :delivery :plain}. Emphasis stays [] (headline then
+          stresses the longest word, as perform already does).
+          Views: a compact radiogroup of the five deliveries beside Send,
+          labelled 'Delivery', each option a short word (plain, typed,
+          headline, aside, credits) with a one-line title attribute saying
+          when to use it (same wording as the agent's instructions in
+          halfahead.worker.core). Selecting emits
+          [[:composer/delivery-chosen {:delivery d}]]. Keyboard: the native
+          radio group behaviour (arrow keys) is enough.
+          CSS: the group is quiet (label type, no boxes) and the chosen
+          option is marked by more than colour."
+ :acceptance
+ ["Core: delivery-chosen with :aside then composer/sent emits a message
+   with :delivery :aside, and the composer is back to :plain with empty
+   text; an unknown delivery leaves state unchanged (tests)"
+  "Core: the existing property that every frame concatenates to its text
+   still holds with the new action in the generated sequences"
+  "Views: five radio inputs named delivery, the current one checked, each
+   emitting delivery-chosen with its value; the group has an accessible
+   name (tests)"
+  "`bb test` stays green"]
+ :non-goals
+ ["No emphasis picking in the composer; no new deliveries; no sound"
+  "Do not edit the schema, perform, the shell, or the worker"
+  "Do not run `bb e2e` or `bb play` (fixed ports; another line may use them)"]
+ :context ["src/halfahead/app/core.cljc" "src/halfahead/app/views.cljc"
+           "src/halfahead/worker/core.clj" "docs/SCHEMA.md" "DESIGN.md"]
+ :budget-usd 8.0}

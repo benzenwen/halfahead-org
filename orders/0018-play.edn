@@ -1,0 +1,47 @@
+{:id "0018-play"
+ :title "`bb play`: one command to talk with Scout locally"
+ :lupa/deps #{"0013-e2e-smoke"}
+ :lupa/area :dev
+ :lupa/risk :low
+ :goal "The founder can try Half Ahead with one command: `bb play` starts
+        the Firestore and Auth emulators, seeds them, starts the worker with
+        the real `claude` engine (or --engine mock), compiles and serves the
+        app, and prints the URL. Ctrl-C stops everything it started. The
+        README says how."
+ :scope ["src/halfahead/dev/play.clj" "test/halfahead/dev/play_test.clj"
+         "bb.edn" "README.md"]
+ :design "halfahead.dev.play (Babashka), reusing halfahead.dev.serve, the
+          seed, and the worker task — no copies of their logic:
+            (-main & args) runs `npx firebase emulators:exec --only
+            firestore,auth --project demo-halfahead \"bb play:inner <args>\"`
+            (emulators:exec stops the emulators when the inner script ends).
+            (inner! opts) compiles the app (npx shadow-cljs compile app),
+            runs the seed, starts the worker as a child process with the
+            chosen engine (default claude), starts the static server on
+            port 8000 (or the first free port after it), prints
+            'Half Ahead is at http://127.0.0.1:<port>/ — Ctrl-C to stop',
+            and waits. A JVM shutdown hook stops the worker and the server
+            by their own handles (never by name).
+            (parse-args args) is pure: --engine mock|claude, --port n;
+            unknown flags throw ex-info {:type :ha/bad-args}.
+          bb.edn: tasks `play` and `play:inner`, documented.
+          README.md: keep the founder's opening paragraph verbatim; add a
+          short 'Try it' section (npm ci; bb play; open the URL; sign-in is
+          automatic on the emulator as Ben; bb play --engine mock for no
+          model calls; bb test; bb e2e) and a 'Read first' list pointing to
+          PRODUCT.md, DESIGN.md, DECISIONS.md, docs/research/."
+ :acceptance
+ ["parse-args: defaults {:engine :claude :port 8000}; --engine mock and
+   --port 9000 parsed; an unknown flag throws :ha/bad-args (tests)"
+  "In this container, `bb play --engine mock` started in the background
+   serves the page (curl the printed URL gets 200 with the app's HTML)
+   within 90 s, and after it is stopped by its process handle no worker,
+   server or emulator it started remains (show `ps` in the final message)"
+  "README keeps the founder's paragraph unchanged and adds the sections"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit src/halfahead outside dev/play.clj; no app changes"
+  "Do not run `bb e2e` (fixed ports; another line may use them)"]
+ :context ["src/halfahead/dev/e2e.clj" "src/halfahead/dev/serve.clj"
+           "src/halfahead/dev/seed.clj" "bb.edn" "README.md" "firebase.json"]
+ :budget-usd 8.0}

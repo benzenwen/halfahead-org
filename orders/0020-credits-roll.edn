@@ -1,0 +1,76 @@
+{:id "0020-credits-roll"
+ :title "End the scene: a conversation's credits roll"
+ :lupa/deps #{"0019-composer-delivery" "0011-app-shell"}
+ :lupa/area :flair
+ :lupa/risk :medium
+ :goal "A conversation can end like a good film: 'End scene' rolls short
+        credits over the page — the title, who took part (each agent with
+        whose it is), how many lines were exchanged, the date — and the
+        last note rides out (docs/research/conversation-design.md,
+        principle 7). Nobody has to sit through it: it can be skipped, and
+        under reduced motion it simply appears."
+ :scope ["src/halfahead/app/credits.cljc" "test/halfahead/app/credits_test.cljc"
+         "src/halfahead/app/core.cljc" "test/halfahead/app/core_test.cljc"
+         "src/halfahead/app/views.cljc" "test/halfahead/app/views_test.cljc"
+         "src/halfahead/app/enrich.cljc" "test/halfahead/app/enrich_test.cljc"
+         "public/css/halfahead.css" "src/halfahead/app.cljs"]
+ :design "halfahead.app.credits (.cljc, pure):
+            (credits-text state date-string) -> a string of lines, e.g.
+              FIRST LIGHT
+              (blank)
+              Ben
+              Scout · agent of Ben
+              (blank)
+              4 lines exchanged
+              21 October 2026
+              (blank)
+              Half Ahead
+            Members in the conversation's member order; humans first, then
+            agents; counts from the messages in state. The text must be a
+            valid :ha/message-text.
+          Core: actions [:scene/ended {:now-ms n :date s}] sets
+          :credits {:text t :started-at n}; [:scene/dismissed] clears it.
+          (frames-credits state) or an addition to frames returns the
+          credits frame via halfahead.perform with delivery :credits (and
+          reduced motion from prefs), the same way message frames work; record the
+          credits performance in :performing under the keyword key :credits
+          (not a message id) so the shell's existing clock loop, which ticks
+          while :performing is non-empty, runs it with no shell change;
+          message frames ignore that key, and clock/ticked drops it when
+          finished like any performance.
+          Enrich: [:scene/ended] gains :now-ms and :date (a human date
+          string from the context; in src/halfahead/app.cljs add :date to
+          enrich-context, formatted with toLocaleDateString \"en-GB\" day,
+          long month, year — the only change to that file).
+          Views: an 'End scene' button in the header; when :credits is set,
+          an overlay section (role=dialog, aria-modal true, aria-label
+          'Credits'; the Close button has the autofocus attribute so focus
+          lands inside without any DOM code) shows the performed credits with the same segment markup
+          as messages (sr-only full text plus aria-hidden segments) and a
+          'Close' button emitting [[:scene/dismissed]]; Escape also
+          dismisses (keydown on the dialog).
+          CSS: the overlay is the paper colour at near-full opacity, credits
+          centred in the label type, generous line height."
+ :acceptance
+ ["credits-text for a state with Ben and Scout (agent of Ben) and four
+   messages contains, in order, the title in capitals, 'Ben', 'Scout ·
+   agent of Ben', '4 lines exchanged', the date, and 'Half Ahead'; it is a
+   valid :ha/message-text (tests)"
+  "Core: scene/ended then clock/ticked past the timeline's duration leaves
+   the credits frame fully settled; scene/dismissed clears it; with
+   reduced motion the credits frame is settled at once (tests)"
+  "Property: the credits frame's segments concatenate to exactly the
+   credits text at any time"
+  "Views: the End scene button emits [[:scene/ended]]; with credits set, a
+   dialog with aria-label 'Credits', the sr-only full text, and a Close
+   button emitting [[:scene/dismissed]] (tests)"
+  "`bb test` stays green"]
+ :non-goals
+ ["Credits are not persisted and do not end the conversation in Firestore"
+  "No sound; no sources list yet (the agent does not record citations)"
+  "Do not edit the schema, perform, the shell's Firebase code, or the worker"
+  "Do not run `bb e2e` or `bb play` (fixed ports; another line may use them)"]
+ :context ["docs/research/conversation-design.md" "src/halfahead/app/core.cljc"
+           "src/halfahead/app/views.cljc" "src/halfahead/app/enrich.cljc"
+           "src/halfahead/app.cljs" "src/halfahead/perform.cljc" "DESIGN.md"]
+ :budget-usd 10.0}
