@@ -176,23 +176,61 @@
     (is (nil? (find-one (class? "empty") full)))
     (is (find-one (tag? "ol") full))))
 
-(deftest skip-and-replay-events
+(defn- button-named [label node]
+  (find-one #(and (= "button" (tag-of %)) (= label (text-of %))) node))
+
+(deftest skip-button-only-while-performing
   (let [s (-> started
               (initial (msg "old" "settled" :plain "ben" #inst "2026-01-02"))
               (live (msg "new" "performing" :typed "ben" #inst "2026-01-03")))
-        [old new] (articles (views/page s))]
-    (is (nil? (:on (attrs-of old))))
-    (is (= [[:message/skipped {:id "new"}]] (get-in (attrs-of new) [:on :click])))
-    (doseq [[a id] [[old "old"] [new "new"]]
-            :let [b (find-one (tag? "button") a)]]
-      (is (= [[:replay/requested {:id id}]] (get-in (attrs-of b) [:on :click])))
-      (is (seq (:aria-label (attrs-of b)))))))
+        [old new] (articles (views/page s))
+        done (step s [:clock/ticked {:now-ms 60000}])]
+    (is (nil? (button-named "Skip" old)))
+    (is (= "button" (:type (attrs-of (button-named "Skip" new)))))
+    (is (= [[:message/skipped {:id "new"}]]
+           (get-in (attrs-of (button-named "Skip" new)) [:on :click])))
+    (is (nil? (:on (attrs-of new))) "no article click handler")
+    (is (nil? (button-named "Skip" (second (articles (views/page done))))))))
+
+(deftest replay-button-events
+  (let [s (initial started (msg "old" "settled"))
+        b (find-one (class? "replay") (first (articles (views/page s))))]
+    (is (= [[:replay/requested {:id "old"}]] (get-in (attrs-of b) [:on :click])))
+    (is (seq (:aria-label (attrs-of b))))))
+
+(deftest author-line-reads-name-dot-owner
+  (let [s (initial started (msg "a" "hi" :plain "bot" #inst "2026-01-02")
+                   (msg "b" "yo" :plain "ben" #inst "2026-01-03"))
+        [agent human] (map #(text-of (find-one (class? "author") %)) (articles (views/page s)))]
+    (is (= "Bot · agent of Ben" agent))
+    (is (= "Ben" human))))
 
 (deftest preferences-toggles
   (let [boxes (find-all #(= "checkbox" (:type (attrs-of %))) (views/page started))
         labels (find-all (tag? "label") (find-one (class? "prefs") (views/page started)))]
     (is (= 2 (count boxes)))
     (is (some #(str/includes? (text-of %) "soon") labels))))
+
+(deftest preference-checkboxes-emit-negation
+  (doseq [[k idx] [[:reduced-motion? 0] [:sound? 1]]
+          cur [true false]]
+    (let [s (step started [:prefs/changed {k cur}])
+          box (nth (find-all #(= "checkbox" (:type (attrs-of %))) (views/page s)) idx)]
+      (is (= cur (:checked (attrs-of box))))
+      (is (= [[:prefs/changed {k (not cur)}]] (get-in (attrs-of box) [:on :change]))
+          (pr-str k cur)))))
+
+(deftest agent-glyphs-carry-presence-state
+  (let [glyphs #(find-all (class? "glyph") (views/page %))
+        states #(map (comp :data-state attrs-of) (glyphs %))]
+    (is (seq (glyphs started)))
+    (is (every? #{"idle"} (states started)))
+    (is (every? #(= "true" (:aria-hidden (attrs-of %))) (glyphs started)))
+    (let [t (thinking started)]
+      (is (some #{"thinking"} (states t)))
+      (is (every? #(= "true" (:aria-hidden (attrs-of %))) (glyphs t))))
+    (let [header-glyphs (find-all (class? "glyph") (find-one (tag? "header") (views/page started)))]
+      (is (= 1 (count header-glyphs)) "one per agent member, none for humans"))))
 
 ;; --- stylesheet -------------------------------------------------------------
 
@@ -209,6 +247,16 @@
       (is (str/includes? css c) c))
     (is (nil? (re-find #"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(" outside-root))
         "colours live only in :root")))
+
+(deftest stylesheet-has-schemes-and-honest-hiding
+  (let [css (read-file "public/css/halfahead.css")]
+    (is (str/includes? css "prefers-color-scheme: dark"))
+    (is (re-find #"(?is)/\*.*contrast.*:1.*\*/" css) "contrast pairs are stated")
+    (is (re-find #"\.replay\s*\{\s*opacity:\s*0" css))
+    (is (not (re-find #"\.replay[^{]*\{[^}]*display:\s*none" css))
+        "replay stays reachable by Tab")
+    (is (str/includes? css ".replay") "hover/focus reveal")
+    (is (str/includes? css "focus-within"))))
 
 (deftest index-links-stylesheet
   (is (str/includes? (read-file "public/index.html") "css/halfahead.css")))
