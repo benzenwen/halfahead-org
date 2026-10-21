@@ -7,7 +7,8 @@
             ["firebase/auth" :refer [getAuth connectAuthEmulator signInWithEmailAndPassword]]
             ["firebase/firestore" :refer [getFirestore connectFirestoreEmulator doc getDoc
                                           collection query orderBy limitToLast onSnapshot
-                                          setDoc serverTimestamp]]
+                                          setDoc serverTimestamp Timestamp]]
+            [clojure.walk :as walk]
             [halfahead.codec :as codec]
             [halfahead.config :refer [config]]))
 
@@ -16,16 +17,20 @@
 (defn- log-error [what e]
   (js/console.error (str "halfahead: " what) e)
   (when-let [data (ex-data e)]
-    (js/console.error "halfahead: details" (clj->js (select-keys data [:type :entity :errors])))))
+    (js/console.error "halfahead: details" (js/JSON.stringify (clj->js (select-keys data [:type :entity :errors]))))))
+
+(defn data->wire
+  "A snapshot's data object as a string-keyed map in which every Firestore
+  Timestamp, at any depth, is a js/Date. js->clj leaves class instances
+  alone and (object? v) is false for them, so conversion must be explicit."
+  [data]
+  (walk/postwalk #(if (instance? Timestamp %) (.toDate ^js %) %) (js->clj data)))
 
 (defn- ->wire
-  "A snapshot's data as a string-keyed map, Timestamps as js/Date, with the
-  document id as \"id\"."
+  "A snapshot's data with the document id as \"id\"."
   [^js snapshot]
-  (-> (.data snapshot #js {:serverTimestamps "estimate"})
-      js->clj
-      (update-vals (fn [^js v] (if (and (object? v) (fn? (.-toDate v))) (.toDate v) v)))
-      (assoc "id" (.-id snapshot))))
+  (assoc (data->wire (.data snapshot #js {:serverTimestamps "estimate"}))
+         "id" (.-id snapshot)))
 
 (defn- decode-snapshot [kind snapshot]
   (codec/decode kind (->wire snapshot)))
