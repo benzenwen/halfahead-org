@@ -44,13 +44,17 @@
    :key     (some-> event .-key)
    :shift?  (boolean (some-> event .-shiftKey))})
 
-(defn- dispatch! [{:replicant/keys [dom-event]} actions]
+(defn- dispatch! [{:replicant/keys [dom-event node]} actions]
   (let [ctx (enrich-context dom-event)]
     (doseq [action actions
             :when (vector? action)]
-      (when (and dom-event (enrich/prevent-default? action ctx))
-        (.preventDefault dom-event))
-      (run! handle! (enrich/enrich action ctx)))))
+      (if (= [:dom/focus] action)
+        ;; a DOM-only life-cycle action: it never reaches the core
+        (some-> node .focus)
+        (do
+          (when (and dom-event (enrich/prevent-default? action ctx))
+            (.preventDefault dom-event))
+          (run! handle! (enrich/enrich action ctx)))))))
 
 (defn- render! []
   (r/render (js/document.getElementById "app") (views/page @state)))

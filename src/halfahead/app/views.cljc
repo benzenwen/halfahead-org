@@ -153,11 +153,13 @@
     [:section.credits {:role "dialog"
                        :aria-modal "true"
                        :aria-label "Credits"
-                       :on {:keydown [[:scene/key {:key nil}]]}}
+                       :tabindex "-1"
+                       :replicant/on-mount [[:dom/focus]]
+                       :on {:keydown [[:scene/key]]}}
      [:p.credits-body
       [:span.sr-only (:text credits)]
       (into [:span {:aria-hidden "true"}] (map segment) frames)]
-     [:button {:type "button" :autofocus true :on {:click [[:scene/dismissed]]}}
+     [:button {:type "button" :on {:click [[:scene/dismissed]]}}
       "Close"]]))
 
 (defn page
