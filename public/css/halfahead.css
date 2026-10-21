@@ -286,7 +286,20 @@ li:hover .replay, li:focus-within .replay { opacity: 1; }
   font-size: var(--step-label);
 }
 
-/* --p runs 0..1 per segment. Every segment keeps its layout box at 0, so
+/* Settled (--p 1) contrast of every effect, traced to the rule that colours
+   it. No effect sets a colour or settles below full opacity, so each inherits
+   its colour: message text from body (--text), no effect rule sets a
+   background, so the page's body (--bg) shows behind it. Values: the :root
+   table at the top of the file.
+   .fx-appear, .fx-type, .fx-slam, .fx-rise, .fx-whisper in .body (colour
+     inherited from body):  --text on --bg   paper 14.19:1   ink 13.99:1
+   .fx-appear, .fx-type, .fx-slam, .fx-rise in .credits-body (no colour set,
+     so inherited from body; background from .credits):
+                            --text on --bg   paper 14.19:1   ink 13.99:1
+   .fx-whisper is the same pair: its size and italics carry the quiet.
+   All >= 4.5:1.
+
+   --p runs 0..1 per segment. Every segment keeps its layout box at 0, so
    nothing reflows while a performance plays. */
 .seg { display: inline-block; white-space: pre-wrap; }
 
@@ -312,10 +325,11 @@ li:hover .replay, li:focus-within .replay { opacity: 1; }
   letter-spacing: 0.04em;
 }
 
+/* Quiet by size and style; the settled state is as opaque as any other. */
 .fx-whisper {
   font-size: 0.8em;
   font-style: italic;
-  opacity: calc(0.6 * var(--p));
+  opacity: var(--p);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -328,7 +342,6 @@ li:hover .replay, li:focus-within .replay { opacity: 1; }
     transform: none !important;
     visibility: visible !important;
   }
-  .fx-whisper { opacity: 0.6 !important; }
 }
 
 /* Credits: paper at near-full opacity over the page, centred in the label

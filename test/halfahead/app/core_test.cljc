@@ -68,6 +68,29 @@
            m))
     (is (= "" (get-in state [:composer :text])))))
 
+(defn- sent-with [text delivery]
+  (let [s (-> started
+              (step [:composer/edited {:text text}])
+              (step [:composer/delivery-chosen {:delivery delivery}]))]
+    (-> (core/handle s [:composer/sent {:id "m1" :now #inst "2026-02-02"}])
+        :effects first second)))
+
+(deftest sent-headline-carries-emphasis
+  (let [m (sent-with "the *one* habit" :headline)]
+    (is (= "the one habit" (:text m)))
+    (is (= [[4 7]] (:emphasis m)))))
+
+(deftest sent-asterisks-are-stripped-for-any-delivery
+  (let [m (sent-with "a *quiet* word" :aside)]
+    (is (= "a quiet word" (:text m)))
+    (is (= [[2 7]] (:emphasis m)))
+    (is (schema/valid? :ha/message m))))
+
+(deftest sent-literal-asterisks-are-unchanged
+  (let [m (sent-with "2 * 3 * 4" :plain)]
+    (is (= "2 * 3 * 4" (:text m)))
+    (is (= [] (:emphasis m)))))
+
 (deftest composer-sent-unsendable
   (doseq [text ["" "   " "\n\t" (apply str (repeat 4001 "a"))]]
     (let [s (step started [:composer/edited {:text text}])
