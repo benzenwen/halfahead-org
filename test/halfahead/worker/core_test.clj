@@ -60,6 +60,32 @@
     (is (< (idx "Human: first") (idx "You: second") (idx "Human: third")))
     (is (< (idx "I am Bot.") (idx "Human: first")))))
 
+(deftest engine-system-prompt-test
+  (let [req (core/engine-request
+             "I am Bot." members
+             [(msg 1 "ann" "first") (msg 2 "bot" "second")])
+        p   (core/engine-system-prompt req)
+        idx #(str/index-of p %)]
+    (is (< (idx "I am Bot.") (idx "- plain") (idx "- typed") (idx "- headline")
+           (idx "- aside") (idx "- credits")))
+    (is (str/includes? p "{\"text\": ..., \"delivery\": ..., \"emphasis\": [...]}"))
+    (is (not (str/includes? p "first")))
+    (is (not (str/includes? p "You:")))))
+
+(deftest engine-transcript-test
+  (let [req (core/engine-request
+             "I am Bot." members
+             [(msg 1 "ann" "first") (msg 2 "bot" "second") (msg 3 "ann" "third")])]
+    (is (= "Human: first\nYou: second\nHuman: third\nYou:" (core/engine-transcript req)))
+    (is (= "You:" (core/engine-transcript {:persona "P" :history []})))
+    (is (not (str/includes? (core/engine-transcript req) "I am Bot.")))))
+
+(deftest engine-prompt-concatenation-test
+  (doseq [ms [[] [(msg 1 "ann" "hi")] [(msg 1 "ann" "hi") (msg 2 "bot" "yo") (msg 3 "ann" "?")]]]
+    (let [req (core/engine-request "I am Bot." members ms)]
+      (is (= (core/engine-prompt req)
+             (str (core/engine-system-prompt req) "\n\n" (core/engine-transcript req)))))))
+
 (deftest parse-reply-test
   (testing "examples"
     (is (= {:text "Hi there" :delivery :aside :emphasis []}

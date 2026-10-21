@@ -20,10 +20,18 @@
 
 (def ^:private default-timeout-ms 180000)
 
+(def ^:private isolation-flags
+  ;; `claude -p` otherwise inherits the host session's built-in file and shell
+  ;; tools and every MCP connector it has, and the agent must only talk.
+  ["--tools" "" "--disallowedTools" "mcp__*"])
+
 (defn claude-command
-  "The argument vector that asks the claude CLI for one reply."
+  "The argument vector that asks the claude CLI for one reply, with every
+  tool disabled and the persona as the system prompt."
   [_config request]
-  ["claude" "-p" (core/engine-prompt request) "--output-format" "json"])
+  (into ["claude" "-p" (core/engine-transcript request)
+         "--system-prompt" (core/engine-system-prompt request)]
+        (concat isolation-flags ["--output-format" "json"])))
 
 (defn- run-process
   "Runs argv; -> {:exit n :out s :err s}, or {:timeout? true} past timeout-ms."

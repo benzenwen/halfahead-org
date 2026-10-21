@@ -1,5 +1,6 @@
 (ns halfahead.worker.engine-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [halfahead.schema :as schema]
             [halfahead.worker.core :as core]
             [halfahead.worker.engine :as engine]))
@@ -23,7 +24,21 @@
 
 (deftest claude-command-test
   (let [argv (engine/claude-command {:engine :claude} request)]
-    (is (= ["claude" "-p" (core/engine-prompt request) "--output-format" "json"] argv))))
+    (is (= ["claude" "-p" (core/engine-transcript request)
+            "--system-prompt" (core/engine-system-prompt request)
+            "--tools" "" "--disallowedTools" "mcp__*"
+            "--output-format" "json"]
+           argv))
+    (testing "every tool is disabled, in order"
+      (let [i (.indexOf argv "--tools")]
+        (is (= ["--tools" "" "--disallowedTools" "mcp__*"] (subvec argv i (+ i 4))))))
+    (testing "persona travels only in the system prompt"
+      (let [arg #(nth argv (inc (.indexOf argv %)))
+            sys (arg "--system-prompt")]
+        (is (not (str/includes? (arg "-p") "Be kind.")))
+        (is (str/includes? sys "Be kind."))
+        (is (apply < (str/index-of sys "Be kind.")
+                   (map #(str/index-of sys (str "- " %)) ["plain" "typed" "headline" "aside" "credits"])))))))
 
 (deftest claude-invoke-test
   (let [seen (atom nil)
