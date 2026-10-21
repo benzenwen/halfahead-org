@@ -84,15 +84,19 @@
              messages)])))
 
 (defn- presence-line [state awaiting?]
-  (let [agents (filter #(= :agent (:kind %)) (vals (:members state)))
-        agent-name (some (fn [[member-id p]]
-                           (let [m (get-in state [:members member-id])]
-                             (when (and (= :thinking (:state p)) (= :agent (:kind m)))
-                               (:display-name m))))
-                         (:presence state))]
-    [:p.presence {:role "status" :aria-live "polite"}
-     (map #(with-meta (glyph state (:id %)) {:key (:id %)}) agents)
-     (if (and awaiting? agent-name) (str agent-name " is thinking…") "")]))
+  (let [[agent-id agent-name]
+        (some (fn [[member-id p]]
+                (let [m (get-in state [:members member-id])]
+                  (when (and (= :thinking (:state p)) (= :agent (:kind m)))
+                    [member-id (:display-name m)])))
+              (:presence state))]
+    ;; The region stays mounted for aria-live; the glyph appears only beside
+    ;; the text it illustrates.
+    (if (and awaiting? agent-name)
+      [:p.presence {:role "status" :aria-live "polite"}
+       (glyph state agent-id)
+       (str agent-name " is thinking…")]
+      [:p.presence {:role "status" :aria-live "polite"} ""])))
 
 (defn- composer [{:keys [composer]}]
   [:form.composer {:on {:submit [[:composer/sent]]}}

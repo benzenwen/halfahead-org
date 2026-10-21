@@ -146,7 +146,12 @@
     (is (= "polite" (:aria-live (attrs-of (status human-last)))))
     (doseq [s [human-last agent-last idle started]]
       (is (= (core/awaiting-agent? s) (boolean (seq (text s))))))
-    (is (= "" (text agent-last)))))
+    (is (= "" (text agent-last)))
+    (doseq [s [idle started agent-last]]
+      (is (nil? (find-one (class? "glyph") (status s)))))
+    (let [glyphs (find-all (class? "glyph") (status human-last))]
+      (is (= 1 (count glyphs)))
+      (is (= "thinking" (:data-state (attrs-of (first glyphs))))))))
 
 (defn- form-of [s] (find-one (tag? "form") (views/page s)))
 
@@ -260,3 +265,40 @@
 
 (deftest index-links-stylesheet
   (is (str/includes? (read-file "public/index.html") "css/halfahead.css")))
+
+(defn- luminance [hex]
+  (let [chan (fn [i]
+               (let [c (/ (#?(:clj Integer/parseInt :cljs js/parseInt)
+                            (subs hex i (+ i 2)) 16) 255.0)]
+                 (if (<= c 0.03928) (/ c 12.92) (Math/pow (/ (+ c 0.055) 1.055) 2.4))))]
+    (+ (* 0.2126 (chan 1)) (* 0.7152 (chan 3)) (* 0.0722 (chan 5)))))
+
+(defn- contrast [a b]
+  (let [[hi lo] (reverse (sort [(luminance a) (luminance b)]))]
+    (/ (+ hi 0.05) (+ lo 0.05))))
+
+(defn- token [css re] (second (re-find re css)))
+
+(deftest send-button-contrast-and-disabled-style
+  (let [css (read-file "public/css/halfahead.css")
+        stated (re-find #"/\*[^*]*on-signal on signal,\s*([\d.]+):1[^*]*\*/\s*\.composer button \{" css)
+        root (re-find #":root\s*\{[^}]*\}" css)
+        dark (re-find #"prefers-color-scheme: dark\)\s*\{\s*:root\s*\{[^}]*\}" css)
+        pair (fn [block] [(token block #"--on-signal:\s*(#[0-9a-f]{6})")
+                          (token block #"--signal:\s*(#[0-9a-f]{6})")])]
+    (is stated "enabled pair and ratio are stated on the rule")
+    (is (>= (#?(:clj Double/parseDouble :cljs js/parseFloat) (second stated)) 4.5))
+    (is (>= (apply contrast (pair root)) 4.5))
+    (is (>= (apply contrast (pair dark)) 4.5))
+    (let [disabled (re-find #"\.composer button:disabled\s*\{[^}]*\}" css)]
+      (is (str/includes? disabled "background: transparent"))
+      (is (str/includes? disabled "border-color"))
+      (is (not (str/includes? disabled "opacity"))))))
+
+(deftest labels-and-rhythm-in-stylesheet
+  (let [css (read-file "public/css/halfahead.css")]
+    (is (re-find #"\.composer label, \.prefs label \{" css) "prefs labels share the label type")
+    (is (re-find #"\.prefs label \{[^}]*font-size: var\(--step-label\)" css))
+    (is (re-find #"--step-label: 0\.875rem" css))
+    (is (re-find #"\.transcript li \{\s*padding: var\(--space-2\) 0;\s*border-top: 1px solid var\(--rule\)" css))
+    (is (re-find #"\.transcript li:first-child \{ border-top: 0; \}" css))))
