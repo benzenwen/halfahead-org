@@ -46,7 +46,7 @@
                 (fn [snap]
                   (try
                     (dispatch! [:messages/received
-                                {:messages (mapv #(decode-snapshot :ha/message %) (.-docs snap))
+                                {:messages (mapv #(decode-snapshot :ha/message %) (.-docs ^js snap))
                                  :initial? @initial?
                                  :now-ms (js/Date.now)}])
                     (reset! initial? false)
@@ -58,7 +58,7 @@
               (fn [snap]
                 (try
                   (dispatch! [:presence/received
-                              {:presence (mapv #(decode-snapshot :ha/presence %) (.-docs snap))}])
+                              {:presence (mapv #(decode-snapshot :ha/presence %) (.-docs ^js snap))}])
                   (catch :default e (log-error "presence snapshot" e))))
               #(log-error "presence listener" %)))
 
@@ -96,7 +96,7 @@
     (connectFirestoreEmulator @db (get-in emulators [:firestore :host])
                               (get-in emulators [:firestore :port]))
     (-> (signInWithEmailAndPassword auth (:email dev-sign-in) (:password dev-sign-in))
-        (.then #(read-session! opts (.. % -user -uid)))
+        (.then #(read-session! opts (.-uid (.-user ^js %))))
         (.catch #(log-error "signing in" %)))))
 
 (defn run-effect!

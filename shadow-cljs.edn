@@ -16,7 +16,12 @@
          :asset-path "js/app"
          :modules    {:main {:init-fn halfahead.app/init!}}}
 
-  :test {:target    :node-test
-         :output-to "out/test.js"
-         :ns-regexp "-test$"
-         :autorun   false}}}
+  ;; Warnings are errors here only: this build compiles every halfahead
+  ;; namespace (tests plus the browser shell), so an unhinted interop form
+  ;; fails `bb test`. :app is left alone so Firebase's own JSDoc lint
+  ;; cannot fail the release.
+  :test {:target           :node-test
+         :output-to        "out/test.js"
+         :ns-regexp        "(-test|^halfahead\\.app)$"
+         :autorun          false
+         :compiler-options {:warnings-as-errors true}}}}
