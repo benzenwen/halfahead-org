@@ -1,0 +1,81 @@
+{:id "0016-look-title-sequence"
+ :title "The look: messages set like title cards, Scout's presence as a Bit"
+ :lupa/deps #{"0006-views" "0013-e2e-smoke"}
+ :lupa/area :ui
+ :lupa/risk :medium
+ :goal "Half Ahead gets its first visual identity (DECISIONS.md H15): paper
+        and ink, messages set like title cards rather than boxed chat
+        bubbles, reading first, and Scout's presence shown as a small
+        Bit-like glyph whose shape is its state. Along the way, fix four
+        things the first screenshot and audit showed: the author line runs
+        name and owner together (\"Scoutagent of Ben\"), the reduced-motion
+        checkbox does nothing when clicked, a performance can only be
+        skipped with a mouse, and every message shows a replay button."
+ :scope ["public/css/halfahead.css" "src/halfahead/app/views.cljc"
+         "test/halfahead/app/views_test.cljc"]
+ :design "Read docs/research/conversation-design.md first (principles and
+          direction 2, \"title sequence\").
+
+          CSS (tokens only on :root; light 'paper' and dark 'ink' schemes
+          via prefers-color-scheme):
+          - Paper: warm off-white background, warm near-black ink, one
+            signal colour (a vermilion) used sparingly for the agent's
+            glyph and focus rings. Dark: the inverse, warm, never pure
+            black or white. Body text contrast at least 7:1 (WCAG AAA) in
+            both schemes; state the pairs in a comment.
+          - Type: messages in a readable serif stack (ui-serif, Georgia,
+            serif) at a comfortable size (1.125rem+), measure about 60-70ch;
+            author lines and the conversation title in a condensed sans
+            stack, small caps or letter-spaced uppercase, like credits. No
+            web-font downloads.
+          - Messages are not boxed: generous vertical space and a hairline
+            rule between turns; agent turns indented a little with the
+            glyph in the margin.
+          - Effects keep their meaning: .fx-slam scales from large (the
+            game-show card, used rarely) and settles; .fx-rise lifts like a
+            credit line; .fx-whisper is smaller and quieter; reduced motion
+            shows everything still.
+          - The replay button is visible on hover and on keyboard focus
+            within the message, hidden otherwise (but always reachable by
+            Tab).
+
+          Views (halfahead.app.views, pure; keep all existing behaviour):
+          - Author line: the name, then a visually separated owner line
+            for agents (e.g. a middle dot and smaller type); the text
+            content must read \"Scout · agent of Ben\" (with spaces).
+          - Presence glyph: an inline SVG for each agent member, shown with
+            the presence line and beside the agent's messages, with
+            data-state \"idle\" or \"thinking\" and three simple shapes (a
+            diamond for idle, a star-like stellated shape for thinking).
+            aria-hidden; the presence line text remains the accessible
+            signal. Under reduced motion the glyph does not animate.
+          - Skip: while a message is performing it shows a real <button>
+            \"Skip\" (keyboard reachable) emitting [[:message/skipped {:id
+            id}]]; the article no longer needs a click handler.
+          - Preferences: each checkbox emits its toggled value,
+            [[:prefs/changed {:reduced-motion? (not current)}]] and
+            [[:prefs/changed {:sound? (not current)}]]."
+ :acceptance
+ ["View tests: the agent's author line text is \"Scout · agent of Ben\" (a
+   separator with spaces between name and owner line)"
+  "View tests: a performing message has a <button> with text \"Skip\" whose
+   click event is [[:message/skipped {:id id}]]; a settled message has none"
+  "View tests: the reduced-motion checkbox's change event carries the
+   negation of the current preference (both directions), and the sound
+   checkbox's likewise"
+  "View tests: each agent member has a glyph with data-state equal to its
+   presence state (default \"idle\"); glyphs are aria-hidden"
+  "All existing view tests still pass (sr-only copy, segments concatenate to
+   the text, presence line, composer)"
+  "CSS: tokens only on :root for colours; a light and a dark scheme; a
+   prefers-reduced-motion block; the contrast pairs listed in a comment"
+  "`bb e2e` still passes, and the final message lists the new screenshot
+   paths (out/e2e/*.png) for the foreman to look at"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit core, perform, the shell, the schema, or the worker"
+  "No credit roll, sound, or new deliveries yet; no web fonts or images"]
+ :context ["docs/research/conversation-design.md" "DESIGN.md" "PRODUCT.md"
+           "src/halfahead/app/views.cljc" "public/css/halfahead.css"
+           "test/halfahead/app/views_test.cljc" "src/halfahead/app/core.cljc"]
+ :budget-usd 12.0}

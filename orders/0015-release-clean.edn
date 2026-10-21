@@ -1,0 +1,49 @@
+{:id "0015-release-clean"
+ :title "The gate builds what GitHub Pages will serve, and our code compiles without warnings"
+ :lupa/deps #{"0014-shell-timestamps" "0013-e2e-smoke"}
+ :lupa/area :ui
+ :lupa/risk :high
+ :goal "A green `bb test` means the optimized release build works. Today the
+        gate compiles the app in development mode, where nothing is renamed,
+        while GitHub Pages will serve the advanced-optimized release build.
+        halfahead.fx.firebase has three :infer-warnings (property access on
+        values with no ^js hint: (.-docs snap) twice and (.. % -user -uid))
+        that advanced compilation may rename into broken code; the dev
+        compile cannot show it."
+ :scope ["src/halfahead/fx/firebase.cljs" "src/halfahead/app.cljs"
+         "shadow-cljs.edn" "bb.edn" "src/halfahead/dev/deps.clj"
+         "test/halfahead/dev/deps_test.clj"]
+ :design "- Add ^js hints (or js/ interop forms the compiler can infer) so the
+            :app and :test builds report zero warnings from halfahead
+            namespaces.
+          - shadow-cljs.edn: the :app build treats warnings from our own
+            namespaces as errors, while warnings from node_modules (the
+            Firebase package emits a JSDoc lint) are ignored, e.g.
+            :compiler-options {:warnings-as-errors {:ignore #{\"node_modules\"}}}
+            or the equivalent the installed shadow-cljs supports — check its
+            documentation in node_modules rather than guessing.
+          - bb.edn: `test` compiles the :test build and runs it as now, then
+            runs `npx shadow-cljs release app` instead of `compile app`.
+            Keep the rules suite step. `release` and `dev` tasks unchanged.
+          - `bb deps` installs when node_modules is missing OR stale: stale
+            means package-lock.json differs from npm's own record of the
+            install, node_modules/.package-lock.json (compare the
+            "packages" maps, ignoring key order). Put the decision in a
+            pure function (halfahead.dev.deps/stale? lock installed) with
+            tests; found when a checkout made before playwright was added
+            failed `bb e2e` with ERR_MODULE_NOT_FOUND."
+ :acceptance
+ ["deps/stale? is true when the installed record lacks a package the lock
+   has or has a different version, false when they match regardless of key
+   order, true when the installed record is missing; tested"
+  "`npx shadow-cljs compile test` and `npx shadow-cljs release app` report
+   0 warnings from halfahead namespaces"
+  "Adding a deliberate unhinted interop warning to a halfahead namespace
+   makes `bb test` fail (show this in the final message, then remove it)"
+  "`bb test` stays green and `bb e2e` still passes"]
+ :non-goals
+ ["No behaviour changes in the shell; no new features"
+  "Do not edit the schema, core, views, codec, or worker"]
+ :context ["src/halfahead/fx/firebase.cljs" "src/halfahead/app.cljs"
+           "shadow-cljs.edn" "bb.edn" "package.json"]
+ :budget-usd 6.0}
