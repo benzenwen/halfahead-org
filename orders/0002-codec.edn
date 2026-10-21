@@ -1,0 +1,59 @@
+{:id "0002-codec"
+ :title "Codec: domain maps to Firestore wire shape and back"
+ :lupa/area :data
+ :lupa/risk :medium
+ :goal "One boundary converts between domain maps (kebab-case keyword keys,
+        keyword enums, span tuples) and Firestore's wire shape (camelCase
+        string keys, enum strings, span maps), validating both ways; and a
+        second, pure namespace converts wire maps to and from the typed-value
+        JSON of the Firestore REST API, which the worker will use."
+ :scope ["src/halfahead/codec.cljc" "src/halfahead/firestore_rest.cljc"
+         "test/halfahead/codec_test.cljc" "test/halfahead/firestore_rest_test.cljc"]
+ :design "halfahead.codec (.cljc):
+            (encode k domain) -> wire map   ; strict: throws if domain is not a valid k
+            (decode k wire)   -> domain map ; validates the result, throws if invalid
+          k is an entity keyword from halfahead.schema (:ha/member,
+          :ha/conversation, :ha/message, :ha/presence). Derive the key table
+          from the entity schema itself (malli.core/entries), so the legal
+          wire keys are exactly the schema's keys. :ha/member is an [:and
+          [:map ...] [:fn ...]]: find its map child. Keys: :display-name <->
+          \"displayName\". Keyword enums <-> their name strings. Insts pass
+          through unchanged. A span [from to] <-> {\"from\" from \"to\" to},
+          because Firestore cannot store an array inside an array.
+          Errors are ex-info {:type :ha/invalid-data :entity k :errors
+          (schema/explain ...) :value v}.
+          Tolerant reading: decode ignores wire keys the schema does not know
+          (a newer writer may add fields), and decodes an unknown delivery
+          string to :plain. Encoding stays strict.
+
+          halfahead.firestore-rest (.cljc, pure, the only namespace that
+          knows the REST format):
+            (->fields wire) -> {\"fields\" {name typed-value}}
+            (<-fields doc)  -> wire map
+          Typed values: nullValue, stringValue, booleanValue, integerValue
+          (a string on the wire), doubleValue, timestampValue (RFC 3339, UTC,
+          'Z'), arrayValue (an empty array is {} with no \"values\" key: the
+          emulator rejects an empty values list), mapValue. Anything else
+          throws ex-info {:type :ha/unsupported-value}."
+ :acceptance
+ ["For each entity, a valid domain example round-trips: (decode k (encode k
+   x)) = x; and the wire map has exactly the expected camelCase keys"
+  "A message with :emphasis [[0 5] [6 11]] encodes emphasis as
+   [{\"from\" 0 \"to\" 5} {\"from\" 6 \"to\" 11}] and decodes back"
+  "encode throws :ha/invalid-data for an invalid domain map; decode throws
+   :ha/invalid-data for wire data that decodes to an invalid map (e.g. blank
+   text), with :errors present"
+  "decode drops an unknown wire key (\"mood\") and decodes delivery
+   \"fireworks\" to :plain"
+  "Member: an agent without ownerId fails decode; a human with one fails"
+  "firestore-rest round-trips a wire message: (<-fields (->fields w)) = w,
+   including an inst (as timestampValue), integers (as integerValue strings),
+   nested maps, and an empty vector (as arrayValue {})"
+  "timestampValue for #inst \"2026-10-21T08:00:00.000Z\" is
+   \"2026-10-21T08:00:00Z\" on the JVM (bb)"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit halfahead.schema, bb.edn, shadow-cljs.edn, or the test runner"
+  "No network or Firebase SDK calls; no worker; no document paths"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/schema.cljc"]
+ :budget-usd 8.0}
