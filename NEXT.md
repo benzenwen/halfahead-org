@@ -13,7 +13,16 @@ bb play --engine mock   # same, no model calls
 
 Sign-in is automatic on the emulator (as Ben). Scout runs through the
 `claude` CLI on the machine where you run `bb play`, with **no tools at
-all** (H13). Try the delivery picker beside Send.
+all** (H13), at about $0.01 and 15–20 s a reply. Things to try:
+
+- the delivery picker under the composer (plain, typed, headline, aside,
+  credits); wrap words in `*asterisks*` to choose what a headline stresses;
+- **Replay scene** (the whole conversation re-performed in compressed time;
+  pause, resume, stop) and **End scene** (the credit roll; Escape closes);
+- **Sound** in Preferences (opt-in, synthesized cues, one per delivery);
+- your OS's reduced-motion and dark-mode settings (both are honoured).
+
+`bb e2e` runs six browser steps and leaves screenshots in `out/e2e/`.
 
 ## Decisions you owe (★ in DECISIONS.md)
 
@@ -32,6 +41,23 @@ all** (H13). Try the delivery picker beside Send.
    PR per order, e.g. "0009 clean" or "0011 found: …". The foreman will
    transcribe them into Lupa's format once it has one (lupa-internal#1,
    finding 4). This is the only way Half Ahead can start earning darkness.
+
+## Where to start reviewing
+
+Rate 1.0 means everything, but the evidence says where the review
+station was weakest. Its known misses tonight (each fixed by a later
+order that carries `:lupa/fixes`):
+
+| order | what review shipped | found by | fixed by |
+|---|---|---|---|
+| 0011 app shell | Firestore Timestamps never converted (the page could not load) | 0013's reviewer, running `bb e2e` | 0014 |
+| 0011 app shell | unhinted interop that advanced compilation could break | foreman's gate audit | 0015 |
+| 0020 credits roll | lines run together, focus never in the dialog | foreman's browser check | 0023 |
+| 0005 worker | read the first 300 messages by id, not the latest | foreman audit | 0007 |
+
+Then the security-critical ones: 0008 (agent isolation), 0009 and 0012
+(Firestore rules), 0021 (spend cap). Known recall on these defects: 6
+caught, 4 shipped. That is why nothing dims yet.
 
 ## Authorizations only you can give
 

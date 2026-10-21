@@ -139,3 +139,21 @@ of social norms modelled on Recurse's, with one change to resolve the
 tension with "correctness": *challenge the point, not the person; correct
 what matters to the point; let the rest go.* (4) an "off the record" mode
 alongside replay. Nothing built yet.
+
+### H17 UI orders carry a rendered check, and run alone in their wave — foreman, from evidence
+Order 0020 passed its unit tests and review and still rendered wrong; the
+order had left out the browser smoke test to avoid a port collision with
+a parallel line. From 0023 on, an order that changes what people see
+includes an e2e step with a screenshot and a geometric assertion, and
+such orders do not share a wave (the e2e uses fixed emulator ports).
+Three of the review station's four known misses tonight would have been
+caught this way (NEXT.md, "Where to start reviewing").
+
+### H18 One larger order, as an experiment in grain size — foreman
+The founder's deck asks how chunky an order can be before the monkey has
+to intervene. Every order before 0025 was one module and its tests. 0025
+(scene replay: a pure scheduler, core actions, views, styles and an e2e
+step, about three times the usual size) shipped first pass for $0.93 in
+about ten minutes, and the foreman's browser check found it working. One
+data point, not a conclusion: next, a larger order on purpose, then
+another, and watch where first-pass shipping breaks.
