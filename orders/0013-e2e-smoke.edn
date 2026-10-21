@@ -1,6 +1,9 @@
 {:id "0013-e2e-smoke"
  :title "End-to-end smoke: a browser talks to the agent through the emulators"
- :lupa/deps #{"0011-app-shell" "0010-dev-seed" "0005-worker"}
+ :lupa/deps #{"0011-app-shell" "0010-dev-seed" "0005-worker" "0014-shell-timestamps"}
+ ;; Respec 2026-10-21 after the first run halted at review (REWORK x2):
+ ;; the smoke test was right, the shell could not decode Timestamps; fixed
+ ;; by 0014. The reviewer's smaller asks are now acceptance criteria.
  :lupa/area :dev
  :lupa/risk :medium
  :goal "`bb e2e` proves the whole loop in a real browser: emulators up and
@@ -63,6 +66,15 @@
    and out/e2e/reduced-motion.png"
   "After `bb e2e`, no worker, server, or emulator process it started is
    still running (assert in the script or show `ps` in the final message)"
+  "Cleanup runs in a finally: the worker, the static server and the
+   emulators are stopped once each whether the smoke test passes or fails,
+   and the final message shows `ps` output with none of them left"
+  "On a failure, the screenshot is taken from the page whose step failed
+   (out/e2e/failure.png), not always the first page"
+  "package-lock.json changes only by adding playwright and its
+   dependencies: do not let npm drop or rewrite unrelated entries
+   (use `npm install --save-dev --save-exact playwright@1.56.1` against the
+   committed lock and check the diff)"
   "`bb test` stays green (e2e is not part of the gate)"]
  :non-goals
  ["Do not edit anything under src/halfahead except the two new dev
