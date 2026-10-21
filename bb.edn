@@ -1,4 +1,4 @@
-{:paths ["src" "test" "resources"]
+{:paths ["src" "test" "test-rules" "resources"]
  :deps {metosin/malli {:mvn/version "0.20.2"}}
 
  :tasks
@@ -9,16 +9,28 @@
            :task (when-not (fs/exists? "node_modules")
                    (shell "npm ci --no-audit --no-fund"))}
 
-  test    {:doc     "Offline gate: the Babashka suite over test/**/*_test.clj[c], then the .cljc tests again under node, then a compile of the app"
+  test    {:doc     "Offline gate: the Babashka suite over test/**/*_test.clj[c], then the .cljc tests again under node, then a compile of the app, then the Firestore rules under the emulator"
            :depends [deps]
-           :requires ([halfahead.test-runner])
+           :requires ([halfahead.test-runner]
+                      [halfahead.dev.emulator])
            :task    (do (halfahead.test-runner/run)
                         (shell "npx shadow-cljs compile test app")
-                        (shell "node out/test.js"))}
+                        (shell "node out/test.js")
+                        (halfahead.dev.emulator/run-rules-tests!))}
 
   test:bb {:doc      "Only the Babashka suite (fast; no JVM, no npm)"
            :requires ([halfahead.test-runner])
            :task     (halfahead.test-runner/run)}
+
+  test:rules {:doc      "Rules tests over the Firestore REST API; needs FIRESTORE_EMULATOR_HOST (bb test sets it via emulators:exec)"
+              :requires ([clojure.test :as t]
+                         [halfahead.rules-test])
+              :task     (do (when-not (System/getenv "FIRESTORE_EMULATOR_HOST")
+                              (throw (ex-info "FIRESTORE_EMULATOR_HOST is not set; run via bb test"
+                                              {:type :ha/no-emulator})))
+                            (let [{:keys [fail error]} (t/run-tests 'halfahead.rules-test)]
+                              (when (pos? (+ fail error))
+                                (System/exit 1))))}
 
   worker  {:doc      "Run the agent worker against the Firestore emulator: bb worker --agent <id> [--engine mock|claude] [--persona path]"
            :requires ([halfahead.worker.main])

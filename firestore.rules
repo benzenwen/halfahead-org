@@ -1,8 +1,57 @@
 rules_version = '2';
-// Deny by default. Client access arrives with the rules order, tested on
-// the emulator; until then only the emulator's admin (the worker) writes.
+// Deny by default. The worker writes through the emulator's admin bypass,
+// so agent messages and presence are not constrained here; a later order
+// gives agents real credentials.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(cid) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.memberIds;
+    }
+
+    function validMessage(cid, mid) {
+      let m = request.resource.data;
+      return m.keys().hasOnly(['id', 'conversationId', 'authorId', 'text',
+                               'delivery', 'emphasis', 'sentAt', 'inReplyTo'])
+        && m.keys().hasAll(['id', 'conversationId', 'authorId', 'text',
+                            'delivery', 'emphasis', 'sentAt'])
+        && m.authorId == request.auth.uid
+        && m.id == mid
+        && m.conversationId == cid
+        && m.sentAt == request.time
+        && m.text is string
+        && m.text.size() >= 1
+        && m.text.size() <= 4000
+        && m.text.matches('(?s).*\\S.*')
+        && m.delivery in ['plain', 'typed', 'headline', 'aside', 'credits']
+        && m.emphasis is list
+        && m.emphasis.size() <= 8;
+    }
+
+    match /members/{memberId} {
+      allow read: if signedIn()
+        && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    match /conversations/{cid} {
+      allow read: if signedIn() && request.auth.uid in resource.data.memberIds;
+
+      match /messages/{mid} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid) && validMessage(cid, mid);
+      }
+
+      match /presence/{memberId} {
+        allow read: if isMember(cid);
+        allow write: if memberId == request.auth.uid && isMember(cid);
+      }
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
