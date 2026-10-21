@@ -105,7 +105,7 @@
 (def ^:private delivery-options
   [[:plain    "the default; most lines."]
    [:typed    "when the pause itself means something."]
-   [:headline "one striking point."]
+   [:headline "one striking point; wrap the words to stress in *asterisks*."]
    [:aside    "a quiet remark or caveat."]
    [:credits  "thanks, attributions, or a short list."]])
 

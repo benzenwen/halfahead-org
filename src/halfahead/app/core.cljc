@@ -34,6 +34,7 @@
 
   Effects: [:fx/write-message :ha/message]"
   (:require [clojure.string :as str]
+            [halfahead.app.compose :as compose]
             [halfahead.app.credits :as credits]
             [halfahead.perform :as perform]
             [halfahead.schema :as schema]))
@@ -145,13 +146,14 @@
               (assoc :now-ms now-ms)))))
 
 (defn- composer-sent [{:keys [me conversation composer] :as state} {:keys [id now]}]
-  (let [text    (str/trim (str (:text composer)))
+  (let [{:keys [text emphasis]} (compose/parse-emphasis
+                                 (str/trim (str (:text composer))))
         message {:id id
                  :conversation-id (:id conversation)
                  :author-id me
                  :text text
                  :delivery (get composer :delivery :plain)
-                 :emphasis []
+                 :emphasis emphasis
                  :sent-at now}]
     ;; An unsendable draft (blank, or over the schema's limit) is kept, so
     ;; the reader can fix it rather than lose it.

@@ -187,7 +187,8 @@
     (is (= ["plain" "typed" "headline" "aside" "credits"] (mapv (comp :value attrs-of) rs)))
     (is (every? #(= "delivery" (:name (attrs-of %))) rs))
     (is (= 5 (count labels)))
-    (is (every? #(not (str/blank? (:title (attrs-of %)))) labels))))
+    (is (every? #(not (str/blank? (:title (attrs-of %)))) labels))
+    (is (str/includes? (:title (attrs-of (nth labels 2))) "*asterisks*"))))
 
 (deftest delivery-radio-checked-follows-state
   (is (= ["plain"] (checked-values started)))
