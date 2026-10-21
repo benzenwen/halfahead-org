@@ -7,6 +7,9 @@
  ;; acceptance criteria below: (1) no test may read the real node_modules;
  ;; (2) no warnings-as-errors config on :app, which could not be shown to
  ;; do anything; the :test build is the warnings gate.
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring
+ ;; (lupa-internal D22): unhinted interop in the shipped shell would break under advanced compilation; found by the foreman's gate audit.
+ :lupa/fixes #{"0011-app-shell"}
  :lupa/area :ui
  :lupa/risk :high
  :goal "A green `bb test` means the optimized release build works. Today the

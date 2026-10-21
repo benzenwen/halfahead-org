@@ -1,6 +1,9 @@
 {:id "0014-shell-timestamps"
  :title "Shell: convert Firestore Timestamps before decoding (the app cannot read its conversation)"
  :lupa/deps #{"0011-app-shell"}
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring
+ ;; (lupa-internal D22): the shipped shell could not decode any Firestore Timestamp; found by 0013's reviewer running bb e2e.
+ :lupa/fixes #{"0011-app-shell"}
  :lupa/area :ui
  :lupa/risk :high
  :goal "The browser reads the seeded conversation, its members and messages.

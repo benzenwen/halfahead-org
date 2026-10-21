@@ -1,6 +1,9 @@
 {:id "0023-credits-fix"
  :title "Credits roll as credits: one line per line, focus inside, Escape closes"
  :lupa/deps #{"0020-credits-roll"}
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring
+ ;; (lupa-internal D22): the shipped credits rendered their lines run together and never took focus; found by the foreman's browser check.
+ :lupa/fixes #{"0020-credits-roll"}
  :lupa/area :ui
  :lupa/risk :medium
  :goal "The credits roll shipped by 0020 passes its unit tests but renders
