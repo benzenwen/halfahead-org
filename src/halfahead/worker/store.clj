@@ -132,3 +132,13 @@
                             (document-path :presence (:conversation-id presence) (:member-id presence))
                             :ha/presence presence))
   presence)
+
+(defn write-member! [cfg member]
+  (assert-emulator! cfg)
+  (send! cfg (write-request cfg (document-path :member (:id member)) :ha/member member))
+  member)
+
+(defn write-conversation! [cfg c]
+  (assert-emulator! cfg)
+  (send! cfg (write-request cfg (document-path :conversation (:id c)) :ha/conversation c))
+  c)
