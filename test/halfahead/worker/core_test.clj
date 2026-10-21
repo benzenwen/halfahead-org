@@ -145,3 +145,47 @@
     (is (= "c1" (:conversation-id m)))
     (is (= [[9 14]] (:emphasis m)))
     (is (= (at 4) (:sent-at m)))))
+
+(deftest spent-today-test
+  (let [entries [{:at "2026-10-20T23:59:59Z" :cost-usd 1}
+                 {:at "2026-10-21T00:00:00Z" :cost-usd 0.25}
+                 {:at "2026-10-21T23:59:59.900Z" :cost-usd 0.5}
+                 {:at "2026-10-21T12:00:00Z"}
+                 {:at "2026-10-21T12:00:00Z" :cost-usd "9"}
+                 {:cost-usd 100}
+                 {:at "garbage" :cost-usd 100}
+                 "not a map"]]
+    (is (= 0.75 (core/spent-today entries "2026-10-21")))
+    (is (= 1 (core/spent-today entries "2026-10-20")))
+    (is (= 0 (core/spent-today [] "2026-10-21")))
+    (testing "days partition the valid entries"
+      (is (= 1.75 (+ (core/spent-today entries "2026-10-20")
+                     (core/spent-today entries "2026-10-21")))))))
+
+(deftest over-cap-test
+  (is (not (core/over-cap? 1000 nil)))
+  (is (core/over-cap? 0.05 0.05))
+  (is (not (core/over-cap? 0.04 0.05)))
+  (is (core/over-cap? 0 0)))
+
+(deftest budget-reply-test
+  (let [to {:id "m1" :conversation-id "c1"}
+        r (core/budget-reply {:to to :agent-id "bot" :id "r1" :now (java.util.Date. 0)})]
+    (is (schema/valid? :ha/message r))
+    (is (= :aside (:delivery r)))
+    (is (= "bot" (:author-id r)))
+    (is (= "m1" (:in-reply-to r)))
+    (is (= "I'm out of budget for today, so I'll stay quiet until tomorrow (UTC). My owner can raise the cap."
+           (:text r)))))
+
+(deftest budget-reply-sent-test
+  (let [mk (fn [author at] (assoc (core/budget-reply {:to {:id "m" :conversation-id "c"}
+                                                      :agent-id author :id "r" :now at})
+                                  :author-id author))
+        day1 (java.util.Date. 0)
+        day2 (java.util.Date. (* 86400 1000))]
+    (is (core/budget-reply-sent? "bot" [(mk "bot" day1)] "1970-01-01"))
+    (is (not (core/budget-reply-sent? "bot" [(mk "bot" day1)] "1970-01-02")))
+    (is (not (core/budget-reply-sent? "bot" [(mk "ann" day1)] "1970-01-01")))
+    (is (not (core/budget-reply-sent? "bot" [(assoc (mk "bot" day1) :text "hi")] "1970-01-01")))
+    (is (core/budget-reply-sent? "bot" [(mk "bot" day2)] "1970-01-02"))))
