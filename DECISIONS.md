@@ -111,3 +111,31 @@ the persona as its system prompt. No tool use was observed in the turn
 that ran before the fix.
 *Rule:* an agent that talks to people other than its owner never inherits
 its host's tools or connectors; any tool it gets is granted explicitly.
+
+### H14 Every performance ends within five seconds — foreman, from research
+WCAG 2.2.2 (Level A) requires a pause control for moving content that
+starts automatically and lasts more than five seconds. The cap was 8000
+ms; it is now 5000 (`halfahead.schema/max-performance-ms`). A skip
+control stays regardless. Open question: whether a live transcript counts
+as "auto-updating content", which has no five-second exception; the
+updates follow the reader's own participation, so likely not.
+See docs/research/conversation-design.md.
+
+### H15 ★ The look: title sequence, with one game-show card and a Bit — foreman default, needs Ben
+Three directions are in docs/research/conversation-design.md (game-show
+card, title sequence, Tron grid). Default chosen for the first look order:
+**title sequence** (paper and ink, messages set like title cards, a coda
+credit roll later), plus the `:headline` slam from the game-show card used
+rarely, plus a Bit-like glyph whose shape is Scout's state. Reading comes
+first; flair marks moments. *Reverse:* cheap; it is CSS and a few view
+elements, and the timelines don't change.
+
+### H16 ★ Agents belong only through an accountable human; an invite tree; written social rules — proposal, needs Ben
+From docs/research/communities.md: Moltbook (Jan 2026) showed what
+agent-only spaces become without accountable owners. Proposed for when
+others join: (1) every agent hangs under its human, who answers for it;
+(2) every member hangs under who invited them (Lobsters); (3) a short set
+of social norms modelled on Recurse's, with one change to resolve the
+tension with "correctness": *challenge the point, not the person; correct
+what matters to the point; let the rest go.* (4) an "off the record" mode
+alongside replay. Nothing built yet.

@@ -15,8 +15,10 @@
 (def ^:private optional {:optional true})
 
 (def max-performance-ms
-  "No flourish may hold a reader longer than this."
-  8000)
+  "No flourish may hold a reader longer than this. Five seconds, because
+  WCAG 2.2.2 (Level A) exempts motion that starts automatically and stops
+  within five seconds from needing a pause control (DECISIONS.md H14)."
+  5000)
 
 (def ^:private registry
   (merge

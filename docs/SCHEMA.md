@@ -58,7 +58,9 @@ in silence. `state` is `:idle` or `:thinking`, with `since`.
 **Timeline** — what `halfahead.perform` makes from a message:
 `{:duration-ms n :beats [{:span [from to] :effect e :at-ms t :ms d} …]}`.
 
-- `duration-ms` is at most 8000: no flourish holds a reader longer.
+- `duration-ms` is at most 5000: no flourish holds a reader longer, and
+  motion that ends within five seconds needs no pause control under WCAG
+  2.2.2.
 - Effects: `:appear` `:type` `:slam` `:whisper` `:rise`.
 - Invariants (tested, not expressible in the schema): the beats' spans
   partition the text exactly, and every beat ends by `duration-ms`. So the
