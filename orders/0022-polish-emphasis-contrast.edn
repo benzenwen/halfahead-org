@@ -1,6 +1,13 @@
 {:id "0022-polish-emphasis-contrast"
  :title "People pick the stressed words, and quiet lines stay legible"
  :lupa/deps #{"0019-composer-delivery" "0020-credits-roll"}
+ ;; Respec 2026-10-21 after a review halt (REWORK x2). The reviewer found
+ ;; the code and tests sound and one defect: the CSS contrast comment
+ ;; named --muted on --bg for message text, but message text inherits
+ ;; body's --text. The actual pairs are --text on --bg: 14.19:1 (light) and
+ ;; 13.99:1 (dark), per the token table at the top of the file. Optional
+ ;; ask, now required: assert schema/valid? for a non-headline delivery
+ ;; with stripped asterisks.
  :lupa/area :flair
  :lupa/risk :medium
  :goal "Two things from the foreman's first live conversation. (1) A
@@ -40,8 +47,12 @@
    the returned text, are sorted and non-overlapping, at most 8"
   "Core: sending \"the *one* habit\" with delivery :headline emits a message
    with text \"the one habit\" and emphasis [[4 7]] (test)"
-  "CSS comment lists each effect's settled foreground/background pair with
-   its contrast ratio, all >= 4.5:1, in light and dark"
+  "CSS comment lists each effect's ACTUAL settled foreground/background
+   pair, traced to the rule that colours it (message text inherits body's
+   --text; verify the credits overlay the same way), with its ratio, all
+   >= 4.5:1, in light and dark"
+  "The core test for stripped asterisks on a non-headline delivery asserts
+   halfahead.schema/valid? :ha/message on the sent message"
   "`bb test` stays green"]
  :non-goals
  ["No rich-text editor; no markdown beyond single-asterisk emphasis"
