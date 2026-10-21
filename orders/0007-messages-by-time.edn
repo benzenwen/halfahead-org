@@ -1,0 +1,32 @@
+{:id "0007-messages-by-time"
+ :title "Worker reads the latest messages by time, not the first 300 by id"
+ :lupa/deps #{"0005-worker"}
+ :lupa/area :agent
+ :lupa/risk :medium
+ :goal "The worker sees a conversation's most recent messages however long
+        it grows. Today halfahead.worker.store/messages! lists the first 300
+        documents in document-id order, so after 300 messages the newest one
+        can be missing and the agent stops answering."
+ :scope ["src/halfahead/worker/store.clj" "test/halfahead/worker/store_test.clj"]
+ :design "Replace the list request with a runQuery on the conversation's
+          messages subcollection: parent
+          .../documents/conversations/<cid>, structuredQuery from
+          [{collectionId \"messages\"}], orderBy sentAt DESCENDING, limit
+          200 (the engine's history cap). Return the decoded messages in
+          ascending :sent-at order. Keep the request builder a pure public
+          function (messages-query-request cfg conversation-id) so it is
+          tested without a network; messages! keeps its signature."
+ :acceptance
+ ["messages-query-request targets
+   .../documents/conversations/<cid>:runQuery with orderBy sentAt
+   DESCENDING and limit 200 (assert on the built request)"
+  "messages! decodes a fake runQuery response (via the store's injectable
+   :send-fn) of three documents given newest first, and returns them oldest
+   first; result rows without a \"document\" key are skipped"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not change other store functions, worker.main, or worker.core"
+  "No pagination beyond the 200 most recent"]
+ :context ["src/halfahead/worker/store.clj" "test/halfahead/worker/store_test.clj"
+           "docs/SCHEMA.md"]
+ :budget-usd 6.0}

@@ -83,3 +83,18 @@ Darkness here is earned later, by Lupa's Phase 2 instruments.
 
 ### H10 Domain: halfahead.org — Ben
 Owned by Ben. Pages custom domain when the first deploy is approved.
+
+### H11 ★ The agent is "Scout", with a drafted persona — foreman default, needs Ben
+`resources/agent/persona.md` is a v0 character written from the brief:
+Ben's agent, never pretending to be human, a curious and precise sidekick,
+mildly irreverent, honest about uncertainty, short replies. "Scout" comes
+from the brief's "share our scouting". Both the name and the character are
+Ben's to change; the worker reads the file on start.
+*First real turn (claude engine, $0.07):* asked "what is the most humane
+thing an agent can do in a conversation?", Scout answered "Leave the other
+person room to be right, and to be wrong, without hurrying them…". It also
+echoed the persona's own phrasing; a sign the persona is too quotable.
+
+### H12 Firestore rules deny everything until the rules order — foreman
+Only the emulator's admin (the worker) reads and writes. Client access
+arrives with tested rules.
