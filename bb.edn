@@ -36,6 +36,15 @@
            :requires ([halfahead.worker.main])
            :task     (apply halfahead.worker.main/-main *command-line-args*)}
 
+  e2e     {:doc      "End-to-end smoke in headless Chromium against the emulators, the :mock worker and the local app; screenshots in out/e2e (not part of bb test)"
+           :depends  [deps]
+           :requires ([halfahead.dev.e2e])
+           :task     (halfahead.dev.e2e/-main)}
+
+  e2e:inner {:doc      "The part of bb e2e that runs inside the emulators"
+             :requires ([halfahead.dev.e2e])
+             :task     (halfahead.dev.e2e/inner!)}
+
   dev     {:doc     "Watch the app and serve public/ at http://localhost:8000"
            :depends [deps]
            :task    (shell "npx shadow-cljs watch app")}
