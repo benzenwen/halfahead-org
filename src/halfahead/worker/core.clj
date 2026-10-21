@@ -160,3 +160,58 @@
    :emphasis        (resolve-emphasis (:text reply) (:emphasis reply))
    :sent-at         now
    :in-reply-to     (:id to)})
+
+(defn utc-day
+  "\"YYYY-MM-DD\" in UTC for a java.util.Date or an ISO-8601 instant string;
+  nil when t is neither, so callers can skip bad entries."
+  [t]
+  (try
+    (let [instant (cond
+                    (instance? java.util.Date t) (.toInstant ^java.util.Date t)
+                    (string? t)                  (java.time.Instant/parse t))]
+      (some-> instant
+              (.atZone java.time.ZoneOffset/UTC)
+              .toLocalDate
+              str))
+    (catch Exception _ nil)))
+
+(defn spent-today
+  "Sum of :cost-usd over the ledger entries that fall on UTC date `day`.
+  An entry without a numeric cost counts 0; an unreadable one is skipped."
+  [entries day]
+  (transduce
+   (comp (filter map?)
+         (filter #(= day (utc-day (:at %))))
+         (keep #(let [c (:cost-usd %)] (when (number? c) c))))
+   + 0 entries))
+
+(defn over-cap?
+  "True when a cap is set and spent has reached it. A nil cap is no cap."
+  [spent cap]
+  (and (number? cap) (>= spent cap)))
+
+(def ^:private budget-text
+  "I'm out of budget for today, so I'll stay quiet until tomorrow (UTC). My owner can raise the cap.")
+
+(defn budget-reply
+  "The :ha/message that tells the conversation the agent is out of budget,
+  written in answer to the message `to`."
+  [{:keys [to agent-id id now]}]
+  {:id              id
+   :conversation-id (:conversation-id to)
+   :author-id       agent-id
+   :text            budget-text
+   :delivery        :aside
+   :emphasis        []
+   :sent-at         now
+   :in-reply-to     (:id to)})
+
+(defn budget-reply-sent?
+  "True when the agent already said it is out of budget on UTC date `day`
+  in these messages, so it says so once rather than after every message."
+  [agent-id messages day]
+  (boolean
+   (some #(and (= agent-id (:author-id %))
+               (= budget-text (:text %))
+               (= day (utc-day (:sent-at %))))
+         messages)))

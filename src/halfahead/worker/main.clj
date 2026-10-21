@@ -11,6 +11,17 @@
 
 (def ledger-path ".halfahead/worker-ledger.jsonl")
 
+(defn read-ledger!
+  "The ledger's entries; a missing file is an empty ledger and lines that
+  are not JSON are dropped."
+  ([] (read-ledger! ledger-path))
+  ([path]
+   (if (fs/exists? path)
+     (into []
+           (keep #(try (json/parse-string % true) (catch Exception _ nil)))
+           (str/split-lines (slurp path)))
+     [])))
+
 (defn default-log!
   "Prints one line and appends a JSON line to the ledger."
   ([event] (default-log! ledger-path event))
@@ -18,8 +29,12 @@
    (let [line (json/generate-string (assoc event :at (str (java.time.Instant/now))))]
      (when-let [dir (fs/parent path)] (fs/create-dirs dir))
      (spit path (str line "\n") :append true)
-     (println (str "[worker] " (or (:replied-to event) "error") " in "
-                   (:conversation event)
+     (println (str "[worker] "
+                   (cond (:replied-to event) (:replied-to event)
+                         (:capped event)     "capped"
+                         :else               "error")
+                   " in " (:conversation event)
+                   (when (:capped event) (str " ($" (:spent event) "/$" (:cap event) ")"))
                    (when-let [c (:cost-usd event)] (str " ($" c ")"))
                    (when-let [e (:error event)] (str " " (pr-str e))))))))
 
@@ -57,17 +72,40 @@
     (log! (assoc entry :engine (:engine engine-config)))
     entry))
 
+(defn- cap-turn!
+  "Out of budget: says so once per UTC day, without the engine or presence.
+  -> the log entry, or nil when it already said so. Quiet turns are not logged:
+  the waiting message re-triggers this on every pass."
+  [{:keys [agent-id write-message! log! new-id now]} conversation to messages spent cap]
+  (let [cid (:id conversation)
+        day (core/utc-day (now))]
+    (when-not (core/budget-reply-sent? agent-id messages day)
+      (let [entry (try
+                    (write-message! (core/budget-reply {:to to :agent-id agent-id
+                                                        :id (new-id) :now (now)}))
+                    {:conversation cid :capped true :spent spent :cap cap}
+                    (catch Exception e
+                      {:conversation cid :error (error-info e)}))]
+        (log! entry)
+        entry))))
+
 (defn step!
   "One pass over the agent's conversations. -> a vector of what happened."
   [{:keys [agent-id conversations-of! messages!] :as deps}]
-  (let [deps (merge {:invoke engine/invoke :now #(java.util.Date.)
-                     :new-id #(str (random-uuid)) :log! default-log!}
-                    deps)]
+  (let [{:keys [cap-usd read-ledger! now] :as deps}
+        (merge {:invoke engine/invoke :now #(java.util.Date.)
+                :new-id #(str (random-uuid)) :log! default-log!
+                :read-ledger! read-ledger!}
+               deps)]
     (into []
           (keep (fn [conversation]
                   (let [messages (messages! (:id conversation))]
                     (when-let [to (core/awaiting-reply agent-id messages)]
-                      (take-turn! deps conversation to messages)))))
+                      (let [spent (when cap-usd
+                                    (core/spent-today (read-ledger!) (core/utc-day (now))))]
+                        (if (core/over-cap? spent cap-usd)
+                          (cap-turn! deps conversation to messages spent cap-usd)
+                          (take-turn! deps conversation to messages)))))))
           (conversations-of! agent-id))))
 
 (defn run!
@@ -91,6 +129,18 @@
         "--persona" (recur more (assoc opts :persona v))
         (throw (ex-info (str "unknown argument " k) {:type :ha/bad-args}))))))
 
+(defn parse-cap
+  "The daily cap from its raw text. nil/blank = no cap. Anything but a finite
+  number >= 0 is refused, so a typo can never switch the cap off."
+  [raw]
+  (let [raw (some-> raw str/trim)]
+    (when-not (str/blank? raw)
+      (let [n (try (parse-double raw) (catch Exception _ nil))]
+        (if (and n (not (Double/isNaN n)) (not (Double/isInfinite n)) (>= n 0))
+          n
+          (throw (ex-info (str "HALFAHEAD_WORKER_CAP_USD must be a number >= 0: " raw)
+                          {:type :ha/bad-args})))))))
+
 (defn- bind-store [cfg f] (fn [& args] (apply f cfg args)))
 
 (defn -main [& args]
@@ -105,12 +155,15 @@
     (when-not (fs/exists? persona)
       (throw (ex-info (str "persona file not found: " persona) {:type :ha/bad-args})))
     (store/assert-emulator! cfg)
-    (run! {:agent-id          agent
-           :persona           (str/trim (slurp persona))
-           :engine-config     {:engine engine}
-           :conversations-of! (bind-store cfg store/conversations-of!)
-           :members!          (bind-store cfg store/members!)
-           :messages!         (bind-store cfg store/messages!)
-           :write-message!    (bind-store cfg store/write-message!)
-           :write-presence!   (bind-store cfg store/write-presence!)}
-          {})))
+    (let [cap (parse-cap (System/getenv "HALFAHEAD_WORKER_CAP_USD"))]
+      (println (if cap (str "spend cap: $" cap "/day") "spend cap: none"))
+      (run! {:agent-id          agent
+             :cap-usd           cap
+             :persona           (str/trim (slurp persona))
+             :engine-config     {:engine engine}
+             :conversations-of! (bind-store cfg store/conversations-of!)
+             :members!          (bind-store cfg store/members!)
+             :messages!         (bind-store cfg store/messages!)
+             :write-message!    (bind-store cfg store/write-message!)
+             :write-presence!   (bind-store cfg store/write-presence!)}
+            {}))))
