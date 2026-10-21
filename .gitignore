@@ -12,3 +12,19 @@ pom.xml.asc
 .lein-failures
 .nrepl-port
 .cpcache/
+
+# Half Ahead
+.basefactory/
+.shadow-cljs/
+node_modules/
+public/js/
+out/
+*.log
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebase/
+.env
+.env.*
+service-account*.json
+.DS_Store
