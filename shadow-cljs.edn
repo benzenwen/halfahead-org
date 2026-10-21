@@ -1,0 +1,16 @@
+;; One build for now:
+;;   :app  the conversation client -> public/js/app (public/index.html)
+;; Tests run under Babashka (bb test); this build is compiled by the gate so
+;; browser-only breakage fails it.
+{:source-paths ["src"]
+
+ :dependencies [[no.cjohansen/replicant "2026.07.1"]
+                [metosin/malli "0.20.2"]]
+
+ :dev-http {8000 "public"}
+
+ :builds
+ {:app {:target     :browser
+        :output-dir "public/js/app"
+        :asset-path "js/app"
+        :modules    {:main {:init-fn halfahead.app/init!}}}}}

@@ -1,0 +1,28 @@
+{:paths ["src" "test" "resources"]
+ :deps {metosin/malli {:mvn/version "0.20.2"}}
+
+ :tasks
+ {:requires ([babashka.fs :as fs]
+             [babashka.process :refer [shell]])
+
+  deps    {:doc  "Install npm dependencies when node_modules is missing (fresh clones, factory worktrees)"
+           :task (when-not (fs/exists? "node_modules")
+                   (shell "npm ci --no-audit --no-fund"))}
+
+  test    {:doc     "Offline gate: the Babashka suite over test/**/*_test.clj[c], then a ClojureScript compile of the app"
+           :depends [deps]
+           :requires ([halfahead.test-runner])
+           :task    (do (halfahead.test-runner/run)
+                        (shell "npx shadow-cljs compile app"))}
+
+  test:bb {:doc      "Only the Babashka suite (fast; no JVM, no npm)"
+           :requires ([halfahead.test-runner])
+           :task     (halfahead.test-runner/run)}
+
+  dev     {:doc     "Watch the app and serve public/ at http://localhost:8000"
+           :depends [deps]
+           :task    (shell "npx shadow-cljs watch app")}
+
+  release {:doc     "Optimized app build into public/js/app (what GitHub Pages serves)"
+           :depends [deps]
+           :task    (shell "npx shadow-cljs release app")}}}
