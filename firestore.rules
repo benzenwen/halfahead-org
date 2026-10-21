@@ -30,7 +30,42 @@ service cloud.firestore {
         && m.text.matches('(?s).*\\S.*')
         && m.delivery in ['plain', 'typed', 'headline', 'aside', 'credits']
         && m.emphasis is list
-        && m.emphasis.size() <= 8;
+        && m.emphasis.size() <= 8
+        && (!('inReplyTo' in m)
+            || (m.inReplyTo is string
+                && m.inReplyTo.size() >= 1
+                && m.inReplyTo.size() <= 128))
+        && validEmphasisAt(m, 0) && validEmphasisAt(m, 1)
+        && validEmphasisAt(m, 2) && validEmphasisAt(m, 3)
+        && validEmphasisAt(m, 4) && validEmphasisAt(m, 5)
+        && validEmphasisAt(m, 6) && validEmphasisAt(m, 7);
+    }
+
+    function validSpan(text, e) {
+      return e is map
+        && e.keys().hasOnly(['from', 'to'])
+        && e.keys().hasAll(['from', 'to'])
+        && e.from is int
+        && e.to is int
+        && 0 <= e.from
+        && e.from < e.to
+        && e.to <= text.size();
+    }
+
+    // Rules have no loops: the size cap of 8 bounds the indexes, and an index
+    // past the end of the list is vacuously valid.
+    function validEmphasisAt(m, i) {
+      return m.emphasis.size() <= i || validSpan(m.text, m.emphasis[i]);
+    }
+
+    function validPresence(cid, memberId) {
+      let p = request.resource.data;
+      return p.keys().hasOnly(['memberId', 'conversationId', 'state', 'since'])
+        && p.keys().hasAll(['memberId', 'conversationId', 'state', 'since'])
+        && p.memberId == memberId
+        && p.conversationId == cid
+        && p.state in ['idle', 'thinking']
+        && p.since == request.time;
     }
 
     match /members/{memberId} {
@@ -48,7 +83,9 @@ service cloud.firestore {
 
       match /presence/{memberId} {
         allow read: if isMember(cid);
-        allow write: if memberId == request.auth.uid && isMember(cid);
+        allow create, update: if memberId == request.auth.uid
+          && isMember(cid)
+          && validPresence(cid, memberId);
       }
     }
 
