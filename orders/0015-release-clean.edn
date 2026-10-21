@@ -1,6 +1,12 @@
 {:id "0015-release-clean"
  :title "The gate builds what GitHub Pages will serve, and our code compiles without warnings"
  :lupa/deps #{"0014-shell-timestamps" "0013-e2e-smoke"}
+ ;; Respec 2026-10-21 after a review halt (REWORK x2). The reviewer
+ ;; confirmed the ^js hints work and that the :test build fails on an
+ ;; unhinted interop warning, and asked for exactly two changes, now
+ ;; acceptance criteria below: (1) no test may read the real node_modules;
+ ;; (2) no warnings-as-errors config on :app, which could not be shown to
+ ;; do anything; the :test build is the warnings gate.
  :lupa/area :ui
  :lupa/risk :high
  :goal "A green `bb test` means the optimized release build works. Today the
@@ -16,12 +22,12 @@
  :design "- Add ^js hints (or js/ interop forms the compiler can infer) so the
             :app and :test builds report zero warnings from halfahead
             namespaces.
-          - shadow-cljs.edn: the :app build treats warnings from our own
-            namespaces as errors, while warnings from node_modules (the
-            Firebase package emits a JSDoc lint) are ignored, e.g.
-            :compiler-options {:warnings-as-errors {:ignore #{\"node_modules\"}}}
-            or the equivalent the installed shadow-cljs supports — check its
-            documentation in node_modules rather than guessing.
+          - shadow-cljs.edn: the :test build (which compiles every halfahead
+            namespace) treats warnings as errors, so an unhinted interop
+            warning fails `bb test`; leave the :app build's compiler options
+            unchanged (no warnings-as-errors there: it could not be shown to
+            have any effect, and Firebase's own JSDoc lint must not fail the
+            release).
           - bb.edn: `test` compiles the :test build and runs it as now, then
             runs `npx shadow-cljs release app` instead of `compile app`.
             Keep the rules suite step. `release` and `dev` tasks unchanged.
@@ -38,6 +44,10 @@
    order, true when the installed record is missing; tested"
   "`npx shadow-cljs compile test` and `npx shadow-cljs release app` report
    0 warnings from halfahead namespaces"
+  "No test reads the real ./node_modules or any file outside a temp
+   directory: `bb test:bb` passes in a checkout with no node_modules
+   (demonstrate by running it with node_modules moved aside, then restore)"
+  "The :app build's :compiler-options are unchanged from before this order"
   "Adding a deliberate unhinted interop warning to a halfahead namespace
    makes `bb test` fail (show this in the final message, then remove it)"
   "`bb test` stays green. Do NOT run `bb e2e` here: it uses fixed
