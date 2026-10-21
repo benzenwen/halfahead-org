@@ -9,12 +9,35 @@
 (defn- display-name [state member-id]
   (or (get-in state [:members member-id :display-name]) member-id))
 
+;; The separator is its own span so the .owner text stays exactly
+;; "agent of <name>" while the author line reads "Scout · agent of Ben".
 (defn- owner-line [state {:keys [kind owner-id]}]
   (when (= :agent kind)
-    [:span.owner "agent of " (display-name state owner-id)]))
+    (list [:span.sep " · "]
+          [:span.owner "agent of " (display-name state owner-id)])))
+
+(defn- presence-state [state member-id]
+  (get-in state [:presence member-id :state] :idle))
+
+;; Shape is the state: a diamond at rest, a stellated star while thinking.
+;; Colour comes from the stylesheet via currentColor; the presence line
+;; carries the accessible signal.
+(defn- glyph [state member-id]
+  (let [current (presence-state state member-id)]
+    [:svg.glyph {:viewBox "0 0 24 24"
+                 :aria-hidden "true"
+                 :focusable "false"
+                 :data-state (name current)}
+     (if (= :thinking current)
+       [:g {:fill "currentColor"}
+        [:path {:d "M12 1 L14.5 9.5 L23 12 L14.5 14.5 L12 23 L9.5 14.5 L1 12 L9.5 9.5 Z"}]
+        [:path {:d "M12 6 L18 12 L12 18 L6 12 Z" :fill "none" :stroke "currentColor"
+                :stroke-width "1.5"}]]
+       [:path {:d "M12 3 L21 12 L12 21 L3 12 Z" :fill "currentColor"}])]))
 
 (defn- member-chip [state {:keys [id kind display-name] :as member}]
   [:li.chip {:key id :class [(name kind)]}
+   (when (= :agent kind) (glyph state id))
    [:span.name display-name]
    (owner-line state member)])
 
@@ -34,10 +57,9 @@
 (defn- message [state performing frames {:keys [id author-id text]}]
   (let [author (get-in state [:members author-id])]
     [:li {:key id}
-     [:article (cond-> {}
-                 (contains? performing id)
-                 (assoc :on {:click [[:message/skipped {:id id}]]}))
+     [:article
       [:p.author
+       (when (= :agent (:kind author)) (glyph state author-id))
        [:span.name (display-name state author-id)]
        (when author (owner-line state author))]
       [:p.body
@@ -46,7 +68,11 @@
       [:button.replay {:type "button"
                        :aria-label "Replay message"
                        :on {:click [[:replay/requested {:id id}]]}}
-       "↻"]]]))
+       "↻"]
+      (when (contains? performing id)
+        [:button.skip {:type "button"
+                       :on {:click [[:message/skipped {:id id}]]}}
+         "Skip"])]]))
 
 (defn- transcript [state frames]
   (let [messages (sort-by (juxt :sent-at :id) (vals (:messages state)))]
@@ -58,12 +84,14 @@
              messages)])))
 
 (defn- presence-line [state awaiting?]
-  (let [agent-name (some (fn [[member-id p]]
+  (let [agents (filter #(= :agent (:kind %)) (vals (:members state)))
+        agent-name (some (fn [[member-id p]]
                            (let [m (get-in state [:members member-id])]
                              (when (and (= :thinking (:state p)) (= :agent (:kind m)))
                                (:display-name m))))
                          (:presence state))]
     [:p.presence {:role "status" :aria-live "polite"}
+     (map #(with-meta (glyph state (:id %)) {:key (:id %)}) agents)
      (if (and awaiting? agent-name) (str agent-name " is thinking…") "")]))
 
 (defn- composer [{:keys [composer]}]
@@ -77,16 +105,20 @@
    [:button {:type "submit" :disabled (str/blank? (:text composer))} "Send"]])
 
 (defn- preferences [{:keys [prefs]}]
-  [:fieldset.prefs
-   [:legend "Preferences"]
-   [:label
-    [:input {:type "checkbox"
-             :checked (boolean (:reduced-motion? prefs))
-             :on {:change [[:prefs/changed]]}}]
-    " Reduced motion"]
-   [:label
-    [:input {:type "checkbox" :checked (boolean (:sound? prefs))}]
-    " Sound (soon)"]])
+  (let [reduced? (boolean (:reduced-motion? prefs))
+        sound? (boolean (:sound? prefs))]
+    [:fieldset.prefs
+     [:legend "Preferences"]
+     [:label
+      [:input {:type "checkbox"
+               :checked reduced?
+               :on {:change [[:prefs/changed {:reduced-motion? (not reduced?)}]]}}]
+      " Reduced motion"]
+     [:label
+      [:input {:type "checkbox"
+               :checked sound?
+               :on {:change [[:prefs/changed {:sound? (not sound?)}]]}}]
+      " Sound (soon)"]]))
 
 (defn page
   "The whole conversation for state."
