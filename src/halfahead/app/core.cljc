@@ -10,7 +10,7 @@
     :members     {member-id :ha/member}
     :messages    {message-id :ha/message}
     :presence    {member-id :ha/presence}
-    :composer    {:text s}
+    :composer    {:text s :delivery d}  ; d resets to :plain after each send
     :now-ms      latest time seen, in ms on the shell's clock
     :performing  {message-id started-at-ms}; absent means settled
     :prefs       {:reduced-motion? b :sound? b}
@@ -20,6 +20,7 @@
     [:messages/received {:messages :initial? :now-ms}]
     [:presence/received {:presence}]
     [:composer/edited {:text}]
+    [:composer/delivery-chosen {:delivery}]
     [:composer/sent {:id :now}]
     [:clock/ticked {:now-ms}]
     [:message/skipped {:id}]
@@ -38,10 +39,14 @@
    :members     {}
    :messages    {}
    :presence    {}
-   :composer    {:text ""}
+   :composer    {:text "" :delivery :plain}
    :now-ms      0
    :performing  {}
    :prefs       {:reduced-motion? false :sound? false}})
+
+;; The schema's :ha/delivery vocabulary; schema exposes no accessor, and
+;; composer-sent still validates the message against it.
+(def ^:private deliveries #{:plain :typed :headline :aside :credits})
 
 ;; ------------------------------------------------------------------- seeds
 
@@ -122,15 +127,20 @@
                  :conversation-id (:id conversation)
                  :author-id me
                  :text text
-                 :delivery :plain
+                 :delivery (get composer :delivery :plain)
                  :emphasis []
                  :sent-at now}]
     ;; An unsendable draft (blank, or over the schema's limit) is kept, so
     ;; the reader can fix it rather than lose it.
     (if (schema/valid? :ha/message message)
-      (done (assoc-in state [:composer :text] "")
+      (done (assoc state :composer (:composer initial-state))
             [:fx/write-message message])
       (done state))))
+
+(defn- delivery-chosen [state {:keys [delivery]}]
+  (if (contains? deliveries delivery)
+    (done (assoc-in state [:composer :delivery] delivery))
+    (done state)))
 
 (defn- clock-ticked [state {:keys [now-ms]}]
   (let [finished? (fn [[id started]]
@@ -155,6 +165,7 @@
       :presence/received  (done (update state :presence into
                                         (index-by :member-id (:presence args))))
       :composer/edited    (done (assoc-in state [:composer :text] (:text args)))
+      :composer/delivery-chosen (delivery-chosen state args)
       :composer/sent      (composer-sent state args)
       :clock/ticked       (clock-ticked state args)
       :message/skipped    (done (update state :performing dissoc (:id args)))

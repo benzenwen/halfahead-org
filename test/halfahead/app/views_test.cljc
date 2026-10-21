@@ -173,6 +173,41 @@
       (is (= #{:key :shift?} (set (keys args)))))
     (is (= (:id (attrs-of ta)) (:for (attrs-of label))))))
 
+(defn- radios [s]
+  (find-all #(and (= "input" (tag-of %)) (= "radio" (:type (attrs-of %)))) (form-of s)))
+
+(defn- checked-values [s]
+  (mapv (comp :value attrs-of) (filter (comp :checked attrs-of) (radios s))))
+
+(deftest delivery-radios-offer-five-named-deliveries
+  (let [rs (radios started)
+        labels (find-all (fn [n] (and (= "label" (tag-of n))
+                                      (find-one #(= "input" (tag-of %)) n)))
+                         (form-of started))]
+    (is (= ["plain" "typed" "headline" "aside" "credits"] (mapv (comp :value attrs-of) rs)))
+    (is (every? #(= "delivery" (:name (attrs-of %))) rs))
+    (is (= 5 (count labels)))
+    (is (every? #(not (str/blank? (:title (attrs-of %)))) labels))))
+
+(deftest delivery-radio-checked-follows-state
+  (is (= ["plain"] (checked-values started)))
+  (let [s (step started [:composer/delivery-chosen {:delivery :aside}])]
+    (is (= ["aside"] (checked-values s)))
+    (let [sent (-> s
+                   (step [:composer/edited {:text "hm"}])
+                   (step [:composer/sent {:id "m1" :now #inst "2026-02-02"}]))]
+      (is (= ["plain"] (checked-values sent))))))
+
+(deftest delivery-radios-emit-delivery-chosen
+  (doseq [r (radios started)]
+    (is (= [[:composer/delivery-chosen {:delivery (keyword (:value (attrs-of r)))}]]
+           (get-in (attrs-of r) [:on :change])))))
+
+(deftest delivery-group-has-accessible-name
+  (let [g (find-one #(= "radiogroup" (:role (attrs-of %))) (form-of started))]
+    (is g)
+    (is (= "Delivery" (:aria-label (attrs-of g))))))
+
 (deftest empty-conversation-renders-empty-state
   (let [empty-page (views/page started)
         full (views/page (initial started (msg "a" "hi")))]
@@ -242,6 +277,11 @@
 (defn- read-file [path]
   #?(:clj (slurp path)
      :cljs (.readFileSync (js/require "fs") path "utf8")))
+
+(deftest stylesheet-marks-chosen-delivery-by-more-than-colour
+  (let [css (read-file "public/css/halfahead.css")]
+    (is (re-find #"\.delivery input:checked \+ span \{[^}]*text-decoration: underline" css))
+    (is (not (re-find #"\.delivery label \{[^}]*border" css)))))
 
 (deftest stylesheet-defines-effects-and-reduced-motion
   (let [css (read-file "public/css/halfahead.css")

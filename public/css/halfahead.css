@@ -207,6 +207,47 @@ li:hover .replay, li:focus-within .replay { opacity: 1; }
   font: inherit;
 }
 
+.send-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.delivery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+}
+
+.delivery label {
+  padding: var(--space-2) 0;
+  cursor: pointer;
+}
+
+/* Visually hidden but focusable, so the native arrow-key group still works. */
+.delivery input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.delivery input:checked + span {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.3em;
+}
+
+.delivery input:focus-visible + span {
+  outline: 3px solid var(--signal);
+  outline-offset: 2px;
+}
+
 /* Enabled Send: on-signal on signal, 5.27:1 paper / 6.74:1 ink, >= 4.5:1.
    Disabled is an outline with muted text, not a paler fill. */
 .composer button {

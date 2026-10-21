@@ -75,6 +75,39 @@
       (is (= s (:state r)))
       (is (= [] (:effects r))))))
 
+(deftest composer-delivery-chosen-then-sent
+  (let [s (-> started
+              (step [:composer/edited {:text "hm"}])
+              (step [:composer/delivery-chosen {:delivery :aside}]))
+        {:keys [state effects]} (core/handle s [:composer/sent {:id "m1" :now #inst "2026-02-02"}])
+        [[fx m]] effects]
+    (is (= :fx/write-message fx))
+    (is (= :aside (:delivery m)))
+    (is (= [] (:emphasis m)))
+    (is (schema/valid? :ha/message m))
+    (is (= {:text "" :delivery :plain} (:composer state)))))
+
+(deftest delivery-chosen-sets-each-known-delivery
+  (doseq [d [:plain :typed :headline :aside :credits]]
+    (is (= d (get-in (step started [:composer/delivery-chosen {:delivery d}])
+                     [:composer :delivery])))))
+
+(deftest delivery-chosen-unknown-leaves-state-unchanged
+  (let [s (step started [:composer/delivery-chosen {:delivery :typed}])]
+    (doseq [a [[:composer/delivery-chosen {:delivery :fireworks}]
+               [:composer/delivery-chosen {:delivery nil}]
+               [:composer/delivery-chosen {:delivery "aside"}]
+               [:composer/delivery-chosen]]]
+      (let [r (core/handle s a)]
+        (is (= s (:state r)) (pr-str a))
+        (is (= [] (:effects r)))))))
+
+(deftest unsendable-draft-keeps-delivery
+  (let [s (step started [:composer/delivery-chosen {:delivery :credits}])
+        r (core/handle s [:composer/sent {:id "m1" :now #inst "2026-02-02"}])]
+    (is (= [] (:effects r)))
+    (is (= :credits (get-in (:state r) [:composer :delivery])))))
+
 (deftest messages-received-initial-performs-nothing
   (let [s (step started [:messages/received {:messages [(msg "a" "hi") (msg "b" "yo")]
                                              :initial? true :now-ms 2000}])]
@@ -208,7 +241,9 @@
     [2 (gen/fmap (fn [id] [:replay/requested {:id id}]) (gen/elements ["m1" "m2" "m3" "m4"]))]
     [1 (gen/fmap (fn [b] [:prefs/changed {:reduced-motion? b}]) gen/boolean)]
     [1 (gen/fmap (fn [t] [:composer/edited {:text t}]) gen/string)]
-    [1 (gen/return [:composer/sent {:id "s1" :now #inst "2026-02-02"}])]
+    [2 (gen/fmap (fn [d] [:composer/delivery-chosen {:delivery d}])
+                 (gen/elements [:plain :typed :headline :aside :credits :fireworks nil]))]
+    [2 (gen/return [:composer/sent {:id "s1" :now #inst "2026-02-02"}])]
     [1 (gen/return [:presence/received {:presence []}])]]))
 
 (defn- with-time
