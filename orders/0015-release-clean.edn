@@ -40,7 +40,9 @@
    0 warnings from halfahead namespaces"
   "Adding a deliberate unhinted interop warning to a halfahead namespace
    makes `bb test` fail (show this in the final message, then remove it)"
-  "`bb test` stays green and `bb e2e` still passes"]
+  "`bb test` stays green. Do NOT run `bb e2e` here: it uses fixed
+   emulator ports and a parallel line may be running it; the foreman runs
+   it after the merge"]
  :non-goals
  ["No behaviour changes in the shell; no new features"
   "Do not edit the schema, core, views, codec, or worker"]
