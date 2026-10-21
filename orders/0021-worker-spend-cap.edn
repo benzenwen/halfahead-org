@@ -1,0 +1,51 @@
+{:id "0021-worker-spend-cap"
+ :title "The worker stops spending at a cap, and says so"
+ :lupa/deps #{"0008-engine-isolation"}
+ :lupa/area :agent
+ :lupa/risk :high
+ :goal "The agent cannot run up a bill. The worker keeps a running total of
+        engine spend per UTC day from its own ledger and, once a configured
+        cap is reached, answers without calling the engine: one plain
+        message saying it is out of budget for today, then nothing more in
+        that conversation until the next day."
+ :scope ["src/halfahead/worker/core.clj" "test/halfahead/worker/core_test.clj"
+         "src/halfahead/worker/main.clj" "test/halfahead/worker/main_test.clj"]
+ :design "worker.core (pure):
+            (spent-today entries day) -> sum of :cost-usd over ledger entries
+              whose :at falls on UTC date `day` (\"2026-10-21\"); entries
+              without a cost count 0; unparseable entries are skipped.
+            (over-cap? spent cap) -> true when cap is a number and spent >=
+              cap; nil cap means no cap.
+            (budget-reply {:to message :agent-id a :id id :now inst}) -> a
+              valid :ha/message, delivery :aside, text exactly
+              \"I'm out of budget for today, so I'll stay quiet until
+              tomorrow (UTC). My owner can raise the cap.\"
+            (budget-reply-sent? agent-id messages day) -> true when the
+              agent already sent that exact text on `day` in this
+              conversation (so it says it once, not after every message).
+          worker.main: deps gain :cap-usd (nil = no cap) and
+          :read-ledger! (fn -> entries; default reads
+          .halfahead/worker-ledger.jsonl, missing file = []). Before
+          answering, step! computes today's spend; when over the cap it
+          writes budget-reply (unless already sent today) without invoking
+          the engine, logs {:conversation .. :capped true :spent n :cap c},
+          and never writes :thinking presence. -main reads the cap from env
+          HALFAHEAD_WORKER_CAP_USD (a number; absent = no cap) and prints it
+          at start."
+ :acceptance
+ ["spent-today sums only the given UTC day's costs and skips bad entries
+   (tests with entries spanning midnight UTC)"
+  "With :cap-usd 0.05 and ledger entries already totalling 0.06 today,
+   step! writes exactly one budget reply, never calls :invoke, and a second
+   step! after another human message writes nothing (tests with fakes)"
+  "With no cap, behaviour is unchanged: the existing worker tests pass"
+  "The budget reply is a valid :ha/message with delivery :aside"
+  "`bb test` stays green"]
+ :non-goals
+ ["No per-conversation or per-member caps; no notification to the owner
+   beyond the log line"
+  "Do not edit the schema, store, engine, or any app/ namespace"
+  "Do not run `bb e2e` or `bb play` (fixed ports; another line may use them)"]
+ :context ["src/halfahead/worker/core.clj" "src/halfahead/worker/main.clj"
+           "test/halfahead/worker/main_test.clj" "docs/SCHEMA.md" "DESIGN.md"]
+ :budget-usd 8.0}
