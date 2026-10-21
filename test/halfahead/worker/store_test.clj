@@ -10,6 +10,10 @@
           :emphasis [] :sent-at (Date. 0)})
 (def pres {:member-id "bot" :conversation-id "c1" :state :thinking :since (Date. 0)})
 
+(def ben {:id "ben" :kind :human :display-name "Ben" :joined-at (Date. 0)})
+(def conv {:id "first" :title "First light" :member-ids ["ben" "scout"]
+           :created-by "ben" :created-at (Date. 0)})
+
 (defn- never-sent [_] (throw (AssertionError. "HTTP reached")))
 
 (deftest refuses-non-emulator-before-http-test
@@ -17,7 +21,8 @@
           :let [cfg {:project-id project :send-fn never-sent}]
           f [#(store/conversations-of! cfg "bot") #(store/members! cfg ["bot"])
              #(store/messages! cfg "c1") #(store/write-message! cfg msg)
-             #(store/write-presence! cfg pres)]]
+             #(store/write-presence! cfg pres)
+             #(store/write-member! cfg ben) #(store/write-conversation! cfg conv)]]
     (let [e (try (f) nil (catch Throwable e e))]
       (is (= :ha/not-emulator (:type (ex-data e)))))))
 
@@ -77,3 +82,15 @@
     (is (= ["m1" "m2" "m3"] (mapv :id out)))
     (is (= [(Date. 1000) (Date. 2000) (Date. 3000)] (mapv :sent-at out)))
     (is (= (store/messages-query-request cfg "c1") @sent))))
+
+(deftest write-member-and-conversation-test
+  (doseq [[write! entity kind path] [[store/write-member! ben :ha/member "members/ben"]
+                                     [store/write-conversation! conv :ha/conversation "conversations/first"]]
+          :let [sent (atom nil)
+                cfg  {:project-id "demo-x"
+                      :send-fn (fn [req] (reset! sent req) {:status 200 :body "{}"})}]]
+    (is (= entity (write! cfg entity)))
+    (is (= :patch (:method @sent)))
+    (is (re-find (re-pattern (str "/projects/demo-x/databases/\\(default\\)/documents/" path "$"))
+                 (:url @sent)))
+    (is (= entity (codec/decode kind (rest/<-fields (json/parse-string (:body @sent))))))))
