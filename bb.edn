@@ -20,6 +20,10 @@
            :requires ([halfahead.test-runner])
            :task     (halfahead.test-runner/run)}
 
+  worker  {:doc      "Run the agent worker against the Firestore emulator: bb worker --agent <id> [--engine mock|claude] [--persona path]"
+           :requires ([halfahead.worker.main])
+           :task     (apply halfahead.worker.main/-main *command-line-args*)}
+
   dev     {:doc     "Watch the app and serve public/ at http://localhost:8000"
            :depends [deps]
            :task    (shell "npx shadow-cljs watch app")}

@@ -15,6 +15,7 @@ pom.xml.asc
 
 # Half Ahead
 .basefactory/
+.halfahead/
 .shadow-cljs/
 node_modules/
 public/js/
