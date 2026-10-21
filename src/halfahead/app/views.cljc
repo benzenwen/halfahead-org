@@ -146,7 +146,7 @@
       [:input {:type "checkbox"
                :checked sound?
                :on {:change [[:prefs/changed {:sound? (not sound?)}]]}}]
-      " Sound (soon)"]]))
+      " Sound"]]))
 
 (defn- credits-overlay [{:keys [credits]} frames]
   (when credits

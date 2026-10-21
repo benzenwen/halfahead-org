@@ -250,7 +250,8 @@
   (let [boxes (find-all #(= "checkbox" (:type (attrs-of %))) (views/page started))
         labels (find-all (tag? "label") (find-one (class? "prefs") (views/page started)))]
     (is (= 2 (count boxes)))
-    (is (some #(str/includes? (text-of %) "soon") labels))))
+    (is (some #(= "Sound" (str/trim (text-of %))) labels))
+    (is (not-any? #(str/includes? (text-of %) "soon") labels))))
 
 (deftest preference-checkboxes-emit-negation
   (doseq [[k idx] [[:reduced-motion? 0] [:sound? 1]]

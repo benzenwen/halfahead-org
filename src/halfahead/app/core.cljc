@@ -32,12 +32,15 @@
     [:scene/dismissed]
   Anything else leaves the state unchanged.
 
-  Effects: [:fx/write-message :ha/message]"
+  Effects: [:fx/write-message :ha/message]
+           [:fx/play-cue cue]  ; only when :prefs :sound? and an agent's new
+                               ; message has a cue"
   (:require [clojure.string :as str]
             [halfahead.app.compose :as compose]
             [halfahead.app.credits :as credits]
             [halfahead.perform :as perform]
-            [halfahead.schema :as schema]))
+            [halfahead.schema :as schema]
+            [halfahead.sound :as sound]))
 
 (def initial-state
   {:me          nil
@@ -137,13 +140,27 @@
                    :members (index-by :id members) :now-ms now-ms)
             (assoc-in [:prefs :reduced-motion?] (boolean reduced-motion?)))))
 
+(defn- cue-for
+  "One cue for the first fresh agent message that has one, when sound is
+  on; one per batch so a burst never stacks sounds."
+  [{:keys [members prefs]} fresh]
+  (when (:sound? prefs)
+    (some (fn [m]
+            (when (= :agent (get-in members [(:author-id m) :kind]))
+              (sound/cue m)))
+          fresh)))
+
 (defn- messages-received [state {:keys [messages initial? now-ms]}]
   (let [fresh (when-not initial?
-                (remove #(contains? (:messages state) (:id %)) messages))]
-    (done (-> state
-              (update :messages into (index-by :id messages))
-              (update :performing into (map (fn [m] [(:id m) now-ms])) fresh)
-              (assoc :now-ms now-ms)))))
+                (remove #(contains? (:messages state) (:id %)) messages))
+        cue   (cue-for state fresh)
+        state' (-> state
+                   (update :messages into (index-by :id messages))
+                   (update :performing into (map (fn [m] [(:id m) now-ms])) fresh)
+                   (assoc :now-ms now-ms))]
+    (if cue
+      (done state' [:fx/play-cue cue])
+      (done state'))))
 
 (defn- composer-sent [{:keys [me conversation composer] :as state} {:keys [id now]}]
   (let [{:keys [text emphasis]} (compose/parse-emphasis

@@ -5,7 +5,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [halfahead.app.core :as core]
-            [halfahead.schema :as schema]))
+            [halfahead.schema :as schema]
+            [halfahead.sound :as sound]))
 
 ;; --- fixtures ---------------------------------------------------------------
 
@@ -328,3 +329,37 @@
     (let [state (assoc ended :now-ms (+ 5000 t))]
       (is (= (get-in ended [:credits :text])
              (text-of (core/frames-credits state)))))))
+
+;; --- sound cues -------------------------------------------------------------
+
+(defn agent-msg [id delivery]
+  (assoc (msg id "hello" delivery) :author-id "bot"))
+
+(def sound-on (step started [:prefs/changed {:sound? true}]))
+
+(defn received [state ms & {:keys [initial?] :or {initial? false}}]
+  (core/handle state [:messages/received {:messages ms :initial? initial? :now-ms 1000}]))
+
+(deftest sound-cues
+  (let [m (agent-msg "a" :headline)]
+    (testing "off: silent"
+      (is (= [] (:effects (received started [m])))))
+    (testing "on: exactly one cue for a new agent headline"
+      (is (= [[:fx/play-cue (sound/cue m)]] (:effects (received sound-on [m])))))
+    (testing "initial history is silent"
+      (is (= [] (:effects (received sound-on [m] :initial? true)))))
+    (testing "redelivery of a known message is silent"
+      (is (= [] (:effects (received (live sound-on m) [m])))))
+    (testing "replay is silent"
+      (is (= [] (:effects (core/handle (live sound-on m)
+                                       [:replay/requested {:id "a" :now-ms 2000}])))))
+    (testing "a human's message, including the reader's own echo, is silent"
+      (is (= [] (:effects (received sound-on [(msg "h" "hi" :headline)]))))
+      (let [sent (step (step sound-on [:composer/edited {:text "hi"}])
+                       [:composer/sent {:id "mine" :now #inst "2026-01-03"}])
+            own  (get-in sent [:messages "mine"])]
+        (is (= [] (:effects (received sent [(or own (msg "mine" "hi"))]))))))
+    (testing "plain agent message has no cue"
+      (is (= [] (:effects (received sound-on [(agent-msg "p" :plain)])))))
+    (testing "a burst yields one cue"
+      (is (= 1 (count (:effects (received sound-on [m (agent-msg "b" :aside)]))))))))

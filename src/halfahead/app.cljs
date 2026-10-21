@@ -6,6 +6,7 @@
   (:require [halfahead.app.core :as core]
             [halfahead.app.enrich :as enrich]
             [halfahead.app.views :as views]
+            [halfahead.fx.audio :as audio]
             [halfahead.fx.firebase :as firebase]
             [replicant.dom :as r]))
 
@@ -16,6 +17,11 @@
   (js/window.matchMedia "(prefers-reduced-motion: reduce)"))
 
 (declare handle!)
+
+(defn- run-effect! [effect]
+  (if (= :fx/play-cue (first effect))
+    (audio/play-cue! (second effect))
+    (firebase/run-effect! effect)))
 
 (defn- tick! []
   (if (seq (:performing @state))
@@ -32,7 +38,7 @@
   (let [{new-state :state effects :effects} (core/handle @state action)]
     (reset! state new-state)
     (ensure-ticking!)
-    (run! firebase/run-effect! effects)))
+    (run! run-effect! effects)))
 
 (defn- enrich-context [event]
   {:now-ms  (js/Date.now)
