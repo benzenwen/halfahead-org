@@ -12,7 +12,9 @@
     :presence    {member-id :ha/presence}
     :composer    {:text s :delivery d}  ; d resets to :plain after each send
     :now-ms      latest time seen, in ms on the shell's clock
-    :performing  {message-id started-at-ms}; absent means settled
+    :performing  {message-id started-at-ms}; absent means settled. The key
+                 :credits stands for the credits performance.
+    :credits     {:text s :started-at ms}; present while the credits are shown
     :prefs       {:reduced-motion? b :sound? b}
 
   Actions:
@@ -26,10 +28,13 @@
     [:message/skipped {:id}]
     [:prefs/changed {:reduced-motion? :sound?}]
     [:replay/requested {:id :now-ms}]
+    [:scene/ended {:now-ms :date}]
+    [:scene/dismissed]
   Anything else leaves the state unchanged.
 
   Effects: [:fx/write-message :ha/message]"
   (:require [clojure.string :as str]
+            [halfahead.app.credits :as credits]
             [halfahead.perform :as perform]
             [halfahead.schema :as schema]))
 
@@ -72,6 +77,24 @@
                     :emphasis emphasis
                     :seed (seed id)
                     :reduced-motion? (get-in state [:prefs :reduced-motion?])}))
+
+(defn- credits-timeline [state]
+  (perform/perform {:text (get-in state [:credits :text])
+                    :delivery :credits
+                    :seed (seed "credits")
+                    :reduced-motion? (get-in state [:prefs :reduced-motion?])}))
+
+(defn frames-credits
+  "The credits frame at the elapsed time while performing, the final frame
+  once settled; nil when no credits are showing."
+  [state]
+  (when-let [{:keys [text started-at]} (:credits state)]
+    (let [tl      (credits-timeline state)
+          started (get-in state [:performing :credits])
+          elapsed (if started
+                    (max 0 (- (:now-ms state) started))
+                    (:duration-ms tl))]
+      (perform/frame-at tl text elapsed))))
 
 (defn frames
   "{message-id frame} for every message: the frame at the elapsed time for
@@ -143,9 +166,11 @@
     (done state)))
 
 (defn- clock-ticked [state {:keys [now-ms]}]
-  (let [finished? (fn [[id started]]
-                    (> now-ms (+ started
-                                 (:duration-ms (timeline-for state (get-in state [:messages id]))))))]
+  (let [duration  (fn [id]
+                    (:duration-ms (if (= :credits id)
+                                    (credits-timeline state)
+                                    (timeline-for state (get-in state [:messages id])))))
+        finished? (fn [[id started]] (> now-ms (+ started (duration id))))]
     (done (-> state
               (assoc :now-ms now-ms)
               (update :performing #(into {} (remove finished?) %))))))
@@ -154,6 +179,13 @@
   (if (contains? (:messages state) id)
     (done (-> state (assoc-in [:performing id] now-ms) (assoc :now-ms now-ms)))
     (done state)))
+
+(defn- scene-ended [state {:keys [now-ms date]}]
+  (done (-> state
+            (assoc :credits {:text (credits/credits-text state date)
+                             :started-at now-ms})
+            (assoc-in [:performing :credits] now-ms)
+            (assoc :now-ms now-ms))))
 
 (defn handle
   "Applies action to state. Returns {:state s :effects [[:fx/name & args]]}."
@@ -172,4 +204,8 @@
       :prefs/changed      (done (update state :prefs merge
                                         (select-keys args [:reduced-motion? :sound?])))
       :replay/requested   (replay-requested state args)
+      :scene/ended        (scene-ended state args)
+      :scene/dismissed    (done (-> state
+                                    (dissoc :credits)
+                                    (update :performing dissoc :credits)))
       (done state))))

@@ -37,6 +37,8 @@
 (defn- enrich-context [event]
   {:now-ms  (js/Date.now)
    :now     (js/Date.)
+   :date    (.toLocaleDateString (js/Date.) "en-GB"
+                                 #js {:day "numeric" :month "long" :year "numeric"})
    :new-id  (str (js/crypto.randomUUID))
    :value   (some-> event .-target .-value)
    :key     (some-> event .-key)

@@ -7,14 +7,16 @@
 
 (defn enrich
   "A vector of actions to handle for a view action. ctx is
-  {:now-ms :now :new-id :value :key :shift?}. An action it does not know
+  {:now-ms :now :date :new-id :value :key :shift?}. An action it does not know
   passes through."
-  [action {:keys [now-ms now new-id value] :as ctx}]
+  [action {:keys [now-ms now date new-id value] :as ctx}]
   (case (first action)
     :composer/edited   [[:composer/edited {:text value}]]
     :composer/key      (if (send-key? ctx) [[:composer/sent {:id new-id :now now}]] [])
     :composer/sent     [[:composer/sent {:id new-id :now now}]]
     :replay/requested  [(update action 1 assoc :now-ms now-ms)]
+    :scene/ended       [(update action 1 assoc :now-ms now-ms :date date)]
+    :scene/key         (if (= "Escape" (:key ctx)) [[:scene/dismissed]] [])
     [action]))
 
 (defn prevent-default?

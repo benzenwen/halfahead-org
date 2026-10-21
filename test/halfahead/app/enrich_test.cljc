@@ -50,3 +50,11 @@
     (is (not (enrich/prevent-default? [:composer/key {}] (assoc ctx :key "Enter" :shift? true))))
     (is (not (enrich/prevent-default? [:composer/key {}] (assoc ctx :key "a"))))
     (is (not (enrich/prevent-default? [:composer/edited] ctx)))))
+
+(deftest scene-ended-carries-time-and-date
+  (is (= [[:scene/ended {:now-ms 1234 :date "21 October 2026"}]]
+         (enrich/enrich [:scene/ended] (assoc ctx :date "21 October 2026")))))
+
+(deftest only-escape-dismisses-the-scene
+  (is (= [[:scene/dismissed]] (enrich/enrich [:scene/key {}] (assoc ctx :key "Escape"))))
+  (is (= [] (enrich/enrich [:scene/key {}] (assoc ctx :key "a")))))

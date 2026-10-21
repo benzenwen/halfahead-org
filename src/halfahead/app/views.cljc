@@ -47,7 +47,9 @@
                      (keep (:members state)))]
     [:header
      [:h1 title]
-     [:ul.members (map #(member-chip state %) members)]]))
+     [:ul.members (map #(member-chip state %) members)]
+     [:button.end-scene {:type "button" :on {:click [[:scene/ended]]}}
+      "End scene"]]))
 
 (defn- segment [{:keys [text effect progress]}]
   [:span {:class ["seg" (str "fx-" (name effect))]
@@ -146,6 +148,18 @@
                :on {:change [[:prefs/changed {:sound? (not sound?)}]]}}]
       " Sound (soon)"]]))
 
+(defn- credits-overlay [{:keys [credits]} frames]
+  (when credits
+    [:section.credits {:role "dialog"
+                       :aria-modal "true"
+                       :aria-label "Credits"
+                       :on {:keydown [[:scene/key {:key nil}]]}}
+     [:p.credits-body
+      [:span.sr-only (:text credits)]
+      (into [:span {:aria-hidden "true"}] (map segment) frames)]
+     [:button {:type "button" :autofocus true :on {:click [[:scene/dismissed]]}}
+      "Close"]]))
+
 (defn page
   "The whole conversation for state."
   [state]
@@ -155,4 +169,5 @@
      (transcript state frames)
      (presence-line state (core/awaiting-agent? state))
      (composer state)
-     (preferences state)]))
+     (preferences state)
+     (credits-overlay state (core/frames-credits state))]))
