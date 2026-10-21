@@ -36,32 +36,45 @@
                                     :human)
                             :text (:text m)})))}))
 
+(def ^:private delivery-line
+  {:plain    "the default; most replies."
+   :typed    "when the pause itself means something."
+   :headline "one striking point, with 1-3 emphasis phrases copied exactly from the text."
+   :aside    "a quiet remark or caveat."
+   :credits  "thanks, attributions, or a short list."})
+
+(defn engine-system-prompt
+  "The persona and the instructions for answering."
+  [{:keys [persona]}]
+  (str/join
+   "\n"
+   (concat
+    [persona
+     ""
+     "Answer with ONE JSON object and nothing else:"
+     "{\"text\": ..., \"delivery\": ..., \"emphasis\": [...]}"
+     ""
+     "\"delivery\" is one of:"]
+    (for [d deliveries]
+      (str "- " (name d) ": " (delivery-line d)))
+    [""
+     "Prefer plain; flair must serve the meaning."])))
+
+(defn engine-transcript
+  "The conversation as Human:/You: lines, ending with the agent's turn."
+  [{:keys [history]}]
+  (str/join
+   "\n"
+   (concat
+    (for [{:keys [role text]} history]
+      (str (if (= role :agent) "You: " "Human: ") text))
+    ["You:"])))
+
 (defn engine-prompt
-  "The persona, the instructions for answering, and the transcript."
-  [{:keys [persona history]}]
-  (let [line {:plain    "the default; most replies."
-              :typed    "when the pause itself means something."
-              :headline "one striking point, with 1-3 emphasis phrases copied exactly from the text."
-              :aside    "a quiet remark or caveat."
-              :credits  "thanks, attributions, or a short list."}]
-    (str/join
-     "\n"
-     (concat
-      [persona
-       ""
-       "Answer with ONE JSON object and nothing else:"
-       "{\"text\": ..., \"delivery\": ..., \"emphasis\": [...]}"
-       ""
-       "\"delivery\" is one of:"]
-      (for [d deliveries]
-        (str "- " (name d) ": " (line d)))
-      [""
-       "Prefer plain; flair must serve the meaning."
-       ""
-       "Conversation so far:"]
-      (for [{:keys [role text]} history]
-        (str (if (= role :agent) "You: " "Human: ") text))
-      ["You:"]))))
+  "The system prompt, a blank line, then the transcript: one string for
+  engines that take no separate system prompt."
+  [request]
+  (str (engine-system-prompt request) "\n\n" (engine-transcript request)))
 
 (defn- balanced-object-from
   "The {...} substring of s that opens at index start, ignoring braces
