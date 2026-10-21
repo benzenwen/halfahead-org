@@ -15,6 +15,11 @@
     :performing  {message-id started-at-ms}; absent means settled. The key
                  :credits stands for the credits performance.
     :credits     {:text s :started-at ms}; present while the credits are shown
+    :scene       {:schedule [{:id :at-ms}] :scale s :end-ms n :started-at n
+                  :paused-at n-or-nil}; present while a replay plays. Its
+                 schedule is fixed at the start, so later messages join the
+                 transcript but not the replay. The key :scene in
+                 :performing keeps the shell's clock ticking.
     :prefs       {:reduced-motion? b :sound? b}
 
   Actions:
@@ -29,6 +34,10 @@
     [:prefs/changed {:reduced-motion? :sound?}]
     [:replay/requested {:id :now-ms}]
     [:scene/ended {:now-ms :date}]
+    [:scene/replay {:now-ms}]
+    [:scene/paused {:now-ms}]
+    [:scene/resumed {:now-ms}]
+    [:scene/stopped]
     [:scene/dismissed]
   Anything else leaves the state unchanged.
 
@@ -38,6 +47,7 @@
   (:require [clojure.string :as str]
             [halfahead.app.compose :as compose]
             [halfahead.app.credits :as credits]
+            [halfahead.app.scene :as scene]
             [halfahead.perform :as perform]
             [halfahead.schema :as schema]
             [halfahead.sound :as sound]))
@@ -100,19 +110,42 @@
                     (:duration-ms tl))]
       (perform/frame-at tl text elapsed))))
 
+(defn- scene-starts
+  "{message-id at-ms} for the messages of the replay that is playing."
+  [state]
+  (into {} (map (juxt :id :at-ms)) (get-in state [:scene :schedule])))
+
+(defn reached?
+  "False for a message the playing replay has not got to yet."
+  [state id]
+  (let [at (get (scene-starts state) id)]
+    (or (nil? at)
+        (<= at (scene/scene-ms (:scene state) (:now-ms state))))))
+
+(defn scene-progress
+  "Whole percent of the playing replay, nil when none plays."
+  [state]
+  (when-let [s (:scene state)]
+    (scene/progress s (:now-ms state))))
+
 (defn frames
   "{message-id frame} for every message: the frame at the elapsed time for
-  one that is performing, the final frame for the rest."
+  one that is performing, the final frame for the rest. A message in the
+  playing replay performs from its place on the scene clock."
   [state]
-  (into {}
-        (map (fn [[id {:keys [text] :as message}]]
-               (let [tl      (timeline-for state message)
-                     started (get-in state [:performing id])
-                     elapsed (if started
-                               (max 0 (- (:now-ms state) started))
-                               (:duration-ms tl))]
-                 [id (perform/frame-at tl text elapsed)])))
-        (:messages state)))
+  (let [starts   (scene-starts state)
+        scene-t  (when (:scene state) (scene/scene-ms (:scene state) (:now-ms state)))
+        scale    (get-in state [:scene :scale] 1.0)]
+    (into {}
+          (map (fn [[id {:keys [text] :as message}]]
+                 (let [tl      (timeline-for state message)
+                       started (get-in state [:performing id])
+                       elapsed (cond
+                                 (contains? starts id) (max 0 (/ (- scene-t (get starts id)) scale))
+                                 started (max 0 (- (:now-ms state) started))
+                                 :else (:duration-ms tl))]
+                   [id (perform/frame-at tl text elapsed)])))
+          (:messages state))))
 
 (defn awaiting-agent?
   "True when the latest message is a human's and an agent is thinking."
@@ -184,15 +217,50 @@
     (done (assoc-in state [:composer :delivery] delivery))
     (done state)))
 
+(defn- scene-over? [{:keys [scene]} now-ms]
+  (and scene
+       (nil? (:paused-at scene))
+       (>= (scene/scene-ms scene now-ms) (:end-ms scene))))
+
 (defn- clock-ticked [state {:keys [now-ms]}]
   (let [duration  (fn [id]
                     (:duration-ms (if (= :credits id)
                                     (credits-timeline state)
                                     (timeline-for state (get-in state [:messages id])))))
-        finished? (fn [[id started]] (> now-ms (+ started (duration id))))]
+        finished? (fn [[id started]]
+                    (and (not= :scene id) (> now-ms (+ started (duration id)))))
+        state'    (-> state
+                      (assoc :now-ms now-ms)
+                      (update :performing #(into {} (remove finished?) %)))]
+    (done (if (scene-over? state' now-ms)
+            (-> state' (dissoc :scene) (update :performing dissoc :scene))
+            state'))))
+
+(defn- scene-replay [state {:keys [now-ms]}]
+  (let [{:keys [schedule] :as plan}
+        (scene/plan (vals (:messages state))
+                    {:seed-fn seed
+                     :reduced-motion? (get-in state [:prefs :reduced-motion?])})]
+    (if (empty? schedule)
+      (done state)
+      (done (-> state
+                (assoc :scene (assoc plan :started-at now-ms :paused-at nil))
+                (update :performing #(apply dissoc % (map :id schedule)))
+                (assoc-in [:performing :scene] now-ms)
+                (assoc :now-ms now-ms))))))
+
+(defn- scene-paused [state {:keys [now-ms]}]
+  (if (and (:scene state) (nil? (get-in state [:scene :paused-at])))
+    (done (-> state (assoc-in [:scene :paused-at] now-ms) (assoc :now-ms now-ms)))
+    (done state)))
+
+(defn- scene-resumed [state {:keys [now-ms]}]
+  (if-let [paused-at (get-in state [:scene :paused-at])]
     (done (-> state
-              (assoc :now-ms now-ms)
-              (update :performing #(into {} (remove finished?) %))))))
+              (update-in [:scene :started-at] + (max 0 (- now-ms paused-at)))
+              (assoc-in [:scene :paused-at] nil)
+              (assoc :now-ms now-ms)))
+    (done state)))
 
 (defn- replay-requested [state {:keys [id now-ms]}]
   (if (contains? (:messages state) id)
@@ -224,6 +292,10 @@
                                         (select-keys args [:reduced-motion? :sound?])))
       :replay/requested   (replay-requested state args)
       :scene/ended        (scene-ended state args)
+      :scene/replay       (scene-replay state args)
+      :scene/paused       (scene-paused state args)
+      :scene/resumed      (scene-resumed state args)
+      :scene/stopped      (done (-> state (dissoc :scene) (update :performing dissoc :scene)))
       :scene/dismissed    (done (-> state
                                     (dissoc :credits)
                                     (update :performing dissoc :credits)))

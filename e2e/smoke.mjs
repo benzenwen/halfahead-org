@@ -90,6 +90,33 @@ try {
   await dialog.waitFor({ state: 'detached', timeout: 3000 })
     .catch(() => { throw new Error('Escape did not close the credits'); });
   done('credits rolled on separate rows, focus inside, Escape closed them');
+
+  begin('scene', page);
+  await page.keyboard.press('Escape');
+  const rendered = () => page.locator('ol.transcript > li').count();
+  for (let i = await rendered(); i < 4; i++) await send(page, `Scene line ${i}`);
+  const before = await rendered();
+  await page.getByRole('button', { name: 'Replay scene' }).click();
+  await page.waitForTimeout(300);
+  const early = await rendered();
+  if (!(early < before)) throw new Error(`replay did not hide messages (${early} of ${before})`);
+  await page.getByRole('button', { name: 'Pause' }).click();
+  const frozen = await rendered();
+  await page.waitForTimeout(1000);
+  if ((await rendered()) !== frozen) throw new Error('pause did not freeze the scene');
+  await page.screenshot({ path: `${out}/scene.png`, fullPage: true });
+  await page.getByRole('button', { name: 'Resume' }).click();
+  const bar = page.locator('[role=toolbar][aria-label=Scene]');
+  await bar.waitFor({ state: 'detached', timeout: 35000 })
+    .catch(() => { throw new Error('scene did not finish within 35 s'); });
+  if ((await rendered()) !== before) throw new Error('not all messages rendered after replay');
+  const settled = await page.locator('ol.transcript .seg').evaluateAll(
+    (segs) => segs.every((s) => parseFloat(s.style.getPropertyValue('--p')) === 1));
+  if (!settled) throw new Error('messages not settled after replay');
+  await page.getByRole('button', { name: 'Replay scene' }).click();
+  await page.getByRole('button', { name: 'Stop' }).click();
+  if ((await rendered()) !== before) throw new Error('Stop did not show every message');
+  done('replay hid messages, pause froze it, resume finished, Stop showed all');
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);

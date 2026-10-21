@@ -15,6 +15,9 @@
     :composer/key      (if (send-key? ctx) [[:composer/sent {:id new-id :now now}]] [])
     :composer/sent     [[:composer/sent {:id new-id :now now}]]
     :replay/requested  [(update action 1 assoc :now-ms now-ms)]
+    :scene/replay      [(update action 1 assoc :now-ms now-ms)]
+    :scene/paused      [(update action 1 assoc :now-ms now-ms)]
+    :scene/resumed     [(update action 1 assoc :now-ms now-ms)]
     :scene/ended       [(update action 1 assoc :now-ms now-ms :date date)]
     :scene/key         (if (= "Escape" (:key ctx)) [[:scene/dismissed]] [])
     [action]))
