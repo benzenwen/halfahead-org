@@ -98,3 +98,16 @@ echoed the persona's own phrasing; a sign the persona is too quotable.
 ### H12 Firestore rules deny everything until the rules order — foreman
 Only the emulator's admin (the worker) reads and writes. Client access
 arrives with tested rules.
+
+### H13 ★ The agent has no tools — foreman, a security finding
+Scout's first real turn ran `claude -p` with the host session's defaults:
+built-in file and shell tools, and every MCP connector the host session
+had, which in the founder's cloud session were 40 Gmail, Calendar and
+Drive tools. Measured: `--tools ""` removes only the built-ins; adding
+`--disallowedTools "mcp__*"` leaves none (and costs about a quarter as
+much). `--strict-mcp-config` did not help; `--bare` breaks the host's
+authentication. Order 0008 makes the engine run with no tools at all and
+the persona as its system prompt. No tool use was observed in the turn
+that ran before the fix.
+*Rule:* an agent that talks to people other than its owner never inherits
+its host's tools or connectors; any tool it gets is granted explicitly.
