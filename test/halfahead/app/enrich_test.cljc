@@ -60,3 +60,8 @@
   (is (= [] (enrich/enrich [:scene/key] (assoc ctx :key "a"))))
   (is (false? (enrich/prevent-default? [:scene/key] (assoc ctx :key "Escape"))))
   (is (false? (enrich/prevent-default? [:scene/key] (assoc ctx :key "a")))))
+
+(deftest scene-clock-actions-carry-the-time
+  (doseq [k [:scene/replay :scene/paused :scene/resumed]]
+    (is (= [[k {:now-ms 1234}]] (enrich/enrich [k] ctx))))
+  (is (= [[:scene/stopped]] (enrich/enrich [:scene/stopped] ctx))))

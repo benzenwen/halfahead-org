@@ -48,6 +48,10 @@
     [:header
      [:h1 title]
      [:ul.members (map #(member-chip state %) members)]
+     [:button.replay-scene {:type "button"
+                            :disabled (empty? (:messages state))
+                            :on {:click [[:scene/replay]]}}
+      "Replay scene"]
      [:button.end-scene {:type "button" :on {:click [[:scene/ended]]}}
       "End scene"]]))
 
@@ -77,13 +81,30 @@
          "Skip"])]]))
 
 (defn- transcript [state frames]
-  (let [messages (sort-by (juxt :sent-at :id) (vals (:messages state)))]
+  (let [messages (->> (vals (:messages state))
+                      (filter #(core/reached? state (:id %)))
+                      (sort-by (juxt :sent-at :id)))]
     (if (empty? messages)
       [:main [:p.empty "No messages yet — say the first word."]]
       [:main
        (into [:ol.transcript]
              (map #(message state (:performing state) frames %))
              messages)])))
+
+(defn- scene-bar [state]
+  (when-let [percent (core/scene-progress state)]
+    (let [paused? (some? (get-in state [:scene :paused-at]))]
+      [:div.scene-bar {:role "toolbar" :aria-label "Scene"}
+       (if paused?
+         [:button {:type "button" :on {:click [[:scene/resumed]]}} "Resume"]
+         [:button {:type "button" :on {:click [[:scene/paused]]}} "Pause"])
+       [:button {:type "button" :on {:click [[:scene/stopped]]}} "Stop"]
+       [:div.scene-progress {:role "progressbar"
+                             :aria-label "Scene progress"
+                             :aria-valuemin "0"
+                             :aria-valuemax "100"
+                             :aria-valuenow (str percent)}
+        [:span {:style {"width" (str percent "%")}}]]])))
 
 (defn- presence-line [state awaiting?]
   (let [[agent-id agent-name]
@@ -168,6 +189,7 @@
   (let [frames (core/frames state)]
     [:div.page
      (header state)
+     (scene-bar state)
      (transcript state frames)
      (presence-line state (core/awaiting-agent? state))
      (composer state)

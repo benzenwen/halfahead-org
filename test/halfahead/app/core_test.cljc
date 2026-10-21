@@ -363,3 +363,106 @@
       (is (= [] (:effects (received sound-on [(agent-msg "p" :plain)])))))
     (testing "a burst yields one cue"
       (is (= 1 (count (:effects (received sound-on [m (agent-msg "b" :aside)]))))))))
+
+;; --- scene replay -----------------------------------------------------------
+
+(defn msg-at [id text sent-ms]
+  (assoc (msg id text) :sent-at (#?(:clj java.util.Date. :cljs js/Date.) sent-ms)))
+
+(def two-messages
+  (step started [:messages/received
+                 {:messages [(msg-at "a" "first" 0) (msg-at "b" "second" 1000)]
+                  :initial? true :now-ms 1000}]))
+
+(defn replaying [state now-ms] (step state [:scene/replay {:now-ms now-ms}]))
+
+(defn visible [state]
+  (set (filter #(core/reached? state %) (keys (:messages state)))))
+
+(defn at-b [state] (get-in state [:scene :schedule 1 :at-ms]))
+
+(deftest replay-hides-until-reached
+  (let [s (replaying two-messages 5000)]
+    (is (contains? (:performing s) :scene))
+    (is (= #{"a"} (visible s)))
+    (let [b-at (at-b s)
+          early (step s [:clock/ticked {:now-ms (+ 5000 (dec b-at))}])
+          later (step s [:clock/ticked {:now-ms (+ 5000 b-at)}])]
+      (is (pos? b-at))
+      (is (= #{"a"} (visible early)))
+      (is (= #{"a" "b"} (visible later))))))
+
+(deftest pause-freezes-and-resume-continues
+  (let [s      (replaying two-messages 5000)
+        b-at   (at-b s)
+        paused (step s [:scene/paused {:now-ms 5100}])
+        ticked (step paused [:clock/ticked {:now-ms (+ 5000 b-at 10000)}])]
+    (is (= #{"a"} (visible ticked)))
+    (is (contains? (:scene ticked) :schedule))
+    (let [resumed (step ticked [:scene/resumed {:now-ms (+ 5000 b-at 10000)}])
+          just-before (step resumed [:clock/ticked {:now-ms (+ 5000 b-at 10000 (- b-at 101))}])
+          reached     (step resumed [:clock/ticked {:now-ms (+ 5000 b-at 10000 (- b-at 100))}])]
+      (is (= #{"a"} (visible just-before)))
+      (is (= #{"a" "b"} (visible reached))))))
+
+(deftest stop-settles-everything
+  (let [s (-> (replaying two-messages 5000) (step [:scene/stopped]))]
+    (is (nil? (:scene s)))
+    (is (not (contains? (:performing s) :scene)))
+    (is (= #{"a" "b"} (visible s)))
+    (is (= "second" (text-of (get (core/frames s) "b"))))
+    (is (every? #(= 1.0 (:progress %)) (get (core/frames s) "b")))))
+
+(deftest scene-ends-by-itself
+  (let [s (replaying two-messages 5000)
+        end (get-in s [:scene :end-ms])
+        before (step s [:clock/ticked {:now-ms (+ 5000 (dec end))}])
+        after  (step s [:clock/ticked {:now-ms (+ 5000 end)}])]
+    (is (some? (:scene before)))
+    (is (nil? (:scene after)))
+    (is (not (contains? (:performing after) :scene)))))
+
+(deftest late-arrival-is-not-in-the-replay
+  (let [s (-> (replaying two-messages 5000)
+              (step [:messages/received {:messages [(msg-at "z" "new" 9000)]
+                                         :initial? false :now-ms 5100}]))]
+    (is (contains? (:messages s) "z"))
+    (is (not-any? #(= "z" (:id %)) (get-in s [:scene :schedule])))
+    (is (contains? (visible s) "z"))))
+
+(deftest reduced-motion-replay-settles-at-once
+  (let [s (-> two-messages
+              (step [:prefs/changed {:reduced-motion? true}])
+              (replaying 5000))]
+    (is (= #{"a" "b"} (visible s)))
+    (is (nil? (:scene (step s [:clock/ticked {:now-ms 5001}]))))))
+
+(deftest replay-without-messages-does-nothing
+  (is (nil? (:scene (replaying started 5000)))))
+
+(def gen-scene-action
+  (gen/one-of
+   [(gen/return [:scene/replay])
+    (gen/return [:scene/paused])
+    (gen/return [:scene/resumed])
+    (gen/return [:scene/stopped])
+    (gen/return [:clock/ticked])
+    (gen/fmap (fn [n] [:messages/received n]) (gen/choose 0 9))]))
+
+(defspec frames-always-concatenate-to-text 100
+  (prop/for-all [reduced? gen/boolean
+                 steps (gen/vector (gen/tuple gen-scene-action (gen/choose 0 4000)) 0 30)]
+    (let [start (step two-messages [:prefs/changed {:reduced-motion? reduced?}])
+          final (reduce (fn [[s t] [[kind arg] dt]]
+                          (let [t' (+ t dt)
+                                action (case kind
+                                         :messages/received
+                                         [kind {:messages [(msg-at (str "n" arg) (str "late " arg) (+ 2000 arg))]
+                                                :initial? false :now-ms t'}]
+                                         :scene/stopped [kind]
+                                         [kind {:now-ms t'}])]
+                            [(step s action) t']))
+                        [start 5000] steps)
+          s (first final)]
+      (every? (fn [[id frame]] (= (:text (get (:messages s) id)) (text-of frame)))
+              (core/frames s)))))

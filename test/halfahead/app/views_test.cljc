@@ -373,3 +373,40 @@
     (let [close (first (find-all #(and ((tag? "button") %) (= "Close" (text-of %))) dialog))]
       (is (some? close))
       (is (= [[:scene/dismissed]] (get-in (attrs-of close) [:on :click]))))))
+
+;; --- scene replay -----------------------------------------------------------
+
+(defn- scene-toolbar [page]
+  (find-one #(= "Scene" (:aria-label (attrs-of %))) page))
+
+(defn- has-text? [page text]
+  (some #{text} (tree-seq sequential? seq page)))
+
+(def two
+  (initial started
+           (msg "a" "first" :plain "ben" #inst "2026-01-02T00:00:00Z")
+           (msg "b" "second" :plain "ben" #inst "2026-01-02T00:00:05Z")))
+
+(deftest replay-scene-button-needs-messages
+  (let [button #(find-one (class? "replay-scene") (views/page %))]
+    (is (true? (:disabled (attrs-of (button started)))))
+    (is (false? (:disabled (attrs-of (button two)))))
+    (is (= [[:scene/replay]] (get-in (attrs-of (button two)) [:on :click])))))
+
+(deftest scene-toolbar-while-playing
+  (is (nil? (scene-toolbar (views/page two))))
+  (let [playing (step two [:scene/replay {:now-ms 2000}])
+        bar     (scene-toolbar (views/page playing))
+        labels  #(set (map text-of (find-all (tag? "button") %)))
+        value   (:aria-valuenow (attrs-of (find-one #(= "progressbar" (:role (attrs-of %))) bar)))]
+    (is (= "toolbar" (:role (attrs-of bar))))
+    (is (= #{"Pause" "Stop"} (labels bar)))
+    (is (re-matches #"\d+" value))
+    (is (= #{"Resume" "Stop"}
+           (labels (scene-toolbar (views/page (step playing [:scene/paused {:now-ms 2100}]))))))))
+
+(deftest unreached-messages-are-absent
+  (let [playing (step two [:scene/replay {:now-ms 2000}])]
+    (is (has-text? (views/page playing) "first"))
+    (is (not (has-text? (views/page playing) "second")))
+    (is (has-text? (views/page (step playing [:scene/stopped])) "second"))))
