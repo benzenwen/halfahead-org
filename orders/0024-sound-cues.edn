@@ -1,0 +1,49 @@
+{:id "0024-sound-cues"
+ :title "Opt-in sound cues, synthesized, never alone"
+ :lupa/deps #{"0022-polish-emphasis-contrast"}
+ :lupa/area :flair
+ :lupa/risk :medium
+ :goal "The 'audio flair' of the brief (You Don't Know Jack used sound to set
+        the scene), done humanely: when the reader has turned sound on, an
+        arriving message plays a short synthesized cue chosen by its
+        delivery. Off by default, never autoplayed before the reader opts
+        in, quiet, and always redundant with something visible
+        (docs/research/conversation-design.md, principle 9)."
+ :scope ["src/halfahead/sound.cljc" "test/halfahead/sound_test.cljc"
+         "src/halfahead/app/core.cljc" "test/halfahead/app/core_test.cljc"
+         "src/halfahead/app/views.cljc" "test/halfahead/app/views_test.cljc"
+         "src/halfahead/fx/audio.cljs" "src/halfahead/app.cljs"]
+ :design "halfahead.sound (.cljc, pure): (cue message) -> a cue as data,
+          {:notes [{:hz n :ms d :at-ms t :gain g} ...]}, or nil for :plain.
+          A distinct short figure per delivery: :headline a two-note rising
+          sting (the game-show card); :typed a soft tick; :aside one low
+          quiet note; :credits a three-note falling coda. Every cue lasts
+          at most 600 ms, gain at most 0.15.
+          Core: when :prefs :sound? is true and a NEW message starts
+          performing (not initial history, not replay, not the reader's own
+          message), handle returns the effect [:fx/play-cue cue]. Never when
+          sound is off.
+          Views: the Sound checkbox loses '(soon)'; label 'Sound'.
+          halfahead.fx.audio (.cljs, the only Web Audio code): plays a cue
+          with an AudioContext created lazily on the first cue after the
+          reader turned sound on (a user gesture), oscillators and gain
+          envelopes; never throws to the caller.
+          app.cljs: route :fx/play-cue to fx.audio (alongside the Firebase
+          effects); nothing else changes there."
+ :acceptance
+ ["sound/cue: nil for :plain; a valid cue for each other delivery, each at
+   most 600 ms long with every gain <= 0.15 (tests, including a property
+   over generated messages)"
+  "Core: with sound off, receiving a new agent message yields no
+   :fx/play-cue; with sound on, a new agent :headline message yields
+   exactly one; initial history, replay, and the reader's own sent message
+   yield none (tests)"
+  "Views: the sound checkbox is labelled 'Sound' and toggles as before"
+  "`bb test` stays green"]
+ :non-goals
+ ["No audio files or assets; no music; no voice"
+  "Do not edit the schema, perform, the worker, or fx/firebase"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/research/conversation-design.md" "src/halfahead/app/core.cljc"
+           "src/halfahead/app/views.cljc" "src/halfahead/app.cljs" "DESIGN.md"]
+ :budget-usd 8.0}
