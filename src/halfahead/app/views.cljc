@@ -98,6 +98,26 @@
        (str agent-name " is thinking…")]
       [:p.presence {:role "status" :aria-live "polite"} ""])))
 
+;; Same guidance as the agent's instructions (halfahead.worker.core), trimmed
+;; for a person; that namespace is .clj so it cannot be required here.
+(def ^:private delivery-options
+  [[:plain    "the default; most lines."]
+   [:typed    "when the pause itself means something."]
+   [:headline "one striking point."]
+   [:aside    "a quiet remark or caveat."]
+   [:credits  "thanks, attributions, or a short list."]])
+
+(defn- delivery-picker [current]
+  (into [:div.delivery {:role "radiogroup" :aria-label "Delivery"}]
+        (for [[d hint] delivery-options]
+          [:label {:key (name d) :title hint}
+           [:input {:type "radio"
+                    :name "delivery"
+                    :value (name d)
+                    :checked (= d current)
+                    :on {:change [[:composer/delivery-chosen {:delivery d}]]}}]
+           [:span (name d)]])))
+
 (defn- composer [{:keys [composer]}]
   [:form.composer {:on {:submit [[:composer/sent]]}}
    [:label {:for "composer-text"} "Message"]
@@ -106,7 +126,9 @@
                :value (:text composer)
                :on {:input   [[:composer/edited]]
                     :keydown [[:composer/key {:key nil :shift? false}]]}}]
-   [:button {:type "submit" :disabled (str/blank? (:text composer))} "Send"]])
+   [:div.send-row
+    (delivery-picker (get composer :delivery :plain))
+    [:button {:type "submit" :disabled (str/blank? (:text composer))} "Send"]]])
 
 (defn- preferences [{:keys [prefs]}]
   (let [reduced? (boolean (:reduced-motion? prefs))
