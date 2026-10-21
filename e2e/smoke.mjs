@@ -70,6 +70,26 @@ try {
   if (!(await allSettled(reply2))) throw new Error('reply was not fully settled when it first appeared');
   await page2.screenshot({ path: `${out}/reduced-motion.png`, fullPage: true });
   done('reply arrived already settled');
+
+  begin('credits', page);
+  await page.getByRole('button', { name: 'End scene' }).click();
+  await page.waitForTimeout(5500);
+  const dialog = page.locator('[role=dialog][aria-label=Credits]');
+  if ((await dialog.count()) !== 1) throw new Error('credits dialog did not appear');
+  if (!(await dialog.evaluate((d) => d.contains(document.activeElement))))
+    throw new Error('focus is not inside the credits dialog');
+  const rowY = async (text) => {
+    const box = await dialog.locator('.seg', { hasText: new RegExp(`^\\s*${text}\\s*$`, "i") }).first().boundingBox();
+    if (!box) throw new Error(`no credits line "${text}"`);
+    return box.y;
+  };
+  const gap = Math.abs((await rowY('HALF AHEAD')) - (await rowY('BEN')));
+  if (gap <= 40) throw new Error(`credits lines run together (y differs by ${gap}px)`);
+  await page.screenshot({ path: `${out}/credits.png`, fullPage: true });
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached', timeout: 3000 })
+    .catch(() => { throw new Error('Escape did not close the credits'); });
+  done('credits rolled on separate rows, focus inside, Escape closed them');
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);

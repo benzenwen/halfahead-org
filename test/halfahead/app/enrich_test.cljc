@@ -56,5 +56,7 @@
          (enrich/enrich [:scene/ended] (assoc ctx :date "21 October 2026")))))
 
 (deftest only-escape-dismisses-the-scene
-  (is (= [[:scene/dismissed]] (enrich/enrich [:scene/key {}] (assoc ctx :key "Escape"))))
-  (is (= [] (enrich/enrich [:scene/key {}] (assoc ctx :key "a")))))
+  (is (= [[:scene/dismissed]] (enrich/enrich [:scene/key] (assoc ctx :key "Escape"))))
+  (is (= [] (enrich/enrich [:scene/key] (assoc ctx :key "a"))))
+  (is (false? (enrich/prevent-default? [:scene/key] (assoc ctx :key "Escape"))))
+  (is (false? (enrich/prevent-default? [:scene/key] (assoc ctx :key "a")))))
