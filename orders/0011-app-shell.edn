@@ -1,0 +1,83 @@
+{:id "0011-app-shell"
+ :title "App shell: the browser runs the conversation against the emulators"
+ :lupa/deps #{"0004-conversation-core" "0006-views" "0002-codec" "0009-rules" "0010-dev-seed"}
+ :lupa/area :ui
+ :lupa/risk :high
+ :goal "Opening public/index.html (served locally, emulators running and
+        seeded) shows the first conversation live: history arrives settled,
+        new messages perform, the agent's thinking shows, and what the human
+        types is sent. The shell is thin; the only new logic is a pure
+        function that completes view actions with times, ids and input
+        values."
+ :scope ["src/halfahead/app.cljs" "src/halfahead/fx/firebase.cljs"
+         "src/halfahead/config.cljc" "src/halfahead/app/enrich.cljc"
+         "test/halfahead/app/enrich_test.cljc" "test/halfahead/config_test.cljc"]
+ :design "halfahead.config (.cljc): the emulator configuration as data —
+          {:firebase {:apiKey \"demo-key\" :projectId \"demo-halfahead\"
+                      :authDomain \"demo-halfahead.firebaseapp.com\"}
+           :emulators {:firestore {:host \"127.0.0.1\" :port 8080}
+                       :auth \"http://127.0.0.1:9099\"}
+           :conversation-id \"first\"
+           :dev-sign-in {:email \"ben@halfahead.test\"
+                         :password \"halfahead-dev\"}}
+          (the dev password only ever works against the Auth emulator).
+
+          halfahead.app.enrich (.cljc, pure):
+            (enrich action {:now-ms n :now inst :new-id s :value s
+                            :key s :shift? b})
+              -> [action'] or [] (a vector of actions to handle)
+            [:composer/edited]            -> [[:composer/edited {:text value}]]
+            [:composer/key ...] with key \"Enter\" and not shift?
+                                          -> [[:composer/sent {:id new-id :now now}]]
+            [:composer/key ...] otherwise -> []
+            [:composer/sent]              -> [[:composer/sent {:id new-id :now now}]]
+            [:replay/requested {:id id}]  -> adds :now-ms
+            anything else passes through unchanged.
+            Also (prevent-default? action ctx) -> true for an unshifted Enter
+            keydown and for form submit.
+
+          halfahead.fx.firebase (.cljs, the only namespace that calls the
+          Firebase JS SDK, \"firebase\" npm 12.19.0 modular API):
+            init: initializeApp, connectAuthEmulator, connectFirestoreEmulator
+            from config; sign in with the dev email/password; on sign-in,
+            read the conversation and its members (getDoc, decode with
+            halfahead.codec after converting Timestamps to js/Date and the
+            document to a wire map with string keys), then onSnapshot the
+            messages (orderBy sentAt, limitToLast 200; read data with
+            {serverTimestamps \"estimate\"}) and the presence subcollection,
+            dispatching :messages/received (the first snapshot :initial?
+            true) and :presence/received.
+            :fx/write-message: setDoc at conversations/<cid>/messages/<id>
+            with the codec's wire map, sentAt replaced by serverTimestamp()
+            (the rules require request.time).
+            Log and surface errors; never swallow them silently.
+
+          halfahead.app (.cljs): one state atom; render with
+          replicant.dom/render into #app on every change; set Replicant's
+          dispatch to: build the enrich context (Date.now, new js/Date,
+          crypto.randomUUID, the event target's value, key and shiftKey),
+          preventDefault when prevent-default?, handle each enriched action
+          with halfahead.app.core/handle, run its effects. A
+          requestAnimationFrame loop dispatches :clock/ticked only while
+          :performing is non-empty. matchMedia('(prefers-reduced-motion:
+          reduce)') sets the preference at start and on change. Start with
+          :session/started once the conversation and members are read."
+ :acceptance
+ ["enrich: each case above has a test; unknown actions pass through; an
+   unshifted Enter on the composer yields one :composer/sent with the
+   context's id and time; Shift+Enter yields none"
+  "config is valid data: the project id starts with demo- and every
+   emulator endpoint is on 127.0.0.1 (a test)"
+  "`bb test` stays green on both hosts and the :app build compiles with no
+   warnings"
+  "The final message of the build names the manual check: run the
+   emulators, `bb -m halfahead.dev.seed`, the worker, and a static server
+   for public/, then open the page"]
+ :non-goals
+ ["Do not edit the schema, core, views, codec, or the worker"
+  "No Google sign-in or production config yet; no deploy; no audio"
+  "No end-to-end browser test (a later order)"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/app/core.cljc"
+           "src/halfahead/app/views.cljc" "src/halfahead/codec.cljc"
+           "firestore.rules" "shadow-cljs.edn" "package.json"]
+ :budget-usd 12.0}

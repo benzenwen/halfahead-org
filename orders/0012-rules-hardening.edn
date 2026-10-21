@@ -1,0 +1,36 @@
+{:id "0012-rules-hardening"
+ :title "Rules: validate presence documents and the inside of messages"
+ :lupa/deps #{"0009-rules"}
+ :lupa/area :security
+ :lupa/risk :high
+ :goal "A member can only write well-formed data, even into documents they
+        own. Today a member may write any shape into their own presence
+        document, and a message's emphasis items and inReplyTo are not
+        type-checked."
+ :scope ["firestore.rules" "test-rules/halfahead/rules_test.clj"]
+ :design "In firestore.rules:
+          - presence write: keys().hasOnly and hasAll ['memberId',
+            'conversationId', 'state', 'since']; memberId == the path's
+            memberId; conversationId == cid; state in ['idle', 'thinking'];
+            since == request.time. Presence may be created and updated, not
+            deleted.
+          - message create additionally: inReplyTo, when present, is a
+            string of size 1..128; every emphasis item is a map with exactly
+            integer 'from' and 'to', 0 <= from < to <= text.size(). Rules
+            have no loops: check items 0..7 with a helper that is true for
+            an index past the list's end.
+          Keep every existing allowed and denied case passing."
+ :acceptance
+ ["Allowed: own presence with the right shape and request.time; a message
+   with two valid emphasis spans and a string inReplyTo"
+  "Denied: presence with an extra key, a wrong memberId field, state
+   \"away\", or a client-chosen since; presence delete; a message with an
+   emphasis item missing 'to', with from >= to, with to past the text's end,
+   or with a non-integer; a message whose inReplyTo is a number"
+  "All existing rules tests still pass; `bb test` stays green"]
+ :non-goals
+ ["Do not edit bb.edn, the emulator runner, or any src/ file"
+  "No changes to who may read what"]
+ :context ["firestore.rules" "test-rules/halfahead/rules_test.clj"
+           "docs/SCHEMA.md" "src/halfahead/codec.cljc"]
+ :budget-usd 8.0}
