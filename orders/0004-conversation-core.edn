@@ -1,0 +1,82 @@
+{:id "0004-conversation-core"
+ :title "Conversation core: the app's state and actions, handled purely"
+ :lupa/deps #{"0001-perform"}
+ :lupa/area :core
+ :lupa/risk :high
+ :goal "The browser app's whole behaviour as a pure function: (handle state
+        action) -> {:state :effects}. It holds one conversation, its members,
+        messages, and presence; the composer; which messages are performing
+        and since when; and the reader's preferences. Views and the shell
+        built later only render state and run effects."
+ :scope ["src/halfahead/app/core.cljc" "test/halfahead/app/core_test.cljc"]
+ :design "New namespace halfahead.app.core (.cljc, no interop). Public:
+
+          initial-state      ; a map; :prefs {:reduced-motion? false :sound? false}
+          (handle state action) -> {:state s :effects [[:fx/... & args] ...]}
+          (frames state)     -> {message-id frame} for every message, in the
+                                shape of halfahead.perform/frame-at
+
+          State keys (plain map, document them in the ns docstring):
+          :me (member id), :conversation, :members {id member}, :messages
+          {id message}, :presence {member-id presence}, :composer {:text s},
+          :now-ms n, :performing {message-id started-at-ms}, :prefs.
+
+          Actions are vectors; everything time- or id-dependent travels in
+          the action:
+          [:session/started {:me id :conversation c :members [m ...]
+                             :now-ms n :reduced-motion? b}]
+          [:messages/received {:messages [msg ...] :initial? b :now-ms n}]
+            merge by :id. When :initial? is false, each message not seen
+            before starts performing at :now-ms. Initial history never
+            performs: it arrives settled.
+          [:presence/received {:presence [p ...]}]
+          [:composer/edited {:text s}]
+          [:composer/sent {:id id :now inst}]
+            when the trimmed text is non-blank: emits
+            [:fx/write-message msg] with a valid :ha/message (author :me,
+            delivery :plain, emphasis [], sent-at :now) and clears the
+            composer; otherwise does nothing (no effect, state unchanged).
+          [:clock/ticked {:now-ms n}]
+            updates :now-ms and drops finished performances (now past
+            started + the timeline's :duration-ms).
+          [:message/skipped {:id id}] settles that message at once.
+          [:prefs/changed {:reduced-motion? b :sound? b}] (either key)
+          [:replay/requested {:id id :now-ms n}] performs that message again.
+          Unknown actions return the state unchanged with no effects.
+
+          frames: for a performing message, frame-at of its timeline at
+          (- now-ms started-at); for any other message, its final frame. The
+          timeline comes from halfahead.perform/perform with the message's
+          text, delivery and emphasis, :reduced-motion? from :prefs, and a
+          seed derived deterministically from the message id (e.g. a string
+          hash computed the same on JVM and JS — implement it, do not use
+          clojure.core/hash, which differs between hosts).
+
+          Also public: (awaiting-agent? state) -> true when the latest
+          message is from a human and some agent member's presence is
+          :thinking (the view shows a thinking line)."
+ :acceptance
+ ["Every action listed has a test asserting the resulting state and effects"
+  "composer/sent with text \"  hi \" emits exactly one :fx/write-message whose
+   message is a valid :ha/message with text \"hi\", and clears the composer;
+   with blank text it returns state unchanged and no effects"
+  "messages/received with :initial? true performs nothing; with :initial?
+   false a new message is in :performing at :now-ms, and a message already
+   present is not restarted"
+  "clock/ticked past a performance's duration removes it; frames then give
+   that message's final frame (all progress 1.0)"
+  "With :reduced-motion? true, a newly received message's frame at its
+   arrival time already shows all text at progress 1.0"
+  "Property: for any sequence of the listed actions, every message's frame
+   concatenates to exactly its text (flair never alters content)"
+  "The seed function gives the same number for the same id across calls and
+   is defined without clojure.core/hash"
+  "Unknown action -> same state, no effects"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit halfahead.schema, halfahead.perform, bb.edn, or the test runner"
+  "No views, DOM, Firebase, timers, or clock reads; no routing; one
+   conversation only"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/schema.cljc"
+           "src/halfahead/perform.cljc"]
+ :budget-usd 10.0}

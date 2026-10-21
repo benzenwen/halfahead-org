@@ -9,11 +9,12 @@
            :task (when-not (fs/exists? "node_modules")
                    (shell "npm ci --no-audit --no-fund"))}
 
-  test    {:doc     "Offline gate: the Babashka suite over test/**/*_test.clj[c], then a ClojureScript compile of the app"
+  test    {:doc     "Offline gate: the Babashka suite over test/**/*_test.clj[c], then the .cljc tests again under node, then a compile of the app"
            :depends [deps]
            :requires ([halfahead.test-runner])
            :task    (do (halfahead.test-runner/run)
-                        (shell "npx shadow-cljs compile app"))}
+                        (shell "npx shadow-cljs compile test app")
+                        (shell "node out/test.js"))}
 
   test:bb {:doc      "Only the Babashka suite (fast; no JVM, no npm)"
            :requires ([halfahead.test-runner])

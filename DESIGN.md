@@ -102,8 +102,10 @@ docs/SCHEMA.md, and the reasons behind both in DECISIONS.md.
   were deleted. Prefer property checks where a pure function has an
   invariant.
 - `bb test` runs offline: the Babashka suite over `test/**/*_test.clj[c]`,
-  then a ClojureScript compile of the app so browser-only breakage fails
-  the gate. Views are tested by asserting on the hiccup they return.
+  then every `.cljc` test again under node (so the shared core is proven
+  on both hosts), then a compile of the app. Tests of shared code are
+  `.cljc`; worker-only tests are `.clj`. Views are tested by asserting on
+  the hiccup they return.
 - Test files mirror source: `src/halfahead/x.cljc` →
   `test/halfahead/x_test.cljc`. The runner discovers them; **never edit
   `test/halfahead/test_runner.clj`.**
