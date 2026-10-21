@@ -269,3 +269,39 @@
     (loop [s started [a & more] actions]
       (and (content-intact? s)
            (or (nil? a) (recur (step s a) more))))))
+
+;; --- credits ----------------------------------------------------------------
+
+(def ended (step (live started (msg "m1" "hi")) [:scene/ended {:now-ms 5000 :date "21 October 2026"}]))
+
+(defn settled? [frame] (every? #(= 1.0 (:progress %)) frame))
+
+(deftest scene-ended-sets-credits-and-performs-them
+  (is (= 5000 (get-in ended [:credits :started-at])))
+  (is (str/includes? (get-in ended [:credits :text]) "HELLO"))
+  (is (contains? (:performing ended) :credits))
+  (is (not (settled? (core/frames-credits ended))))
+  (is (not (contains? (core/frames ended) :credits))))
+
+(deftest credits-settle-after-their-duration
+  (let [later (step ended [:clock/ticked {:now-ms 60000}])]
+    (is (not (contains? (:performing later) :credits)))
+    (is (some? (:credits later)))
+    (is (settled? (core/frames-credits later)))))
+
+(deftest dismissing-clears-credits
+  (let [gone (step ended [:scene/dismissed])]
+    (is (nil? (:credits gone)))
+    (is (not (contains? (:performing gone) :credits)))
+    (is (nil? (core/frames-credits gone)))))
+
+(deftest reduced-motion-credits-are-settled-at-once
+  (let [state (step (assoc-in started [:prefs :reduced-motion?] true)
+                    [:scene/ended {:now-ms 5000 :date "d"}])]
+    (is (settled? (core/frames-credits state)))))
+
+(deftest credits-segments-concatenate-to-the-text
+  (doseq [t [0 1 500 2000 10000 60000]]
+    (let [state (assoc ended :now-ms (+ 5000 t))]
+      (is (= (get-in ended [:credits :text])
+             (text-of (core/frames-credits state)))))))

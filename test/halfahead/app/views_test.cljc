@@ -342,3 +342,30 @@
     (is (re-find #"--step-label: 0\.875rem" css))
     (is (re-find #"\.transcript li \{\s*padding: var\(--space-2\) 0;\s*border-top: 1px solid var\(--rule\)" css))
     (is (re-find #"\.transcript li:first-child \{ border-top: 0; \}" css))))
+
+;; --- credits ----------------------------------------------------------------
+
+(def with-credits
+  (step started [:scene/ended {:now-ms 5000 :date "21 October 2026"}]))
+
+(deftest end-scene-button-ends-the-scene
+  (let [buttons (find-all (class? "end-scene") (views/page started))]
+    (is (= 1 (count buttons)))
+    (is (= [[:scene/ended]] (get-in (attrs-of (first buttons)) [:on :click])))
+    (is (= [] (find-all #(= "Credits" (:aria-label (attrs-of %))) (views/page started))))))
+
+(deftest credits-overlay-is-an-accessible-dialog
+  (let [page    (views/page with-credits)
+        dialogs (find-all #(= "Credits" (:aria-label (attrs-of %))) page)
+        dialog  (first dialogs)
+        text    (get-in with-credits [:credits :text])]
+    (is (= 1 (count dialogs)))
+    (is (= "dialog" (:role (attrs-of dialog))))
+    (is (= "true" (:aria-modal (attrs-of dialog))))
+    (is (= [[:scene/key {:key nil}]] (get-in (attrs-of dialog) [:on :keydown])))
+    (is (seq (find-all #(and ((class? "sr-only") %) (= text (text-of %))) dialog)))
+    (is (seq (find-all #(= "true" (:aria-hidden (attrs-of %))) dialog)))
+    (let [close (first (find-all #(and ((tag? "button") %) (= "Close" (text-of %))) dialog))]
+      (is (some? close))
+      (is (:autofocus (attrs-of close)))
+      (is (= [[:scene/dismissed]] (get-in (attrs-of close) [:on :click]))))))
