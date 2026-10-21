@@ -40,11 +40,6 @@
 (defn get-request [cfg path]
   {:method :get :url (str (documents-url cfg) "/" path) :headers headers})
 
-(defn list-request [cfg collection-path]
-  {:method :get
-   :url (str (documents-url cfg) "/" collection-path "?pageSize=300")
-   :headers headers})
-
 (defn write-request
   "PATCH of the whole document at path; creates or replaces, so a retry is
   harmless."
@@ -64,6 +59,23 @@
                "where" {"fieldFilter" {"field" {"fieldPath" "memberIds"}
                                        "op"    "ARRAY_CONTAINS"
                                        "value" {"stringValue" member-id}}}}})})
+
+(def ^:private history-cap
+  "How many of the newest messages the engine is given; matches its own cap."
+  200)
+
+(defn messages-query-request
+  "The newest messages of a conversation, newest first: ordering by id would
+  drop the latest ones once a conversation outgrows the limit."
+  [cfg conversation-id]
+  {:method  :post
+   :url     (str (documents-url cfg) "/conversations/" conversation-id ":runQuery")
+   :headers headers
+   :body    (json/generate-string
+             {"structuredQuery"
+              {"from"    [{"collectionId" "messages"}]
+               "orderBy" [{"field" {"fieldPath" "sentAt"} "direction" "DESCENDING"}]
+               "limit"   history-cap}})})
 
 (defn- send!
   "The one HTTP call. cfg's :send-fn replaces it in tests."
@@ -101,9 +113,11 @@
 
 (defn messages! [cfg conversation-id]
   (assert-emulator! cfg)
-  (->> (send! cfg (list-request cfg (str "conversations/" conversation-id "/messages")))
-       (#(get % "documents"))
-       (mapv #(decode-with-id :ha/message %))))
+  (->> (send! cfg (messages-query-request cfg conversation-id))
+       (keep #(get % "document"))
+       (mapv #(decode-with-id :ha/message %))
+       reverse
+       vec))
 
 (defn write-message! [cfg msg]
   (assert-emulator! cfg)

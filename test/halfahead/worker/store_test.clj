@@ -44,7 +44,36 @@
                    "name" "projects/p/databases/(default)/documents/conversations/c1/messages/m1")
         bad (assoc-in doc ["fields" "text"] {"stringValue" ""})
         cfg (fn [d] {:project-id "demo-x"
-                     :send-fn (fn [_] {:status 200 :body (json/generate-string {"documents" [d]})})})]
+                     :send-fn (fn [_] {:status 200 :body (json/generate-string [{"document" d}])})})]
     (is (= [msg] (store/messages! (cfg doc) "c1")))
     (is (= :ha/invalid-data (:type (ex-data (try (store/messages! (cfg bad) "c1")
                                                  (catch Exception e e))))))))
+
+(deftest messages-query-request-test
+  (let [r (store/messages-query-request {:project-id "demo-x"} "c1")
+        q (get (json/parse-string (:body r) true) :structuredQuery)]
+    (is (= :post (:method r)))
+    (is (re-find #"/projects/demo-x/databases/\(default\)/documents/conversations/c1:runQuery$"
+                 (:url r)))
+    (is (= [{:collectionId "messages"}] (:from q)))
+    (is (= [{:field {:fieldPath "sentAt"} :direction "DESCENDING"}] (:orderBy q)))
+    (is (= 200 (:limit q)))))
+
+(deftest messages-newest-first-become-oldest-first-test
+  (let [doc  (fn [id ms]
+               (assoc (rest/->fields (codec/encode :ha/message (assoc msg :id id :sent-at (Date. ms))))
+                      "name" (str "projects/p/databases/(default)/documents/conversations/c1/messages/" id)))
+        sent (atom nil)
+        cfg  {:project-id "demo-x"
+              :send-fn (fn [req]
+                         (reset! sent req)
+                         {:status 200
+                          :body (json/generate-string
+                                 [{"document" (doc "m3" 3000)}
+                                  {"document" (doc "m2" 2000)}
+                                  {"document" (doc "m1" 1000)}
+                                  {"readTime" "2026-01-01T00:00:00Z"}])})}
+        out  (store/messages! cfg "c1")]
+    (is (= ["m1" "m2" "m3"] (mapv :id out)))
+    (is (= [(Date. 1000) (Date. 2000) (Date. 3000)] (mapv :sent-at out)))
+    (is (= (store/messages-query-request cfg "c1") @sent))))
