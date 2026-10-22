@@ -1,0 +1,48 @@
+{:id "0008-engine-isolation"
+ :title "Scout's engine runs with no tools at all, and the persona as its system prompt"
+ :lupa/deps #{"0005-worker"}
+ :lupa/area :agent
+ :lupa/risk :high
+ :goal "The agent can only talk. Today the :claude engine runs `claude -p`
+        with the host session's defaults: the built-in file and shell tools,
+        and every MCP connector the host has (in the foreman's session that
+        was 40 Gmail, Calendar and Drive tools), so anyone in a conversation
+        could ask the agent to read files or mail on the worker's machine.
+        After this order the engine disables every tool, and the persona is
+        the system prompt rather than text in the user turn."
+ :scope ["src/halfahead/worker/core.clj" "src/halfahead/worker/engine.clj"
+         "test/halfahead/worker/core_test.clj" "test/halfahead/worker/engine_test.clj"]
+ :design "worker.core: split engine-prompt into two public pure fns:
+            (engine-system-prompt request) -> the persona, a blank line, and
+              the answering instructions (the JSON shape and the five
+              deliveries, exactly as engine-prompt has them today)
+            (engine-transcript request) -> the transcript lines ('Human:' /
+              'You:') ending with 'You:'
+          Keep engine-prompt as their concatenation (system, blank line,
+          transcript) for engines that take one string (:mock).
+
+          worker.engine: claude-command returns
+            [\"claude\" \"-p\" transcript
+             \"--system-prompt\" system
+             \"--tools\" \"\"
+             \"--disallowedTools\" \"mcp__*\"
+             \"--output-format\" \"json\"]
+          Define the two isolation flags in one private var with a comment
+          saying why (built-in tools and inherited MCP connectors), so they
+          cannot be dropped by accident. Nothing else changes."
+ :acceptance
+ ["claude-command's vector contains, in order, \"--tools\" \"\" and
+   \"--disallowedTools\" \"mcp__*\", and passes the system prompt via
+   --system-prompt and the transcript as the -p argument"
+  "The -p argument does not contain the persona text; the --system-prompt
+   argument does, followed by the five delivery names"
+  "engine-system-prompt and engine-transcript are pure, tested, and their
+   concatenation equals engine-prompt"
+  "The existing worker tests still pass unchanged; `bb test` stays green"]
+ :non-goals
+ ["Do not edit halfahead.schema, store, or main"
+  "No new engines; no API-key engine (that needs a key the founder has
+   not provided)"]
+ :context ["src/halfahead/worker/core.clj" "src/halfahead/worker/engine.clj"
+           "test/halfahead/worker/engine_test.clj" "DESIGN.md"]
+ :budget-usd 6.0}

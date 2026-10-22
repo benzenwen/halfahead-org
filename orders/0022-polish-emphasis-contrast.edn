@@ -1,0 +1,63 @@
+{:id "0022-polish-emphasis-contrast"
+ :title "People pick the stressed words, and quiet lines stay legible"
+ :lupa/deps #{"0019-composer-delivery" "0020-credits-roll"}
+ ;; Respec 2026-10-21 after a review halt (REWORK x2). The reviewer found
+ ;; the code and tests sound and one defect: the CSS contrast comment
+ ;; named --muted on --bg for message text, but message text inherits
+ ;; body's --text. The actual pairs are --text on --bg: 14.19:1 (light) and
+ ;; 13.99:1 (dark), per the token table at the top of the file. Optional
+ ;; ask, now required: assert schema/valid? for a non-headline delivery
+ ;; with stripped asterisks.
+ :lupa/area :flair
+ :lupa/risk :medium
+ :goal "Two things from the foreman's first live conversation. (1) A
+        headline sent by a person stressed 'engineer' because it was the
+        longest word; people should choose. Words wrapped in *asterisks* in
+        the composer become the message's emphasis, and the asterisks are
+        removed from the sent text. (2) An aside's settled text looked
+        faint; every effect's final state must meet 4.5:1 contrast."
+ :scope ["src/halfahead/app/core.cljc" "test/halfahead/app/core_test.cljc"
+         "src/halfahead/app/compose.cljc" "test/halfahead/app/compose_test.cljc"
+         "src/halfahead/app/views.cljc" "test/halfahead/app/views_test.cljc"
+         "public/css/halfahead.css"]
+ :design "halfahead.app.compose (.cljc, pure):
+            (parse-emphasis s) -> {:text t :emphasis spans}
+            Each *run* (one or more non-asterisk characters between a pair
+            of single asterisks, not starting or ending with whitespace)
+            becomes a span over the run in t, with its asterisks removed.
+            Unpaired asterisks, '**', and '* spaced *' stay literal. Only the
+            first 8 runs become spans; any later run is left exactly as
+            typed, asterisks included. If removing asterisks would leave
+            t blank, return s unchanged with no emphasis.
+          Core :composer/sent uses parse-emphasis on the trimmed text for
+          every delivery (emphasis only changes how :headline performs);
+          the resulting message must stay a valid :ha/message.
+          Views: the Delivery group's 'headline' title attribute adds:
+          'wrap the words to stress in *asterisks*'.
+          CSS: the settled (--p 1) state of .fx-whisper, and of every other
+          effect, meets 4.5:1 against the background in both colour
+          schemes; list the pairs and ratios in a comment. Quietness comes
+          from size and style, not from low contrast."
+ :acceptance
+ ["parse-emphasis: \"the *one* habit\" -> text \"the one habit\", emphasis
+   [[4 7]]; \"*a* and *b c*\" -> two spans; \"2 * 3 * 4\" and \"**x**\" and
+   \"* x *\" stay literal with no emphasis; \"**\" alone stays as is; nine
+   marked words give 8 spans and the ninth keeps its asterisks (tests)"
+  "Property: for any string, parse-emphasis returns spans that lie inside
+   the returned text, are sorted and non-overlapping, at most 8"
+  "Core: sending \"the *one* habit\" with delivery :headline emits a message
+   with text \"the one habit\" and emphasis [[4 7]] (test)"
+  "CSS comment lists each effect's ACTUAL settled foreground/background
+   pair, traced to the rule that colours it (message text inherits body's
+   --text; verify the credits overlay the same way), with its ratio, all
+   >= 4.5:1, in light and dark"
+  "The core test for stripped asterisks on a non-headline delivery asserts
+   halfahead.schema/valid? :ha/message on the sent message"
+  "`bb test` stays green"]
+ :non-goals
+ ["No rich-text editor; no markdown beyond single-asterisk emphasis"
+  "Do not edit the schema, perform, the shell, or the worker"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/app/core.cljc" "src/halfahead/perform.cljc"
+           "public/css/halfahead.css" "docs/SCHEMA.md" "DESIGN.md"]
+ :budget-usd 8.0}

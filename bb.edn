@@ -1,0 +1,66 @@
+{:paths ["src" "test" "test-rules" "resources"]
+ :deps {metosin/malli {:mvn/version "0.20.2"}}
+
+ :tasks
+ {:requires ([babashka.fs :as fs]
+             [babashka.process :refer [shell]])
+
+  deps    {:doc      "Install npm dependencies when node_modules is missing or older than package-lock.json (fresh clones, factory worktrees, pulls that bump the lock)"
+           :requires ([halfahead.dev.deps])
+           :task     (when (or (not (fs/exists? "node_modules"))
+                               (halfahead.dev.deps/stale-node-modules? "."))
+                       (shell "npm ci --no-audit --no-fund"))}
+
+  test    {:doc     "Offline gate: the Babashka suite over test/**/*_test.clj[c], then the .cljc tests again under node, then the optimized release build of the app (what GitHub Pages serves), then the Firestore rules under the emulator"
+           :depends [deps]
+           :requires ([halfahead.test-runner]
+                      [halfahead.dev.emulator])
+           :task    (do (halfahead.test-runner/run)
+                        (shell "npx shadow-cljs compile test")
+                        (shell "node out/test.js")
+                        (shell "npx shadow-cljs release app")
+                        (halfahead.dev.emulator/run-rules-tests!))}
+
+  test:bb {:doc      "Only the Babashka suite (fast; no JVM, no npm)"
+           :requires ([halfahead.test-runner])
+           :task     (halfahead.test-runner/run)}
+
+  test:rules {:doc      "Rules tests over the Firestore REST API; needs FIRESTORE_EMULATOR_HOST (bb test sets it via emulators:exec)"
+              :requires ([clojure.test :as t]
+                         [halfahead.rules-test])
+              :task     (do (when-not (System/getenv "FIRESTORE_EMULATOR_HOST")
+                              (throw (ex-info "FIRESTORE_EMULATOR_HOST is not set; run via bb test"
+                                              {:type :ha/no-emulator})))
+                            (let [{:keys [fail error]} (t/run-tests 'halfahead.rules-test)]
+                              (when (pos? (+ fail error))
+                                (System/exit 1))))}
+
+  worker  {:doc      "Run the agent worker against the Firestore emulator: bb worker --agent <id> [--engine mock|claude] [--persona path]"
+           :requires ([halfahead.worker.main])
+           :task     (apply halfahead.worker.main/-main *command-line-args*)}
+
+  e2e     {:doc      "End-to-end smoke in headless Chromium against the emulators, the :mock worker and the local app; screenshots in out/e2e (not part of bb test)"
+           :depends  [deps]
+           :requires ([halfahead.dev.e2e])
+           :task     (halfahead.dev.e2e/-main)}
+
+  e2e:inner {:doc      "The part of bb e2e that runs inside the emulators"
+             :requires ([halfahead.dev.e2e])
+             :task     (halfahead.dev.e2e/inner!)}
+
+  play    {:doc      "Try Half Ahead locally: emulators, seed, worker (real claude engine by default) and the app, then the URL. Ctrl-C stops everything. bb play [--engine mock|claude] [--port n]"
+           :depends  [deps]
+           :requires ([halfahead.dev.play])
+           :task     (apply halfahead.dev.play/-main *command-line-args*)}
+
+  play:inner {:doc      "The part of bb play that runs inside the emulators; not meant to be run by hand"
+              :requires ([halfahead.dev.play])
+              :task     (halfahead.dev.play/inner! *command-line-args*)}
+
+  dev     {:doc     "Watch the app and serve public/ at http://localhost:8000"
+           :depends [deps]
+           :task    (shell "npx shadow-cljs watch app")}
+
+  release {:doc     "Optimized app build into public/js/app (what GitHub Pages serves)"
+           :depends [deps]
+           :task    (shell "npx shadow-cljs release app")}}}

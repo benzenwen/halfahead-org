@@ -1,0 +1,41 @@
+{:id "0017-look-polish"
+ :title "Look polish: tighter rhythm, no orphan glyph, a legible Send"
+ :lupa/deps #{"0016-look-title-sequence"}
+ :lupa/area :ui
+ :lupa/risk :low
+ :goal "The first screenshot of the title-sequence look (foreman's review,
+        out/e2e/reduced-motion.png) reads well but wastes space and shows
+        three flaws. Fix them without changing the direction."
+ :scope ["public/css/halfahead.css" "src/halfahead/app/views.cljc"
+         "test/halfahead/app/views_test.cljc"]
+ :design "1. Rhythm: a one-line turn currently takes ~140px of height at a
+             1280px-wide viewport. Tighten the vertical space between turns
+             to roughly half (consecutive turns read as one scene; keep the
+             hairline rule and the title's generous space).
+          2. Orphan glyph: the presence area shows Scout's idle diamond on
+             its own above the composer, with no text. Show the presence
+             line's glyph only while the agent is thinking, beside its
+             'Scout is thinking…' text; idle shows nothing there (the
+             glyph in the header and beside Scout's messages stays).
+          3. Send: the enabled button's label meets 4.5:1 contrast against
+             its fill (state the pair in a CSS comment); the disabled state
+             is visibly disabled (e.g. outline only) rather than a paler
+             fill.
+          4. Preferences: labels use the same label type as the other
+             labels (the condensed, letter-spaced style), at least 0.875rem."
+ :acceptance
+ ["View test: with presence idle, the presence line contains no glyph; with
+   presence thinking, it contains the glyph (data-state \"thinking\") and the
+   text"
+  "CSS: the enabled Send colour pair and its contrast are stated in a
+   comment and are at least 4.5:1; the disabled style differs from enabled
+   by more than lightness alone"
+  "`bb e2e` passes; the final message reports the pixel height of the first
+   two turns in out/e2e/conversation.png versus before (~140px each)"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit core, perform, the shell, the schema, or the worker"
+  "No new features; no change of direction"]
+ :context ["docs/research/conversation-design.md" "public/css/halfahead.css"
+           "src/halfahead/app/views.cljc" "test/halfahead/app/views_test.cljc"]
+ :budget-usd 6.0}

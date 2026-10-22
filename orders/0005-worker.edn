@@ -1,0 +1,99 @@
+{:id "0005-worker"
+ :title "Worker: the agent's turn, against Firestore, with swappable engines"
+ :lupa/deps #{"0002-codec" "0003-worker-core"}
+ :lupa/area :agent
+ :lupa/risk :high
+ :goal "`bb worker` runs a babashka process that watches the conversations
+        an agent belongs to, and when one is waiting on the agent, shows the
+        agent as thinking, asks an engine for a reply, writes the reply, and
+        shows the agent idle again. Engines are swappable: a deterministic
+        :mock for tests and the `claude` CLI for development, with no API
+        key."
+ :scope ["src/halfahead/worker/engine.clj" "src/halfahead/worker/store.clj"
+         "src/halfahead/worker/main.clj" "test/halfahead/worker/engine_test.clj"
+         "test/halfahead/worker/main_test.clj" "test/halfahead/worker/store_test.clj"
+         "bb.edn" ".gitignore"]
+ :design "Three namespaces (Babashka only):
+
+          halfahead.worker.engine
+            (defmulti invoke (fn [config request] (:engine config)))
+            -> {:raw string :cost-usd n}
+            :mock   returns a JSON string whose text is \"Noted: \" plus the
+                    last :human turn's text, delivery aside, no emphasis,
+                    cost 0. Deterministic.
+            :claude shells out to `claude -p <prompt> --output-format json`
+                    (prompt from halfahead.worker.core/engine-prompt), with a
+                    timeout from config (default 180 s), reads the CLI's JSON
+                    \"result\" as :raw and \"total_cost_usd\" as :cost-usd.
+                    Non-zero exit or timeout throws ex-info
+                    {:type :ha/engine-failed :engine :claude :err ...}.
+            Adding an engine is one defmethod.
+
+          halfahead.worker.store (the only namespace that does HTTP)
+            Firestore REST against the emulator: base URL from env
+            FIRESTORE_EMULATOR_HOST (default \"127.0.0.1:8080\"), project
+            from config (default \"demo-halfahead\"), header
+            \"Authorization: Bearer owner\" (the emulator's admin bypass).
+            Uses babashka.http-client, halfahead.codec and
+            halfahead.firestore-rest. Functions return domain maps:
+            (conversations-of! cfg member-id), (members! cfg ids),
+            (messages! cfg conversation-id), (write-message! cfg msg),
+            (write-presence! cfg presence). Document paths follow
+            docs/SCHEMA.md. Refuse (throw ex-info {:type :ha/not-emulator})
+            when the project id does not start with \"demo-\": this worker
+            never touches a real project until a later order says so.
+
+          halfahead.worker.main
+            (step! deps) -> vector of what happened this pass, e.g.
+              [{:conversation id :replied-to id :cost-usd n}] or
+              [{:conversation id :error {...}}]
+            deps is a map of functions and values, so tests inject fakes:
+              {:agent-id, :persona, :engine-config, :conversations-of!,
+               :members!, :messages!, :write-message!, :write-presence!,
+               :invoke (defaults to engine/invoke), :now (fn -> inst),
+               :new-id (fn -> id), :log! (fn [event])}
+            For each conversation of the agent: if
+            halfahead.worker.core/awaiting-reply finds a message, write
+            presence :thinking, invoke the engine, parse-reply,
+            reply-message, write the message, then write presence :idle. On
+            any exception after :thinking, write presence :idle anyway, log
+            the error, and continue with the next conversation: one bad turn
+            never stops the worker.
+            Every event goes to :log!; the default appends JSON lines to
+            .halfahead/worker-ledger.jsonl (timestamp, conversation, replied
+            message id, engine, cost) and prints one line.
+            (run! deps {:interval-ms n}) loops step! forever, sleeping
+            between passes (default 2000 ms).
+            (-main & args) reads --agent <id> --engine mock|claude
+            --persona <path> (default resources/agent/persona.md) and runs.
+
+          bb.edn: add a `worker` task that calls halfahead.worker.main/-main
+          with *command-line-args*, documented. .gitignore: add .halfahead/."
+ :acceptance
+ ["step! with in-memory fakes and the :mock engine: a conversation whose
+   latest message is the human's gets exactly one reply message (valid
+   :ha/message, author the agent, :in-reply-to set), and presence is written
+   :thinking then :idle, in that order"
+  "A second step! on the resulting state writes nothing (no double replies)"
+  "When :invoke throws, step! writes presence :idle after :thinking, writes
+   no message, returns an :error entry, and still processes a second
+   conversation in the same pass"
+  "engine :mock is deterministic and its :raw parses (via parse-reply) to a
+   valid :ha/engine-reply"
+  "engine :claude builds the command line with -p, the prompt, and
+   --output-format json (assert on the argument vector via an injected
+   process function or a pure command builder; do not run the real CLI in
+   tests); a fake CLI JSON output {\"result\": ..., \"total_cost_usd\": 0.02}
+   is read into {:raw .. :cost-usd 0.02}"
+  "store refuses a project id that does not start with demo- (throws
+   :ha/not-emulator) before any HTTP; the document-path and request-building
+   functions are pure and tested without a network"
+  "`bb tasks` lists `worker`; `bb test` stays green and runs offline"]
+ :non-goals
+ ["Do not edit halfahead.schema, codec, firestore-rest, or worker.core"
+  "No real Firebase project, service accounts, or secrets; no deploy"
+  "No streaming replies; no tools for the agent; no persona text"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/worker/core.clj"
+           "src/halfahead/codec.cljc" "src/halfahead/firestore_rest.cljc"
+           "bb.edn"]
+ :budget-usd 12.0}

@@ -1,0 +1,81 @@
+{:id "0003-worker-core"
+ :title "Worker core: decide when and how the agent replies"
+ :lupa/area :agent
+ :lupa/risk :medium
+ :goal "The pure decisions behind the agent's turn: whether a conversation
+        is waiting on the agent, what to send an engine, how to read what the
+        engine says back (tolerantly), and the reply message to write. The
+        I/O worker built later only fetches, calls, and stores."
+ :scope ["src/halfahead/worker/core.clj" "test/halfahead/worker/core_test.clj"]
+ :design "New namespace halfahead.worker.core (.clj: the worker runs only in
+          Babashka; cheshire.core is available there for JSON). Public fns:
+
+          (awaiting-reply agent-id messages) -> message or nil
+            messages are :ha/message maps of one conversation, any order.
+            Returns the latest message by :sent-at when its author is not
+            the agent and no agent message was sent after it; else nil.
+            (Derived, never stored.)
+
+          (engine-request persona members messages) -> :ha/engine-request
+            history = the conversation's messages sorted by :sent-at, the
+            last 200 at most, each as {:role :human|:agent :text}, where the
+            role is the author member's :kind (an author not in members
+            counts as :human).
+
+          (engine-prompt request) -> string
+            The persona, then a short instruction block, then the transcript.
+            The instructions tell the engine to answer with ONE JSON object
+            {\"text\": ..., \"delivery\": ..., \"emphasis\": [...]} and nothing
+            else; list the five deliveries with one line each on when to use
+            them (plain: the default; typed: when the pause itself means
+            something; headline: one striking point, with 1-3 emphasis
+            phrases copied exactly from the text; aside: a quiet remark or
+            caveat; credits: thanks, attributions, or a short list). Say:
+            prefer plain; flair must serve the meaning. The transcript labels
+            turns 'Human:' and 'You:'.
+
+          (parse-reply s) -> :ha/engine-reply
+            Tolerant reader. If s contains a JSON object (possibly inside
+            ```json fences or surrounded by prose), read it; unknown delivery
+            -> :plain; missing or non-string emphasis items dropped, at most
+            8; text over 4000 characters truncated at 4000. If no usable JSON
+            object with a non-blank text is found, the whole trimmed s is the
+            text with :plain delivery and no emphasis. Blank s throws
+            ex-info {:type :ha/empty-reply}.
+
+          (resolve-emphasis text phrases) -> [[from to] ...]
+            First occurrence of each phrase in text; phrases not found are
+            dropped; a span overlapping an earlier kept span is dropped;
+            sorted by from; at most 8.
+
+          (reply-message {:reply r :to message :agent-id a :id id :now inst})
+            -> :ha/message with the reply's text and delivery, emphasis
+            resolved from its phrases, :in-reply-to the replied message's
+            :id, the same :conversation-id, :sent-at now. The result must be
+            a valid :ha/message (assert in tests via halfahead.schema)."
+ :examples
+ ["parse-reply of \"Sure!\\n```json\\n{\\\"text\\\": \\\"Hi there\\\", \\\"delivery\\\": \\\"aside\\\", \\\"emphasis\\\": []}\\n```\" -> {:text \"Hi there\" :delivery :aside :emphasis []}"
+  "parse-reply of \"just words\" -> {:text \"just words\" :delivery :plain :emphasis []}"
+  "resolve-emphasis \"the cat sat on the mat\" [\"cat\" \"dog\" \"the mat\"] -> [[4 7] [15 22]]"]
+ :acceptance
+ ["awaiting-reply: returns the human's latest message when the agent has not
+   answered after it; nil when the agent's message is the latest; nil for no
+   messages; order of input does not matter"
+  "engine-request: valid :ha/engine-request; roles follow member kinds; at
+   most 200 turns, the most recent ones, in time order"
+  "engine-prompt contains the persona, all five delivery names, the JSON
+   shape, and the transcript with 'Human:' and 'You:' labels in order"
+  "parse-reply handles every example above, a bare JSON object, a JSON
+   object with an unknown delivery (-> :plain), over-long text (-> 4000
+   chars), and throws :ha/empty-reply on blank input; every non-throwing
+   result is a valid :ha/engine-reply"
+  "resolve-emphasis matches the example, never returns overlapping spans,
+   and every span is within the text"
+  "reply-message returns a valid :ha/message with :in-reply-to set"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit halfahead.schema, bb.edn, or the test runner"
+  "No network, no Firestore, no shelling out to an engine, no clock reads,
+   no persona text (the persona is an input)"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/schema.cljc"]
+ :budget-usd 8.0}

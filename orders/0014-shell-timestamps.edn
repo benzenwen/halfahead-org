@@ -1,0 +1,42 @@
+{:id "0014-shell-timestamps"
+ :title "Shell: convert Firestore Timestamps before decoding (the app cannot read its conversation)"
+ :lupa/deps #{"0011-app-shell"}
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring
+ ;; (lupa-internal D22): the shipped shell could not decode any Firestore Timestamp; found by 0013's reviewer running bb e2e.
+ :lupa/fixes #{"0011-app-shell"}
+ :lupa/area :ui
+ :lupa/risk :high
+ :goal "The browser reads the seeded conversation, its members and messages.
+        Today halfahead.fx.firebase/->wire converts a value with .toDate only
+        when (object? v), and cljs.core/object? is true only for plain JS
+        objects, never for a class instance like Firestore's Timestamp. So
+        every timestamp reaches the codec unconverted, decode throws
+        :ha/invalid-data for the conversation, and the page stays empty.
+        Found by order 0013's reviewer running `bb e2e`."
+ :scope ["src/halfahead/fx/firebase.cljs" "test/halfahead/fx/firebase_test.cljs"]
+ :design "Split the conversion out of the snapshot handling:
+            (data->wire data) — public; data is the JS object a snapshot's
+            .data returns. Returns a string-keyed Clojure map in which every
+            Firestore Timestamp (instance? of the Timestamp class imported
+            from \"firebase/firestore\"), at any depth, inside maps or
+            vectors, is a js/Date. Everything else as js->clj leaves it.
+          ->wire calls (data->wire (.data snapshot #js {:serverTimestamps
+          \"estimate\"})). Also log the codec's :errors with JSON.stringify so
+          a decode failure names its fields in the console (the reviewer
+          saw only `errors: Object`)."
+ :acceptance
+ ["A node test (test/halfahead/fx/firebase_test.cljs, picked up by the
+   :test build) passes a plain JS object holding Timestamp.fromDate(d) at
+   the top level, inside a nested map, and inside an array, and gets
+   js/Dates equal to d at all three places"
+  "Feeding data->wire's result for a conversation-shaped object (createdAt
+   a Timestamp) to halfahead.codec/decode :ha/conversation succeeds"
+  "Strings, numbers, booleans, nil, nested plain maps and arrays come
+   through unchanged"
+  "`bb test` stays green on all suites"]
+ :non-goals
+ ["Do not edit the codec, schema, core, views, or the app namespace"
+  "No end-to-end test here (order 0013 re-runs after this)"]
+ :context ["src/halfahead/fx/firebase.cljs" "src/halfahead/codec.cljc"
+           "shadow-cljs.edn" "DESIGN.md"]
+ :budget-usd 6.0}

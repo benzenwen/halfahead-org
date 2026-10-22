@@ -1,0 +1,50 @@
+;; Half Ahead's charter: the human-owned governance for the factory that
+;; builds Half Ahead. Read by Lupa (`bb --config ../lupa/bb.edn lupa check`).
+;; Seeded 2026-10-21 by the foreman session; Ben owns it from here.
+;; The values in PRODUCT.md are the norms; this file holds what Lupa can
+;; enforce or check.
+{:charter/id "halfahead"
+ :charter/purpose
+ "Build Half Ahead: a humane place where agentic engineers and their agents
+  hold conversations that flourish better than in ordinary messaging,
+  through the graphical and temporal nature of writing and reading."
+
+ :charter/invariants
+ ["Flair never alters content: a performed message ends showing exactly
+   the text that was sent."
+  "Motion and sound are reducible; with reduced motion and sound off, no
+   content is lost."
+  "An agent is always shown as an agent, and as whose agent it is."
+  "Pure functional core; side effects only in namespaces whose job is I/O."
+  "Every behavior change ships with tests; `bb test` runs offline."
+  "Firestore security rules are code: every rule change ships with rule
+   tests."
+  "This repository is public: no secrets, no members' personal data, and
+   no text copied from private repositories."
+  "Nothing merges to main without a human; the factory merges only into
+   integration branches."]
+
+ ;; Ben set a $150 cap for the first overnight drive (2026-10-21). Lupa has
+ ;; no total-spend key yet; the foreman tracks it (DECISIONS.md H7).
+ :charter/budget {:usd-per-tick 30.0
+                  :usd-per-order 12.0}
+
+ ;; The darkness dial. Start fully lit: a human reviews everything.
+ ;; Lower a rate only on recorded evidence (see DECISIONS.md H8).
+ :charter/review {:seed "halfahead-2026-10-21"
+                  :default-rate 1.0
+                  :always #{:high}}
+
+ :charter/max-wave 3
+
+ :charter/protected-branches #{"main" "master"}
+
+ :charter/escalate
+ ["An order halts twice on the same cause."
+  "A node's :budget-usd exceeds :usd-per-order, or the drive's spend
+   would pass its cap."
+  "The work graph has a missing dependency or a cycle."
+  "A change would touch the charter, the domain schema, the security
+   rules' trust model, or DESIGN.md."
+  "Anything that would deploy, send a message to a person, or spend money
+   outside the agent engine."]}

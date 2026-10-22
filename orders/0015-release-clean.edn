@@ -1,0 +1,64 @@
+{:id "0015-release-clean"
+ :title "The gate builds what GitHub Pages will serve, and our code compiles without warnings"
+ :lupa/deps #{"0014-shell-timestamps" "0013-e2e-smoke"}
+ ;; Respec 2026-10-21 after a review halt (REWORK x2). The reviewer
+ ;; confirmed the ^js hints work and that the :test build fails on an
+ ;; unhinted interop warning, and asked for exactly two changes, now
+ ;; acceptance criteria below: (1) no test may read the real node_modules;
+ ;; (2) no warnings-as-errors config on :app, which could not be shown to
+ ;; do anything; the :test build is the warnings gate.
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring
+ ;; (lupa-internal D22): unhinted interop in the shipped shell would break under advanced compilation; found by the foreman's gate audit.
+ :lupa/fixes #{"0011-app-shell"}
+ :lupa/area :ui
+ :lupa/risk :high
+ :goal "A green `bb test` means the optimized release build works. Today the
+        gate compiles the app in development mode, where nothing is renamed,
+        while GitHub Pages will serve the advanced-optimized release build.
+        halfahead.fx.firebase has three :infer-warnings (property access on
+        values with no ^js hint: (.-docs snap) twice and (.. % -user -uid))
+        that advanced compilation may rename into broken code; the dev
+        compile cannot show it."
+ :scope ["src/halfahead/fx/firebase.cljs" "src/halfahead/app.cljs"
+         "shadow-cljs.edn" "bb.edn" "src/halfahead/dev/deps.clj"
+         "test/halfahead/dev/deps_test.clj"]
+ :design "- Add ^js hints (or js/ interop forms the compiler can infer) so the
+            :app and :test builds report zero warnings from halfahead
+            namespaces.
+          - shadow-cljs.edn: the :test build (which compiles every halfahead
+            namespace) treats warnings as errors, so an unhinted interop
+            warning fails `bb test`; leave the :app build's compiler options
+            unchanged (no warnings-as-errors there: it could not be shown to
+            have any effect, and Firebase's own JSDoc lint must not fail the
+            release).
+          - bb.edn: `test` compiles the :test build and runs it as now, then
+            runs `npx shadow-cljs release app` instead of `compile app`.
+            Keep the rules suite step. `release` and `dev` tasks unchanged.
+          - `bb deps` installs when node_modules is missing OR stale: stale
+            means package-lock.json differs from npm's own record of the
+            install, node_modules/.package-lock.json (compare the
+            "packages" maps, ignoring key order). Put the decision in a
+            pure function (halfahead.dev.deps/stale? lock installed) with
+            tests; found when a checkout made before playwright was added
+            failed `bb e2e` with ERR_MODULE_NOT_FOUND."
+ :acceptance
+ ["deps/stale? is true when the installed record lacks a package the lock
+   has or has a different version, false when they match regardless of key
+   order, true when the installed record is missing; tested"
+  "`npx shadow-cljs compile test` and `npx shadow-cljs release app` report
+   0 warnings from halfahead namespaces"
+  "No test reads the real ./node_modules or any file outside a temp
+   directory: `bb test:bb` passes in a checkout with no node_modules
+   (demonstrate by running it with node_modules moved aside, then restore)"
+  "The :app build's :compiler-options are unchanged from before this order"
+  "Adding a deliberate unhinted interop warning to a halfahead namespace
+   makes `bb test` fail (show this in the final message, then remove it)"
+  "`bb test` stays green. Do NOT run `bb e2e` here: it uses fixed
+   emulator ports and a parallel line may be running it; the foreman runs
+   it after the merge"]
+ :non-goals
+ ["No behaviour changes in the shell; no new features"
+  "Do not edit the schema, core, views, codec, or worker"]
+ :context ["src/halfahead/fx/firebase.cljs" "src/halfahead/app.cljs"
+           "shadow-cljs.edn" "bb.edn" "package.json"]
+ :budget-usd 6.0}

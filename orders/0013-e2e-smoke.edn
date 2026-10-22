@@ -1,0 +1,87 @@
+{:id "0013-e2e-smoke"
+ :title "End-to-end smoke: a browser talks to the agent through the emulators"
+ :lupa/deps #{"0011-app-shell" "0010-dev-seed" "0005-worker" "0014-shell-timestamps"}
+ ;; Respec 2026-10-21 after the first run halted at review (REWORK x2):
+ ;; the smoke test was right, the shell could not decode Timestamps; fixed
+ ;; by 0014. The reviewer's smaller asks are now acceptance criteria.
+ :lupa/area :dev
+ :lupa/risk :medium
+ :goal "`bb e2e` proves the whole loop in a real browser: emulators up and
+        seeded, the worker answering with the :mock engine, the app served
+        locally; a headless Chromium signs in, sends a message, and sees the
+        agent's reply arrive and settle, with and without reduced motion,
+        and saves screenshots."
+ :scope ["package.json" "package-lock.json" "bb.edn" "e2e/smoke.mjs"
+         "src/halfahead/dev/e2e.clj" "src/halfahead/dev/serve.clj"
+         "test/halfahead/dev/serve_test.clj" ".gitignore"]
+ :design "package.json: add devDependency \"playwright\": \"1.56.1\" (its
+          Chromium revision is the one preinstalled under
+          PLAYWRIGHT_BROWSERS_PATH; never run `playwright install`).
+          Regenerate package-lock.json with npm install.
+
+          halfahead.dev.serve (Babashka, using the bundled
+          org.httpkit.server): (handler root) serves files under root with
+          content types for .html .js .css .png .svg .json .map; a request
+          path that resolves outside root (.. segments, encoded or not) is a
+          404. (start! {:root :port}) -> a stop function.
+
+          halfahead.dev.e2e (Babashka):
+            (-main) runs `npx firebase emulators:exec --only firestore,auth
+            --project demo-halfahead \"bb e2e:inner\"` (the ports in
+            firebase.json; e2e runs alone).
+            (inner!) compiles the app (npx shadow-cljs compile app), runs the
+            seed, starts the worker (`bb worker --agent scout --engine mock`)
+            as a child process, starts the static server on a free port,
+            runs `node e2e/smoke.mjs <url>`, then stops the server and kills
+            the worker by its own process handle (never by name), and exits
+            with the smoke test's exit code. Child output goes to
+            out/e2e/*.log.
+          bb.edn: tasks `e2e` (-main) and `e2e:inner` (inner!).
+          .gitignore: out/ is already ignored; keep it so.
+
+          e2e/smoke.mjs (Playwright, chromium.launch()):
+            1. open the URL; wait for the conversation header; assert the
+               agent chip reads \"agent of Ben\".
+            2. type \"Hello from the smoke test\" in the composer and press
+               Enter; assert it appears as Ben's message.
+            3. within 20 s, a Scout message whose .sr-only text is \"Noted:
+               Hello from the smoke test\" appears; wait until every .seg in
+               it has --p 1; screenshot out/e2e/conversation.png.
+            4. a second browser context with reducedMotion 'reduce': send
+               \"Second, without motion\"; when Scout's reply first appears,
+               every .seg in it already has --p 1; screenshot
+               out/e2e/reduced-motion.png.
+            Print one line per step; exit non-zero with the step name and
+            the page's console errors on any failure.
+
+          If the smoke test exposes a defect in the app shell, core, views,
+          or worker, do NOT fix it here: stop, and make your final message
+          the failing step, the evidence (console errors, screenshot path),
+          and the fix you would make. That message is the respec."
+ :acceptance
+ ["serve: a test starts the server on a free port over a temp dir and gets
+   200 with text/html for index.html, 404 for a missing file, and 404 for
+   /../bb.edn and /%2e%2e/bb.edn"
+  "`bb e2e` passes in this container and leaves out/e2e/conversation.png
+   and out/e2e/reduced-motion.png"
+  "After `bb e2e`, no worker, server, or emulator process it started is
+   still running (assert in the script or show `ps` in the final message)"
+  "Cleanup runs in a finally: the worker, the static server and the
+   emulators are stopped once each whether the smoke test passes or fails,
+   and the final message shows `ps` output with none of them left"
+  "On a failure, the screenshot is taken from the page whose step failed
+   (out/e2e/failure.png), not always the first page"
+  "package-lock.json changes only by adding playwright and its
+   dependencies: do not let npm drop or rewrite unrelated entries
+   (use `npm install --save-dev --save-exact playwright@1.56.1` against the
+   committed lock and check the diff)"
+  "`bb test` stays green (e2e is not part of the gate)"]
+ :non-goals
+ ["Do not edit anything under src/halfahead except the two new dev
+   namespaces; no app fixes"
+  "Not in `bb test`; no CI workflow yet; no real engine"]
+ :context ["src/halfahead/app.cljs" "src/halfahead/fx/firebase.cljs"
+           "src/halfahead/config.cljc" "src/halfahead/dev/seed.clj"
+           "src/halfahead/worker/main.clj" "src/halfahead/dev/emulator.clj"
+           "firebase.json" "bb.edn" "package.json" "DESIGN.md"]
+ :budget-usd 12.0}

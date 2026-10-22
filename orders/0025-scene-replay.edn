@@ -1,0 +1,84 @@
+{:id "0025-scene-replay"
+ :title "Replay the scene: a whole conversation re-performed in compressed time"
+ ;; Grain-size experiment (the founder's deck: "how chunky can an order be
+ ;; before the monkey has to intervene?"). Deliberately about three times
+ ;; the size of tonight's other orders: a pure scheduler, core actions, a
+ ;; view control, styles, and an e2e step.
+ :lupa/deps #{"0024-sound-cues" "0023-credits-fix"}
+ :lupa/area :flair
+ :lupa/risk :medium
+ :goal "Reading has a tempo (PRODUCT.md, 'a conversation can be re-read the
+        way you would re-watch a scene'). 'Replay scene' re-performs the
+        whole conversation from the top: the transcript empties, then each
+        message arrives and performs in order, with the real gaps between
+        messages compressed so the whole scene takes at most 30 seconds;
+        it can be paused, resumed, and stopped, and stopping (or reduced
+        motion) shows the full transcript settled at once."
+ :scope ["src/halfahead/app/scene.cljc" "test/halfahead/app/scene_test.cljc"
+         "src/halfahead/app/core.cljc" "test/halfahead/app/core_test.cljc"
+         "src/halfahead/app/views.cljc" "test/halfahead/app/views_test.cljc"
+         "src/halfahead/app/enrich.cljc" "test/halfahead/app/enrich_test.cljc"
+         "public/css/halfahead.css" "e2e/smoke.mjs"]
+ :design "halfahead.app.scene (.cljc, pure):
+            (schedule messages opts) -> [{:id id :at-ms t} ...] in sent-at
+            order. The first message is at 0. Each later message starts
+            after the previous one's performance ends (its timeline's
+            :duration-ms from halfahead.perform with the same seed rule as
+            core uses) plus a pause equal to the real gap between their
+            sent-at times, clamped to [300, 2500] ms. If the total exceeds
+            30000 ms, scale every pause (never the performances) down so it
+            fits; if it still exceeds, scale everything proportionally.
+            Deterministic; reduced motion gives every :at-ms 0.
+          Core: actions [:scene/replay {:now-ms n}], [:scene/paused {:now-ms
+          n}], [:scene/resumed {:now-ms n}], [:scene/stopped]. State :scene
+          {:schedule .. :started-at n :paused-at n-or-nil}. While a scene
+          plays, a message is visible only once its :at-ms has passed (on
+          the scene clock, which stops while paused), and it performs from
+          its :at-ms; clock/ticked drives it (register the scene in
+          :performing under the key :scene so the shell's clock keeps
+          ticking, as the credits do). When the last message has performed,
+          the scene ends by itself. New messages arriving during a replay
+          are added to the transcript but do not join the replay. A frames
+          property must hold throughout: every visible message's segments
+          concatenate to its text.
+          Enrich: add :now-ms to the three timed scene actions.
+          Views: a 'Replay scene' button in the header (disabled with no
+          messages); while playing, a small control bar (role toolbar,
+          aria-label 'Scene') with Pause/Resume and Stop buttons and a
+          progress indicator (aria-valuenow as a percentage); messages not
+          yet reached are not rendered.
+          CSS: the control bar in the label type, quiet, sticky at the top.
+          e2e/smoke.mjs: a sixth step: with at least 4 messages present,
+          click Replay scene; after 300 ms fewer messages are rendered than
+          before; click Pause, wait 1 s, the count does not change; Resume;
+          within 35 s all messages are rendered and settled; then replay
+          again and press Stop: all messages appear at once; screenshot
+          out/e2e/scene.png mid-replay."
+ :acceptance
+ ["scene/schedule: first at 0; ordered by sent-at; pauses clamped to
+   [300, 2500]; total <= 30000 for 200 messages of 4000 characters; all 0
+   under reduced motion; deterministic (tests, including a property over
+   generated conversations)"
+  "Core: replay hides all messages at its start; a message appears after
+   its :at-ms on the scene clock; pause freezes the scene clock across
+   ticks; resume continues from where it paused; stop shows everything
+   settled; a message arriving mid-replay is in the transcript and not in
+   the schedule (tests)"
+  "Property: for any sequence of the scene and clock actions, every
+   visible message's frame concatenates to its text"
+  "Views: Replay scene button (disabled with no messages); while playing, a
+   toolbar labelled Scene with Pause or Resume and Stop, and a progress
+   value; unreached messages absent (tests)"
+  "`bb e2e` passes with the new scene step; the final message lists
+   out/e2e/scene.png"
+  "`bb test` stays green"]
+ :non-goals
+ ["No persistence of replays; no sharing; no audio beyond what sound
+   already does per message"
+  "Do not edit the schema, perform, credits, the shell's Firebase code, or
+   the worker"]
+ :context ["PRODUCT.md" "docs/research/conversation-design.md"
+           "src/halfahead/app/core.cljc" "src/halfahead/app/views.cljc"
+           "src/halfahead/app/enrich.cljc" "src/halfahead/perform.cljc"
+           "src/halfahead/app/credits.cljc" "e2e/smoke.mjs" "DESIGN.md"]
+ :budget-usd 12.0}

@@ -1,0 +1,27 @@
+;; Two builds share one source tree:
+;;   :app   the conversation client -> public/js/app (public/index.html)
+;;   :test  every *-test namespace in a .cljc file, run under node by
+;;          `bb test`, so the shared core is proven on both hosts
+{:source-paths ["src" "test"]
+
+ :dependencies [[no.cjohansen/replicant "2026.07.1"]
+                [metosin/malli "0.20.2"]
+                [org.clojure/test.check "1.1.1"]]
+
+ :dev-http {8000 "public"}
+
+ :builds
+ {:app  {:target     :browser
+         :output-dir "public/js/app"
+         :asset-path "js/app"
+         :modules    {:main {:init-fn halfahead.app/init!}}}
+
+  ;; Warnings are errors here only: this build compiles every halfahead
+  ;; namespace (tests plus the browser shell), so an unhinted interop form
+  ;; fails `bb test`. :app is left alone so Firebase's own JSDoc lint
+  ;; cannot fail the release.
+  :test {:target           :node-test
+         :output-to        "out/test.js"
+         :ns-regexp        "(-test|^halfahead\\.app)$"
+         :autorun          false
+         :compiler-options {:warnings-as-errors true}}}}

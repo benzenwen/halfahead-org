@@ -1,0 +1,60 @@
+{:id "0023-credits-fix"
+ :title "Credits roll as credits: one line per line, focus inside, Escape closes"
+ :lupa/deps #{"0020-credits-roll"}
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring
+ ;; (lupa-internal D22): the shipped credits rendered their lines run together and never took focus; found by the foreman's browser check.
+ :lupa/fixes #{"0020-credits-roll"}
+ :lupa/area :ui
+ :lupa/risk :medium
+ :goal "The credits roll shipped by 0020 passes its unit tests but renders
+        wrong (foreman's browser check, 2026-10-21): the lines run together
+        ('FIRST LIGHTBENSCOUT · AGENT OF BEN2 LINES EXCHANGED…') with the
+        blank lines lost; focus never enters the dialog, so Escape does
+        nothing (the autofocus attribute only works on page load, never on
+        elements inserted later); and the End scene and Close buttons are
+        unstyled browser defaults. Fix all three, and make the e2e smoke
+        test exercise the credits so this cannot regress unseen."
+ :scope ["public/css/halfahead.css" "src/halfahead/app/views.cljc"
+         "test/halfahead/app/views_test.cljc" "src/halfahead/app.cljs"
+         "src/halfahead/app/enrich.cljc" "test/halfahead/app/enrich_test.cljc"
+         "e2e/smoke.mjs"]
+ :design "Line breaks: the performed copy and the sr-only copy of the
+          credits keep the text's newlines (white-space: pre-line or
+          pre-wrap on the credits body; each newline-terminated segment
+          already ends with its newline character). Blank lines remain
+          visible as space.
+          Focus: replace autofocus with a Replicant life-cycle hook expressed
+          as data on the dialog, e.g. {:replicant/on-mount [[:dom/focus]]}.
+          The shell's dispatch receives life-cycle triggers with the DOM
+          node (:replicant/node); when an action is [:dom/focus] it calls
+          .focus on that node (the dialog has tabindex -1) and does nothing
+          else — no core change. Escape: event data in hiccup cannot inspect the key,
+          so the dialog's keydown emits [[:scene/key]] and
+          halfahead.app.enrich maps it the way it maps the composer's Enter:
+          key \"Escape\" -> [[:scene/dismissed]], any other key -> [] (and
+          prevent-default? is false for it).
+          Overlay: fixed to the viewport, the paper colour, the credits
+          centred in a column in the label type, generous line height; the
+          Close button and the End scene button styled like the other quiet
+          controls (outlined, label type), with visible focus.
+          e2e/smoke.mjs: a fifth step after the reduced-motion step: click
+          End scene; wait 5.5 s; assert the dialog exists and has focus
+          within it; assert the credits lines are on different rows (the
+          bounding boxes of the 'BEN' line and the 'HALF AHEAD' line differ
+          in y by more than 40px); screenshot out/e2e/credits.png; press
+          Escape; assert the dialog is gone."
+ :acceptance
+ ["`bb e2e` passes with the new credits step, and the final message lists
+   out/e2e/credits.png"
+  "View tests: the dialog carries the on-mount focus hook as data,
+   tabindex -1, and keydown [[:scene/key]]; no autofocus attribute remains"
+  "Enrich tests: [:scene/key] with key Escape -> [[:scene/dismissed]]; with
+   any other key -> []"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit core, credits.cljc, perform, the schema, or the worker"
+  "No sound; no change to what the credits say"]
+ :context ["src/halfahead/app/views.cljc" "src/halfahead/app.cljs"
+           "src/halfahead/app/enrich.cljc" "public/css/halfahead.css"
+           "e2e/smoke.mjs" "src/halfahead/app/credits.cljc"]
+ :budget-usd 8.0}

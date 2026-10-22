@@ -1,0 +1,90 @@
+{:id "0001-perform"
+ :title "Perform: turn a message into a timeline of beats"
+ :lupa/area :flair
+ :lupa/risk :medium
+ :goal "halfahead.perform turns a message's text, delivery and emphasis into
+        an :ha/timeline, and turns a timeline plus elapsed milliseconds into
+        the frame to show, so that views only ever play data and every
+        flourish is testable without a browser."
+ :scope ["src/halfahead/perform.cljc" "test/halfahead/perform_test.cljc"]
+ :design "Two public functions in a new namespace halfahead.perform (.cljc;
+          must also compile as ClojureScript, so no JVM interop):
+
+          (perform {:text s :delivery d :emphasis spans :seed n
+                    :reduced-motion? b}) -> :ha/timeline
+          (frame-at timeline text t-ms) -> [{:text str :effect kw
+                                             :progress p} ...]
+
+          frame-at returns one segment per beat, in text order; :text is the
+          substring of the beat's span; :progress is 0.0 before the beat
+          starts, rises linearly to 1.0 over the beat's :ms, and is 1.0 from
+          then on (a beat with :ms 0 is 1.0 from its :at-ms). Not-yet-started
+          segments are still returned so the view can lay them out invisibly
+          and the text never reflows.
+
+          Spans are [from to) indices in the string as the host counts it
+          (UTF-16 code units on both the JVM and JS). Split words at
+          whitespace boundaries only, so a surrogate pair is never split;
+          trailing whitespace belongs to the word before it, leading
+          whitespace to the first segment.
+
+          Delivery semantics (all durations in ms; cap the whole timeline at
+          halfahead.schema/max-performance-ms by compressing gaps and beat
+          lengths proportionally, never by dropping beats):
+          - :plain    one :appear beat over the whole text, at 0, ms 150.
+          - :typed    one :type beat per word, back to back, each lasting
+                      35 ms per character of its span, each multiplied by a
+                      jitter factor in [0.8, 1.2] drawn from a small pure
+                      PRNG seeded by :seed (implement it here, e.g. a 32-bit
+                      LCG with explicit masking, so JVM and JS agree).
+          - :headline each emphasis span gets a :slam beat, in text order,
+                      starting at 0 and 250 ms apart, ms 300; the remaining
+                      text is cut into segments between the emphasis spans
+                      and they :appear together after the last slam ends,
+                      ms 200. With no usable emphasis, the longest word
+                      (first on ties, trailing whitespace excluded from the
+                      measure) is the emphasis.
+          - :aside    one :whisper beat over the whole text, at 0, ms 600.
+          - :credits  split the text into lines at newlines (each line keeps
+                      its newline); if there is only one line, split at
+                      sentence ends ('. ', '! ', '? '). One :rise beat per
+                      line, 400 ms apart, ms 700.
+          - :reduced-motion? true overrides every delivery: one :appear beat
+            over the whole text, :at-ms 0, :ms 0, :duration-ms 0.
+
+          Emphasis spans are untrusted: clamp them to the text, drop empty
+          ones, and merge overlapping or touching ones before use.
+          :duration-ms is the latest (+ at-ms ms) over all beats."
+ :acceptance
+ ["Property (test.check, at least 300 cases over generated texts that
+   include multi-byte characters such as emoji, newlines, and leading and
+   trailing whitespace, random deliveries, random emphasis spans including
+   out-of-range and overlapping ones, random seeds and reduced-motion):
+   the timeline is valid :ha/timeline; the beats' spans are sorted,
+   contiguous and cover exactly [0, (count text)); every beat ends by
+   :duration-ms"
+  "Property, same generators: at t = :duration-ms, frame-at returns
+   segments whose texts concatenate to exactly the input text and whose
+   progress is 1.0; and at ANY t, the segments' texts concatenate to the
+   input text (layout never changes, only progress does)"
+  "Property: perform is deterministic: equal inputs give equal timelines"
+  "With :reduced-motion? true and any delivery, :duration-ms is 0, there is
+   one beat, and frame-at at t 0 shows the whole text at progress 1.0"
+  ":typed on a text of 5 or more words gives different beat timings for
+   seeds 1 and 2, both valid"
+  ":typed on a 4000-character text has :duration-ms at most
+   halfahead.schema/max-performance-ms and still one beat per word"
+  ":headline with emphasis [[6 11]] on \"Hello world, friends\" starts a
+   :slam beat for \"world\" before any :appear beat; with no emphasis on
+   \"a big remarkable day\" the :slam beat covers \"remarkable\""
+  ":credits on \"one\\ntwo\\nthree\" has three :rise beats in line order,
+   400 ms apart"
+  "`bb test` stays green (it also compiles the app as ClojureScript)"]
+ :non-goals
+ ["Do not edit halfahead.schema, bb.edn, shadow-cljs.edn, or the test runner"
+  "No rendering, CSS, DOM, or audio; no views"
+  "No easing curves beyond linear progress; the view may ease"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/schema.cljc"
+           "test/halfahead/schema_test.cljc"
+           "clojure.test.check is bundled with Babashka; use it for the properties"]
+ :budget-usd 8.0}

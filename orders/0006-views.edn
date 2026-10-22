@@ -1,0 +1,85 @@
+{:id "0006-views"
+ :title "Views: the conversation as hiccup, with performances as data"
+ :lupa/deps #{"0004-conversation-core"}
+ :lupa/area :ui
+ :lupa/risk :medium
+ :goal "A pure view of the app state: one page with the conversation's
+        title and members, the transcript (each message performed from its
+        frame), a presence line while the agent thinks, and a composer.
+        Motion is expressed only as a per-segment progress value; a
+        stylesheet decides what progress looks like for each effect."
+ :scope ["src/halfahead/app/views.cljc" "test/halfahead/app/views_test.cljc"
+         "public/css/halfahead.css" "public/index.html"]
+ :design "halfahead.app.views (.cljc, pure, returns hiccup for Replicant;
+          no Replicant require is needed to build hiccup). Public:
+            (page state) -> hiccup
+
+          Events in hiccup are data vectors WITHOUT times or ids; the shell
+          (a later order) adds :now-ms, :now and :id before handling:
+            composer input  {:on {:input [[:composer/edited]]}} (the shell
+                            adds {:text value})
+            send            a <form> {:on {:submit [[:composer/sent]]}};
+                            Enter submits, Shift+Enter is a newline: emit
+                            [[:composer/key {:key k :shift? b}]] on keydown
+                            and let core decide (add nothing to core: the
+                            shell maps an unshifted Enter to :composer/sent)
+            skip            clicking a performing message: [[:message/skipped {:id id}]]
+            replay          a small button per message: [[:replay/requested {:id id}]]
+            preferences     two toggles: reduced motion, sound (sound is
+                            shown but does nothing yet; label it 'soon')
+
+          Structure (semantic, accessible):
+          - <header> with the conversation title and each member as a chip:
+            a human shows their name; an agent shows its name and
+            \"agent of <owner's display-name>\" — always.
+          - <main> transcript as an <ol>, oldest first, newest last, so the
+            newest message sits on the composer. Each message is an <li>
+            <article> with the author line and the body. The body has TWO
+            renderings of the text: a visually hidden plain copy for
+            assistive technology (class \"sr-only\"), and the performed copy
+            marked aria-hidden=\"true\", one <span> per frame segment with
+            classes \"seg\" and \"fx-<effect>\" and the style custom
+            property --p set to its progress (0..1, as a number string).
+            Whitespace is preserved (white-space: pre-wrap in CSS).
+          - A presence line (role=\"status\", aria-live=\"polite\") reading
+            \"<agent name> is thinking…\" when halfahead.app.core/awaiting-agent?
+            is true; empty otherwise.
+          - The composer: a labelled <textarea>, a send <button>; the send
+            button is disabled when the composer text is blank.
+          - Designed empty state: with no messages, a short line inviting the
+            first word.
+
+          public/css/halfahead.css: tokens as CSS custom properties on :root
+          (colours, type scale, radii, spacing) with a dark and a light
+          scheme via prefers-color-scheme; never hard-code a colour outside
+          :root. Effects map --p to appearance: .fx-appear opacity; .fx-type
+          visibility (hidden at 0) and opacity; .fx-slam scale from 2.2 to 1
+          and opacity; .fx-whisper smaller and quieter, fading in; .fx-rise
+          translateY from 1em to 0 and opacity. A segment at --p 0 keeps its
+          layout box (no reflow). Under @media (prefers-reduced-motion:
+          reduce) every .seg is fully shown with no transform. Readable
+          measure ~70ch, works at 360px wide, visible focus rings.
+          public/index.html links the stylesheet."
+ :acceptance
+ ["(page state) for a state with two members (Ben, and an agent owned by
+   Ben) shows the agent chip with the text \"agent of Ben\""
+  "Messages render oldest first in an <ol>; each has a .sr-only copy equal
+   to the full text and an aria-hidden copy whose .seg spans concatenate to
+   the full text, at every point of a performance"
+  "A performing message's segments carry --p values equal to the frame's
+   progress; a settled message's are all 1"
+  "The presence line reads '<agent name> is thinking…' exactly when
+   awaiting-agent? is true"
+  "The send button is disabled for blank composer text; the form's submit
+   event is [[:composer/sent]]"
+  "Empty conversation renders the empty-state line"
+  "halfahead.css defines .fx-appear .fx-type .fx-slam .fx-whisper .fx-rise
+   and a prefers-reduced-motion block (assert by reading the file in a test)"
+  "`bb test` stays green on both hosts"]
+ :non-goals
+ ["Do not edit halfahead.schema, perform, or app.core"
+  "No DOM, Firebase, timers, or Replicant rendering; no audio; no routing"
+  "No final visual identity: use plain, legible tokens; the look is a later order"]
+ :context ["DESIGN.md" "docs/SCHEMA.md" "src/halfahead/app/core.cljc"
+           "src/halfahead/perform.cljc"]
+ :budget-usd 10.0}
