@@ -30,3 +30,13 @@ ui-debug.log
 service-account*.json
 .DS_Store
 public/lab/js/
+
+# macOS
+.DS_Store
+
+# editor backups
+*~
+\#*\#
+.\#*
+
+
