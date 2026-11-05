@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lights="up">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,6 +12,15 @@
       --signal: #ff7a55;
       --condensed: "Arial Narrow", "Helvetica Neue", "Roboto Condensed", sans-serif;
       color-scheme: dark;
+    }
+    /* The house lights up (reveal levels 0 and 1): ink on paper, like any
+       chat box. The shell sets data-lights from each frame's :reveal. */
+    :root[data-lights="up"] {
+      --bg: #f6f1e7;
+      --text: #1d1a16;
+      --muted: #5a5044;
+      --signal: #c2401c;
+      color-scheme: light;
     }
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
     #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
@@ -43,7 +52,7 @@
       position: fixed; left: 0.5rem; bottom: 0.5rem; margin: 0; padding: 0.35rem 0.5rem;
       max-width: calc(100vw - 1rem); box-sizing: border-box; white-space: pre-wrap;
       font: 11px/1.35 ui-monospace, Menlo, Consolas, monospace;
-      color: var(--text); background: rgba(0, 0, 0, 0.7); pointer-events: none;
+      color: #efe6d6; background: rgba(0, 0, 0, 0.7); pointer-events: none;
     }
     #debug[hidden] { display: none; }
     /* A quiet picker in the corner opposite the debug panel. */

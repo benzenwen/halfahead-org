@@ -1,6 +1,7 @@
 // Drives the typing lab in headless Chromium: usage `node e2e/lab.mjs <url>`.
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 
 const url = process.argv[2];
 const out = 'out/lab';
@@ -57,10 +58,46 @@ const nextFrame = (page) => page.evaluate(() => new Promise((resolve) =>
     });
   }))));
 
-async function open(page, at = url) {
-  await page.goto(at);
+// Every step but the reveal's runs on the full stage (?reveal=3) unless its
+// URL names a level; { plain: true } opens the URL as given, at level 0.
+async function open(page, at = url, { plain = false } = {}) {
+  const u = new URL(at);
+  if (!plain && !u.searchParams.has('reveal')) u.searchParams.set('reveal', '3');
+  await page.goto(u.href);
   await page.waitForFunction(() => window.__lab?.backend, null, { timeout: 30000 });
   return page.evaluate(() => window.__lab.backend);
+}
+
+// The luminance (0 black to 1 white) of one pixel of the page as shown, at
+// the left edge half way down, where only the stage's background is drawn:
+// a screenshot of that pixel, decoded here, because reading a WebGPU canvas
+// back is unreliable. Any PNG filter leaves a lone pixel's bytes as they are.
+async function backgroundLuminance(page) {
+  const png = await page.screenshot({ clip: { x: 4, y: 320, width: 1, height: 1 } });
+  const idat = [];
+  let colorType = null;
+  for (let i = 8; i < png.length;) {
+    const len = png.readUInt32BE(i);
+    const type = png.toString('ascii', i + 4, i + 8);
+    const data = png.subarray(i + 8, i + 8 + len);
+    if (type === 'IHDR') {
+      if (data[8] !== 8) throw new Error(`a screenshot PNG of bit depth ${data[8]}`);
+      colorType = data[9];
+    }
+    if (type === 'IDAT') idat.push(data);
+    i += 12 + len;
+  }
+  if (colorType !== 2 && colorType !== 6) throw new Error(`a screenshot PNG of colour type ${colorType}`);
+  const [r, g, b] = inflateSync(Buffer.concat(idat)).subarray(1, 4);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+// The reveal level of the frame drawn now, waiting up to 5 s for it to reach
+// at least `atLeast` (software rendering can lag behind the keys).
+async function revealLevel(page, atLeast = 0) {
+  await page.waitForFunction((n) => window.__lab.lastFrame().reveal.level >= n, atLeast, { timeout: 5000 })
+    .catch(() => {});
+  return page.evaluate(() => window.__lab.lastFrame().reveal.level);
 }
 
 const browser = await chromium.launch({
@@ -138,6 +175,86 @@ try {
   if (wrapped.live !== wrapped.value) throw new Error(`live text "${wrapped.live}" != "${wrapped.value}"`);
   if (wrapped.lines < 2) throw new Error(`the block did not wrap: ${wrapped.lines} line(s)`);
   done(`${wrapped.lines} lines; ${assertCentred(wrapped.centre)}`);
+
+  // The reveal: a plain /lab/ starts as a familiar flat box on paper and
+  // opens up as it is used.
+  begin('reveal 0', null);
+  const revealing = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = revealing;
+  await open(revealing, url, { plain: true });
+  let lv = await revealLevel(revealing);
+  let lum = await backgroundLuminance(revealing);
+  await revealing.screenshot({ path: `${out}/reveal-0.png` });
+  if (lv !== 0) throw new Error(`a plain /lab/ starts at reveal level ${lv}`);
+  if (!(lum > 0.8)) throw new Error(`the background at level 0 has luminance ${lum.toFixed(3)}, not paper`);
+  done(`level 0; background luminance ${lum.toFixed(3)} (paper)`);
+
+  begin('reveal 1', revealing);
+  await revealing.keyboard.type('one two three ', { delay: 70 });
+  lv = await revealLevel(revealing, 1);
+  await revealing.screenshot({ path: `${out}/reveal-1.png` });
+  if (lv !== 1) throw new Error(`after three words the level is ${lv}`);
+  lum = await backgroundLuminance(revealing);
+  if (!(lum > 0.8)) throw new Error(`the lights went down at level 1: luminance ${lum.toFixed(3)}`);
+  done(`level 1 after three words; still on paper (${lum.toFixed(3)})`);
+
+  begin('reveal 2', revealing);
+  await revealing.keyboard.type('deploy crash merge finally ', { delay: 70 });
+  lv = await revealLevel(revealing, 2);
+  if (lv !== 2) throw new Error(`after four glossary words the level is ${lv}`);
+  await revealing.waitForTimeout(1500);
+  lum = await backgroundLuminance(revealing);
+  await revealing.screenshot({ path: `${out}/reveal-2.png` });
+  if (!(lum < 0.2)) throw new Error(`1.5 s into level 2 the background has luminance ${lum.toFixed(3)}, not the dark stage`);
+  const lights = await revealing.evaluate(() => window.__lab.lastFrame().reveal.lights);
+  if (lights !== 1) throw new Error(`1.5 s into level 2 the lights are at ${lights}`);
+  done(`level 2 after "deploy crash merge finally"; 1.5 s later lights ${lights}, background ${lum.toFixed(3)}`);
+
+  begin('reveal 3', revealing);
+  await revealing.keyboard.type('WHAT A DAY! ', { delay: 70 });
+  lv = await revealLevel(revealing, 3);
+  if (lv !== 3) throw new Error(`after "WHAT A DAY! " the level is ${lv}`);
+  const cardScale = await revealing.waitForFunction(() => {
+    const lab = window.__lab;
+    const card = lab.directions().find((d) => d.shot === 'card');
+    if (!card) return null;
+    const on = new Set(card['glyph-ids']);
+    const big = Math.max(...lab.lastFrame().poses.filter((p) => on.has(p.id)).map((p) => p.scale));
+    return big > 1.5 ? big : null;
+  }, null, { timeout: 5000 }).then((h) => h.jsonValue()).catch(() => null);
+  await revealing.screenshot({ path: `${out}/reveal-3.png` });
+  if (!cardScale) throw new Error('at level 3 no card was performed (no glyph of a card direction at scale > 1.5)');
+  done(`level 3 after "WHAT A DAY! "; the card performed, a glyph at scale ${cardScale.toFixed(2)}`);
+  await revealing.close();
+
+  begin('reveal wands', null);
+  const waving = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = waving;
+  await open(waving, url, { plain: true });
+  if ((await revealLevel(waving)) !== 0) throw new Error('a fresh page is not at level 0');
+  await waving.keyboard.press('Control+.');
+  lv = await revealLevel(waving, 1);
+  if (lv !== 1) throw new Error(`Ctrl+. raised the level to ${lv}, not 1`);
+  // slow pointing is no wand: 750 px over about a second
+  await waving.mouse.move(100, 300);
+  for (let k = 1; k <= 10; k++) {
+    await waving.mouse.move(100 + 75 * k, 300);
+    await waving.waitForTimeout(100);
+  }
+  if ((await revealLevel(waving)) !== 1) throw new Error('a slow sweep of the mouse raised the level');
+  // a flick: 750 px back in five moves dispatched at once, since a
+  // software-rendered page can take longer than the flick itself between
+  // two of Playwright's mouse moves
+  await waving.evaluate(() => {
+    const stage = document.getElementById('type');
+    for (let k = 1; k <= 5; k++)
+      stage.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true, pointerType: 'mouse', clientX: 850 - 150 * k, clientY: 320 }));
+  });
+  lv = await revealLevel(waving, 2);
+  if (lv !== 2) throw new Error(`a flick of the mouse left the level at ${lv}`);
+  done('Ctrl+. raised level 0 to 1; a slow sweep of the mouse did nothing; a synthesized flick raised it to 2');
+  await waving.close();
 
   begin('crawl', null);
   const crawl = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
@@ -260,6 +377,7 @@ try {
   if (!shown.split('\n').some((l) => l.includes('shipped -> launch')))
     throw new Error(`no "shipped -> launch" line in the overlay: "${shown}"`);
   if (!/camera target x -?\d/.test(shown)) throw new Error(`no camera target in the overlay: "${shown}"`);
+  if (!/reveal level 3 · lights 1\.00/.test(shown)) throw new Error(`no reveal level in the overlay: "${shown}"`);
   if (!/style (plain|elegant|caffeinated|drunken|coarse) \(auto\)/.test(shown))
     throw new Error(`the overlay does not name the style in force: "${shown}"`);
   const clipped = await overlay.evaluate((el) => el.scrollWidth > el.clientWidth);
@@ -529,7 +647,8 @@ try {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
-  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'crawl', 'steady', 'fuse', 'debug', 'card', 'push',
+  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
+    'crawl', 'steady', 'fuse', 'debug', 'card', 'push',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;

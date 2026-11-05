@@ -4,7 +4,10 @@
   renderer. All deciding happens in lab.draft, lab.cues, lab.director,
   lab.style and lab.pose, the camera included; the shell only reports the
   viewport's shape and which motion style the writer picked. With Sound on
-  it also plays each new cue's and direction's sound from lab.sound."
+  it also plays each new cue's and direction's sound from lab.sound. It
+  keeps the reveal's inputs (lab.reveal): the start level from ?reveal=N,
+  the times of the writer's wands (Ctrl+. or a mouse flick over the
+  stage), and the levels reached so far, so they never go down."
   (:require [halfahead.lab.audio :as audio]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
@@ -12,13 +15,23 @@
             [halfahead.lab.draft :as draft]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.render :as render]
+            [halfahead.lab.reveal :as reveal]
             [halfahead.lab.sound :as sound]))
+
+(defn- start-level
+  "?reveal=N, 0 to 3: the reveal level the lab starts at; 0 when absent."
+  []
+  (let [n (js/parseInt (.get (js/URLSearchParams. js/location.search) "reveal") 10)]
+    (if (js/isNaN n) 0 (max 0 (min 3 n)))))
 
 (defonce ^:private state
   ;; :sound-log, the last sounds played, for tests and the console;
-  ;; :sound-queue, those not yet handed to the speaker
+  ;; :sound-queue, those not yet handed to the speaker;
+  ;; :reveal, lab.reveal's opts; :pointer, the last moments of mouse motion
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
-         :sound? false :sound-log [] :sound-queue []}))
+         :sound? false :sound-log [] :sound-queue []
+         :reveal {:start-level (start-level) :wands [] :reached nil}
+         :pointer []}))
 
 ;; Only this viewer's choice of Sound, on this device; never sent anywhere.
 (def ^:private sound-key "halfahead.lab.sound")
@@ -50,7 +63,8 @@
                :width-em (width-em)
                :aspect (aspect)
                :reduced-motion? reduced-motion?
-               :style-choice (:style-choice @state)}))
+               :style-choice (:style-choice @state)
+               :reveal-opts (:reveal @state)}))
 
 (defn- voiced
   "s with the sounds of newly placed entries of a kind logged and queued."
@@ -68,6 +82,13 @@
   (let [[old _] (swap-vals! state assoc :sound-queue [])]
     (run! #(audio/play! (:sound %)) (:sound-queue old))))
 
+(defn- revealed
+  "state with the levels reached by t, never fewer than before."
+  [s t]
+  (assoc-in s [:reveal :reached] (reveal/levels (:draft s) t (:reveal s))))
+
+(defn- level [s t] (reveal/level-at (get-in s [:reveal :reached]) (:reveal s) t))
+
 (defn- camera-line [{:keys [tx ty tz]}]
   (str "camera target x " (.toFixed tx 2) " · y " (.toFixed ty 2) " · z " (.toFixed tz 2)))
 
@@ -83,17 +104,32 @@
                                     :style (:style f) :style-choice style-choice
                                     :log cue-log :directions direction-log})
                "\n" (camera-line (:camera f))
+               "\n" (let [{:keys [level lights]} (:reveal f)]
+                      (str "reveal level " level " · lights " (.toFixed lights 2)))
                "\n" (if sound? "sound on" "sound off")))))
 
 (defn- directed
-  "state with the director run over its draft at t: on every edit, and on
-  every frame for phrases that a pause ended."
-  [{old :draft :as s} t]
-  (let [new (director/direct old t)
-        placed (when (or debug? (:sound? s)) (debug/new-directions old new))]
-    (cond-> (assoc s :draft new)
-      debug? (update :direction-log debug/cue-log placed t)
-      true (voiced :shot placed))))
+  "state with its levels brought up to t and, from level 2, the director
+  run over its draft: on every edit, and on every frame for phrases that a
+  pause ended. Its first spectacle is what opens level 3."
+  [s t]
+  (let [{old :draft :as s} (revealed s t)]
+    (if (< (level s t) 2)
+      s
+      (let [new (director/direct old t)
+            placed (when (or debug? (:sound? s)) (debug/new-directions old new))]
+        (cond-> (assoc s :draft new)
+          debug? (update :direction-log debug/cue-log placed t)
+          true (voiced :shot placed)
+          true (revealed t))))))
+
+(defn- show-lights!
+  "The page's own colours follow the house lights: data-lights on <html>."
+  [{:keys [lights]}]
+  (let [v (if (>= lights 0.5) "down" "up")
+        ^js root js/document.documentElement]
+    (when (not= v (.. root -dataset -lights))
+      (set! (.. root -dataset -lights) v))))
 
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
@@ -101,6 +137,7 @@
         _ (play-queued!)
         f (frame r t (.-matches motion-query))]
     (swap! state assoc :last-frame f)
+    (show-lights! (:reveal f))
     (render/draw! r f)
     (when debug? (show-debug! r t f))
     (js/requestAnimationFrame #(loop! r motion-query))))
@@ -131,6 +168,33 @@
                        true (voiced :cue placed)
                        true (directed t)))))
     (play-queued!)))
+
+(defn- wand!
+  "The writer's wand: one level more, from now."
+  []
+  (let [t (now-ms)]
+    (swap! state (fn [s]
+                   (cond-> s
+                     (< (level s t) 3) (-> (update-in [:reveal :wands] conj t)
+                                           (directed t)))))
+    (play-queued!)))
+
+(def ^:private flick-window-ms
+  "How much recent mouse motion is kept to look for a flick in."
+  300)
+
+(defn- on-pointer-move
+  "A quick sweep of the mouse over the stage is a wand; the samples start
+  afresh after one, so one sweep is one wand."
+  [^js e]
+  (when (= "mouse" (.-pointerType e))
+    ;; when the pointer moved, not when a busy frame let the handler run
+    (let [t (.-timeStamp e)
+          samples (into [] (filter #(< (- t (:t %)) flick-window-ms))
+                        (conj (:pointer @state) {:x (.-clientX e) :y (.-clientY e) :t t}))]
+      (if (reveal/flick? samples)
+        (do (swap! state assoc :pointer []) (wand!))
+        (swap! state assoc :pointer samples)))))
 
 (defn- on-input [^js e]
   (edit! (.. e -target -value)))
@@ -170,11 +234,14 @@
   [_]
   (when (:sound? @state) (audio/unlock!)))
 
-(defn- on-style-key [picker input ^js e]
-  (when-let [choice (and (.-ctrlKey e) (not (.-altKey e)) (not (.-metaKey e))
-                         (style-keys (.-key e)))]
-    (.preventDefault e)
-    (choose-style! choice picker input)))
+(defn- on-ctrl-key [picker input ^js e]
+  (when (and (.-ctrlKey e) (not (.-altKey e)) (not (.-metaKey e)))
+    (if-let [choice (style-keys (.-key e))]
+      (do (.preventDefault e)
+          (choose-style! choice picker input))
+      (when (= "." (.-key e))
+        (.preventDefault e)
+        (wand!)))))
 
 (defn init! []
   (let [^js input (by-id "type")
@@ -184,12 +251,14 @@
         ;; read on every frame, so a change of the setting applies at once
         motion-query (js/window.matchMedia "(prefers-reduced-motion: reduce)")]
     (when debug? (.removeAttribute (by-id "debug") "hidden"))
+    (show-lights! {:lights (if (>= (get-in @state [:reveal :start-level]) 2) 1 0)})
+    (.addEventListener js/window "pointermove" on-pointer-move)
     (.focus input)
     (.addEventListener input "input" on-input)
     (set! (.-value picker) (name (:style-choice @state)))
     (.addEventListener picker "change"
                        #(choose-style! (keyword (.-value picker)) picker input))
-    (.addEventListener js/window "keydown" #(on-style-key picker input %))
+    (.addEventListener js/window "keydown" #(on-ctrl-key picker input %))
     (swap! state assoc :sound? (remembered-sound?))
     (set! (.-checked sound-box) (:sound? @state))
     (.addEventListener sound-box "change" #(choose-sound! (.-checked sound-box) input))
