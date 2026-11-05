@@ -1,15 +1,21 @@
 (ns halfahead.lab.main
   "The lab page's shell: the textarea's value goes into the draft, every
   animation frame asks the pure core for a frame and hands it to the
-  renderer. All deciding happens in lab.draft, lab.cues and lab.pose,
-  the camera included; the shell only reports the viewport's shape."
+  renderer. All deciding happens in lab.draft, lab.cues, lab.style and
+  lab.pose, the camera included; the shell only reports the viewport's
+  shape and which motion style the writer picked."
   (:require [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.draft :as draft]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.render :as render]))
 
-(defonce ^:private state (atom {:draft (draft/empty-draft) :last-frame nil}))
+(defonce ^:private state
+  (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto}))
+
+(def ^:private style-keys
+  "Ctrl+1..6, in the picker's order."
+  {"1" :auto "2" :plain "3" :elegant "4" :caffeinated "5" :drunken "6" :coarse})
 
 (defn- now-ms [] (js/Math.round (js/performance.now)))
 
@@ -33,18 +39,20 @@
               {:advance #(render/advance r %)
                :width-em (width-em)
                :aspect (aspect)
-               :reduced-motion? reduced-motion?}))
+               :reduced-motion? reduced-motion?
+               :style-choice (:style-choice @state)}))
 
 (defn- camera-line [{:keys [tx ty tz]}]
   (str "camera target x " (.toFixed tx 2) " · y " (.toFixed ty 2) " · z " (.toFixed tz 2)))
 
 (defn- show-debug! [r t f]
-  (let [{:keys [stats cue-log]} (swap! state #(-> %
+  (let [{:keys [stats cue-log style-choice]} (swap! state #(-> %
                                                   (update :stats debug/record t)
                                                   (update :cue-log debug/cue-log [] t)))]
     (set! (.-textContent (by-id "debug"))
           (str (debug/overlay-text {:summary (debug/summary stats) :t-ms t
                                     :backend (render/backend r) :glyphs (render/drawn r)
+                                    :style (:style f) :style-choice style-choice
                                     :log cue-log})
                "\n" (camera-line (:camera f))))))
 
@@ -77,14 +85,33 @@
 (defn- on-input [^js e]
   (edit! (.. e -target -value)))
 
+(defn- choose-style!
+  "Perform from now on in choice, keep the picker showing it, and give the
+  textarea its focus back so typing carries on."
+  [choice ^js picker ^js input]
+  (swap! state assoc :style-choice choice)
+  (set! (.-value picker) (name choice))
+  (.focus input))
+
+(defn- on-style-key [picker input ^js e]
+  (when-let [choice (and (.-ctrlKey e) (not (.-altKey e)) (not (.-metaKey e))
+                         (style-keys (.-key e)))]
+    (.preventDefault e)
+    (choose-style! choice picker input)))
+
 (defn init! []
   (let [^js input (by-id "type")
         ^js status (by-id "status")
+        ^js picker (by-id "style")
         ;; read on every frame, so a change of the setting applies at once
         motion-query (js/window.matchMedia "(prefers-reduced-motion: reduce)")]
     (when debug? (.removeAttribute (by-id "debug") "hidden"))
     (.focus input)
     (.addEventListener input "input" on-input)
+    (set! (.-value picker) (name (:style-choice @state)))
+    (.addEventListener picker "change"
+                       #(choose-style! (keyword (.-value picker)) picker input))
+    (.addEventListener js/window "keydown" #(on-style-key picker input %))
     (-> (render/start! (by-id "stage")
                        (pose/frame (draft/empty-draft) 0 {:width-em (width-em) :aspect (aspect)}))
         (.then (fn [r]

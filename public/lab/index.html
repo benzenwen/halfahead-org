@@ -46,6 +46,17 @@
       color: var(--text); background: rgba(0, 0, 0, 0.7); pointer-events: none;
     }
     #debug[hidden] { display: none; }
+    /* A quiet picker in the corner opposite the debug panel. */
+    .styles {
+      position: fixed; right: 0.5rem; bottom: 0.5rem; display: flex; align-items: center;
+      gap: 0.5rem; font-family: var(--condensed); font-size: 0.8125rem;
+      text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted);
+    }
+    .styles select {
+      font: inherit; letter-spacing: 0.06em; color: var(--text); background: var(--bg);
+      border: 1px solid rgba(185, 173, 154, 0.35); border-radius: 0.25rem; padding: 0.2rem 0.35rem;
+    }
+    .styles select:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -59,6 +70,18 @@
   <div class="bar">
     <p id="status" role="status">Starting the renderer…</p>
     <a href="../">Back to Half Ahead</a>
+  </div>
+  <div class="styles">
+    <label for="style">Motion style</label>
+    <select id="style" aria-keyshortcuts="Control+1 Control+2 Control+3 Control+4 Control+5 Control+6"
+            title="Ctrl+1 to Ctrl+6">
+      <option value="auto" selected>Auto</option>
+      <option value="plain">Plain</option>
+      <option value="elegant">Elegant</option>
+      <option value="caffeinated">Caffeinated</option>
+      <option value="drunken">Drunken</option>
+      <option value="coarse">Coarse</option>
+    </select>
   </div>
   <pre id="debug" aria-hidden="true" hidden></pre>
   <script src="js/main.js"></script>

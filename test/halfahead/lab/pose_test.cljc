@@ -5,6 +5,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [halfahead.lab.pose :as pose]
+            [halfahead.lab.style :as style]
             [halfahead.schema :as schema]))
 
 ;; --- generators -------------------------------------------------------------
@@ -55,8 +56,11 @@
 
 (defn- latest [draft] (reduce max 0 (event-times draft)))
 
+(def ^:private style-choices (into [:auto] style/styles))
+
 (def gen-opts
-  (gen/hash-map :width-em (gen/choose 3 40)
+  (gen/hash-map :style-choice (gen/elements style-choices)
+                :width-em (gen/choose 3 40)
                 :aspect (gen/double* {:min 0.4 :max 3 :NaN? false :infinite? false})
                 :advance (gen/elements [pose/default-advance
                                         (fn [c] (if (#{"W" "日" "😀"} c) 1.0 0.5))])))
@@ -69,7 +73,7 @@
      (let [events (vec (event-times draft))
            near (if (seq events)
                   (gen/fmap (fn [[e d]] (+ e d))
-                            (gen/tuple (gen/elements events) (gen/choose -50 1600)))
+                            (gen/tuple (gen/elements events) (gen/choose -50 2600)))
                   (gen/return 0))]
        (gen/fmap (fn [t] [draft opts t])
                  (gen/one-of [near near near (gen/choose -500 6000)]))))))
@@ -124,7 +128,7 @@
 (defspec everything-settles-onto-the-layout 300
   (prop/for-all [[draft opts _] gen-case
                  k (gen/choose 0 3000)]
-    (let [f (pose/frame draft (+ (latest draft) 1500 k) opts)]
+    (let [f (pose/frame draft (+ (latest draft) 2500 k) opts)]
       (and (= (rest-poses draft opts) (live f))
            (empty? (ghosts f))))))
 
@@ -152,12 +156,42 @@
            (<= 0 pitch-deg 8)
            (< (abs (- 0.75 (/ width (* 2 dist (:aspect opts) half)))) 1e-9)))))
 
-(defspec cued-glyphs-stay-within-half-an-em 300
+(defspec every-glyph-stays-within-half-an-em 300
   (prop/for-all [[draft opts t] gen-case]
-    (let [cued (set (mapcat :glyph-ids (:cues draft)))
-          rest-x (into {} (map (juxt :id :x)) (rest-poses draft opts))]
+    (let [rest-x (into {} (map (juxt :id :x)) (rest-poses draft opts))]
       (every? (fn [{:keys [id x]}] (<= (abs (- x (rest-x id))) (+ 0.5 1e-9)))
-              (filter (comp cued :id) (live (pose/frame draft t opts)))))))
+              (live (pose/frame draft t opts))))))
+
+(defspec frame-names-the-style 300
+  (prop/for-all [[draft {:keys [style-choice] :as opts} t] gen-case
+                 reduced? gen/boolean]
+    (let [s (:style (pose/frame draft t (assoc opts :reduced-motion? reduced?)))]
+      (= s (if (= :auto style-choice)
+             (style/infer (:glyphs draft) t)
+             style-choice)))))
+
+(defspec auto-motion-is-causal 300
+  ;; A space after the last glyph never re-wraps earlier words or changes
+  ;; the current line, unless the text ends with a newline (then the space
+  ;; starts the next line, and the camera rightly moves); so any change to
+  ;; an earlier glyph would come from the style.
+  (prop/for-all [[draft opts _] gen-case
+                 gaps (gen/vector (gen/elements [0 40 60 90 200 450 600 1500]) 40)
+                 later (gen/choose 1 2000)
+                 before (gen/choose 1 3000)]
+    (let [;; births in a rhythm, so :auto infers every style
+          draft (update draft :glyphs
+                        #(mapv (fn [g born] (assoc g :born-ms born)) % (reductions + 0 gaps)))
+          b (+ (latest draft) later)
+          t (- b before)
+          longer (-> draft
+                     (update :text str " ")
+                     (update :glyphs conj {:id (:next-id draft) :char " " :born-ms b})
+                     (update :next-id inc))
+          opts (assoc opts :style-choice :auto)]
+      (or (str/ends-with? (:text draft) "\n")
+          (= (live (pose/frame draft t opts))
+             (pop (live (pose/frame longer t opts))))))))
 
 (defspec frames-are-deterministic 100
   (prop/for-all [[draft opts t] gen-case]
@@ -322,3 +356,82 @@
   (is (= {:x 0.0 :y 0.0} (:caret (pose/frame (draft-of "" 0 []) 0 {}))))
   (is (close? 1.2 (:x (:caret (pose/frame (draft-of "ab" 0 []) 0 {})))))
   (is (= {:x 0.0 :y -1.35} (:caret (pose/frame (draft-of "ab\n" 0 []) 0 {})))))
+
+;; --- styles -----------------------------------------------------------------
+
+(def ^:private quake
+  {:glyph-ids [0 1 2 3]
+   :cue {:word "boom" :effect :quake :intensity 1 :source :glossary}
+   :at-ms 10000})
+
+(deftest every-effect-settles-in-every-style
+  (doseq [s style/styles, effect effects]
+    (let [cue {:glyph-ids (vec (range 30))
+               :cue {:word "w" :effect effect :intensity 1 :source :default}
+               :at-ms 5000}
+          draft (draft-of (apply str (repeat 30 "x")) 0 [cue])
+          base (rest-poses draft {:advance pose/default-advance :width-em 40})
+          opts {:style-choice s}]
+      (testing (str s " " effect)
+        (is (some true? (for [dt [50 150 300 500 800]]
+                          (not= base (live (pose/frame draft (+ 5000 dt) opts))))))
+        (is (= base (live (pose/frame draft 7500 opts))))))))
+
+(deftest styles-differ
+  (let [draft (draft-of "boom " 10000 [quake])
+        at (fn [s] (live (pose/frame draft 10100 {:style-choice s})))
+        poses (map at style/styles)]
+    (is (= (count style/styles) (count (set poses)))
+        "a birth and a quake 100 ms in look different in every style")
+    (is (= (live (pose/frame draft 10100 {})) (at :plain))
+        ":plain is the default")))
+
+(deftest coarse-moves-in-steps
+  (testing "a quake holds each of 3 poses, then rests"
+    (let [draft (draft-of "boom " 0 [quake])
+          at #(first (live (pose/frame draft % {:style-choice :coarse})))
+          moving (map at (range 10000 10500 5))]
+      (is (= 3 (count (set moving))) "the quake lasts 500 ms in coarse")
+      (is (= (first (rest-poses draft {:advance pose/default-advance :width-em 40}))
+             (at 10500)))))
+  (testing "a birth takes 3 steps"
+    (let [draft (draft-of "a" 1000 [])
+          scales (for [t (range 1000 1200 2)]
+                   (:scale (first (live (pose/frame draft t {:style-choice :coarse})))))]
+      (is (= 3 (count (set scales))))
+      (is (= 1.0 (:scale (first (live (pose/frame draft 1200 {:style-choice :coarse})))))))))
+
+(deftest elegant-glides
+  (let [draft (draft-of "a" 1000 [])
+        scales (for [t (range 1000 1600 5)]
+                 (:scale (first (live (pose/frame draft t {:style-choice :elegant})))))]
+    (testing "a birth never overshoots"
+      (is (every? #(<= % (+ 1.0 1e-9)) scales)))
+    (testing "and grows steadily, more slowly than plain"
+      (is (apply <= scales))
+      (is (< (:scale (first (live (pose/frame draft 1200 {:style-choice :elegant}))))
+             (:scale (first (live (pose/frame draft 1200 {}))))))
+      (is (= 1.0 (:scale (first (live (pose/frame draft 1600 {:style-choice :elegant})))))))))
+
+(deftest caffeinated-overshoots-more-than-plain
+  (let [draft (draft-of "a" 1000 [])
+        peak (fn [s] (reduce max (for [t (range 1000 1400 2)]
+                                   (:scale (first (live (pose/frame draft t {:style-choice s})))))))]
+    (is (> (peak :caffeinated) (+ 0.05 (peak :plain))))))
+
+(deftest a-letter-keeps-its-birth-style
+  (let [slow (mapv (fn [i] {:id i :char "a" :born-ms (* 450 i)}) (range 12))
+        letter (peek slow)
+        b (:born-ms letter)
+        burst (mapv (fn [k] {:id (+ 12 k) :char "b" :born-ms (+ b 40 (* 40 k))}) (range 6))
+        draft (fn [glyphs] {:text (apply str (map :char glyphs)) :glyphs glyphs
+                            :ghosts [] :cues [] :next-id (count glyphs)})
+        pose-at (fn [glyphs t] (nth (live (pose/frame (draft glyphs) t {:style-choice :auto})) 11))
+        t (+ b 300)]
+    (testing "typed slowly, the last letter is born elegant"
+      (is (= (pose-at slow t)
+             (nth (live (pose/frame (draft slow) t {:style-choice :elegant})) 11))))
+    (testing "a fast burst after it leaves it as it was"
+      (is (= (pose-at slow t) (pose-at (into slow burst) t))))
+    (testing "but the burst itself is styled from the rhythm"
+      (is (= :coarse (:style (pose/frame (draft (into slow burst)) (+ b 280) {:style-choice :auto})))))))
