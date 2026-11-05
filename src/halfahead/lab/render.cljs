@@ -148,11 +148,53 @@
         (.add scene bigger)
         (reset! mesh bigger)))))
 
+;; --- stage -------------------------------------------------------------------
+
+(def ^:private bg "#141210")
+
+(def ^:private floor-drop
+  "Gap between the block's lowest baseline region and the floor, in em."
+  1.2)
+
+(defn- floor-mesh
+  "A wide plane under the text, receding into the distance: fine grid lines
+  in ink at low alpha (blending is in linear light, so 0.02 shows as about
+  8% of the way from the background to ink), anti-aliased by their
+  screen-space width, fixed in world space so they never slide as the
+  plane follows the block. Fog fades it into the background."
+  []
+  (let [^js p (.div (.-xz tsl/positionWorld) 2.0)
+        ^js cell (.div (tsl/abs (.sub (tsl/fract (.sub p 0.5)) 0.5)) (tsl/fwidth p))
+        line (.oneMinus (tsl/min (tsl/min (.-x cell) (.-y cell)) 1.0))
+        ^js m (three/MeshBasicNodeMaterial.)]
+    (set! (.-transparent m) true)
+    (set! (.-depthWrite m) false)
+    (set! (.-colorNode m) (tsl/vec4 (tsl/color ink) 1.0))
+    (set! (.-opacityNode m) (.mul line 0.02))
+    (doto (three/Mesh. (three/PlaneGeometry. 400 400) m)
+      (-> .-rotation (.set (- (/ js/Math.PI 2)) 0 0))
+      (aset "renderOrder" -1))))
+
 ;; --- camera ------------------------------------------------------------------
 
+(def ^:private fov-deg 40)
+
+(def ^:private pitch-deg
+  "How far the camera looks down onto the block. A vertical edge at
+  normalised image x (tangent of its angle off-axis) leans by about
+  atan(x tan pitch); the block's outer edges sit near x = 0.4, so 8 degrees
+  would lean them about 3 and 3 degrees leans them about 1.2, under the 2
+  degree bound with margin, while still showing the floor receding."
+  3)
+
+(def ^:private lift
+  "The block sits this fraction of the viewport height above centre, by
+  shifting the lens rather than pitching further, so verticals stay upright."
+  0.08)
+
 (defn- fit-viewport!
-  "Matches the drawing buffer and the camera's aspect to the canvas's CSS
-  size, only when that size changed."
+  "Matches the drawing buffer and the camera's aspect and lens shift to the
+  canvas's CSS size, only when that size changed."
   [{:keys [^js renderer ^js camera viewport]} ^js canvas]
   (let [w (max 1 (.-clientWidth canvas)), h (max 1 (.-clientHeight canvas))
         dpr (min 2 (or js/window.devicePixelRatio 1))]
@@ -161,34 +203,114 @@
       (.setPixelRatio renderer dpr)
       (.setSize renderer w h false)
       (set! (.-aspect camera) (/ w h))
-      (.updateProjectionMatrix camera))))
+      (.setViewOffset camera w h 0 (* lift h) w h))))
 
 ;; --- public ------------------------------------------------------------------
 
-(def ^:private text-px
-  "On-screen size of 1 em at the text plane, in CSS pixels, at most."
-  40)
+(def ^:private line-em
+  "The layout width the shell asks for: in the condensed face about 36-40
+  characters, a comfortable line."
+  18)
 
 (defn em-px
-  "How many CSS pixels one em of text occupies in a viewport w px wide; the
-  shell divides by this to give the layout a width that fits."
+  "How many CSS pixels one em of text occupies in a viewport w px wide: a
+  line of 18 em fills about 70% of the width, never smaller than 16 px.
+  The shell divides by this to give the layout a width that fits."
   [w]
-  (min text-px (/ w 12)))
+  (max 16 (/ (* 0.7 w) line-em)))
 
-(defn- view
-  "A camera slightly below and in front of the text plane (z = 0, text
-  starting at the origin and running down), aimed up into it, so motion in
-  z reads as depth; the first line sits near the top of the canvas."
-  [^js camera ^js canvas]
+(defn- block-extent
+  "[x0 x1 y0 y1] in em around the live poses' laid-out glyphs (each from its
+  pen x to x plus its advance, baseline to about cap height) and the caret."
+  [r {:keys [poses caret]}]
+  (let [live (remove :ghost? poses)
+        {cx :x cy :y} caret
+        xs (concat [cx (+ cx 0.1)] (mapcat (fn [{:keys [x char]}] [x (+ x (:advance (glyph r char)))]) live))
+        ys (concat [cy (+ cy 0.7)] (mapcat (fn [{:keys [y]}] [y (+ y 0.7)]) live))]
+    [(apply min xs) (apply max xs) (apply min ys) (apply max ys)]))
+
+(def ^:private follow-ms
+  "Time constant with which the stage eases toward a changed block."
+  200)
+
+(defn- follow!
+  "Eases the stage's extent toward this frame's block and returns the eased
+  extent. It snaps on the first frame, and on every frame when still?
+  (reduced motion), so the camera never glides on its own."
+  [{:keys [stage] :as r} {:keys [t-ms poses] :as frame} still?]
+  (let [target (block-extent r frame)
+        {:keys [eased at]} @stage
+        k (if (and eased (not still?))
+            (- 1 (js/Math.exp (- (/ (max 0 (- t-ms at)) follow-ms))))
+            1)
+        eased' (if eased (mapv (fn [e t] (+ e (* k (- t e)))) eased target) target)]
+    (reset! stage {:eased eased' :at t-ms :target target
+                   :live (keep-indexed (fn [i p] (when-not (:ghost? p) i)) poses)})
+    eased'))
+
+(defn- view!
+  "Aims the camera's axis at the centre of the eased block from in front
+  and slightly above, at the distance where 1 em spans em-px CSS pixels;
+  rests the floor under the block and sets the fog around the text plane,
+  so letters coming forward brighten and the floor fades into the dark."
+  [{:keys [^js camera ^js scene ^js floor]} ^js canvas [x0 x1 y0 y1]]
   (let [w (max 1 (.-clientWidth canvas)), h (max 1 (.-clientHeight canvas))
-        px (em-px w)
-        fov-rad (* (.-fov camera) (/ js/Math.PI 180))
-        ;; distance at which 1 em spans px CSS pixels vertically
-        dist (/ (/ h px) (* 2 (js/Math.tan (/ fov-rad 2))))
-        cx (- (/ w px 2) 1)
-        cy (- 2.5 (/ h px 2))]
-    (.set (.-position camera) cx (- cy (* 0.18 dist)) dist)
-    (.lookAt camera cx (- cy 0.4) 0)))
+        fov-rad (* fov-deg (/ js/Math.PI 180))
+        pitch (* pitch-deg (/ js/Math.PI 180))
+        dist (/ (/ h (em-px w)) (* 2 (js/Math.tan (/ fov-rad 2))))
+        fx (/ (+ x0 x1) 2), fy (/ (+ y0 y1) 2)
+        ^js fog (.-fog scene)]
+    (.set (.-position camera) fx (+ fy (* dist (js/Math.sin pitch))) (* dist (js/Math.cos pitch)))
+    (.lookAt camera fx fy 0)
+    (.set (.-position floor) fx (- y0 floor-drop) 0)
+    ;; just past the text plane, so letters at rest keep full ink and only
+    ;; those pushed back into the scene dim
+    (set! (.-near fog) (+ dist 0.5))
+    (set! (.-far fog) (+ dist 12))))
+
+(defn- project
+  "World point v (mutated) in CSS pixels of the canvas, y running down."
+  [{:keys [^js camera viewport]} ^js v]
+  (let [[w h] @viewport
+        ^js ndc (.project v camera)]
+    [(* w (/ (inc (.-x ndc)) 2)) (* h (/ (- 1 (.-y ndc)) 2))]))
+
+(defn lean
+  "Degrees between the screen vertical and the projected left edge (bottom
+  to top corner) of drawn glyph i's quad, as placed in the last frame; the
+  shader's jelly sway is not included."
+  [r i]
+  (let [^js mesh @(:mesh r)]
+    (when-not (and (integer? i) (< -1 i (.-count mesh)))
+      (throw (ex-info "No such glyph" {:type :lab/no-such-glyph :index i :count (.-count mesh)})))
+    (let [^js m (three/Matrix4.)
+          _ (.getMatrixAt mesh i m)
+          [bx by] (project r (.applyMatrix4 (three/Vector3. -0.5 -0.5 0) m))
+          [tx ty] (project r (.applyMatrix4 (three/Vector3. -0.5 0.5 0) m))]
+      (* (/ 180 js/Math.PI) (js/Math.atan2 (- tx bx) (- by ty))))))
+
+(defn block-centre
+  "Where the last frame's text block lands on the canvas, in CSS pixels with
+  y down, as #js {:x :y :aimX :aimY :width :height}. x and y are the centre
+  of the bounding box of the live glyphs' quads as drawn, independent of
+  where the camera aims; aimX and aimY are where the centre of the block's
+  layout extent lands, which is the camera's aim point once it has caught
+  up with the block."
+  [r]
+  (let [{:keys [target live]} @(:stage r)
+        [x0 x1 y0 y1] target
+        [w h] @(:viewport r)
+        [ax ay] (project r (three/Vector3. (/ (+ x0 x1) 2) (/ (+ y0 y1) 2) 0))
+        ^js mesh @(:mesh r)
+        ^js m (three/Matrix4.)
+        pts (for [i live
+                  :let [_ (.getMatrixAt mesh i m)]
+                  [cx cy] [[-0.5 -0.5] [0.5 -0.5] [-0.5 0.5] [0.5 0.5]]]
+              (project r (.applyMatrix4 (three/Vector3. cx cy 0) m)))
+        mid (fn [vs] (/ (+ (apply min vs) (apply max vs)) 2))]
+    #js {:x (if (seq pts) (mid (map first pts)) ax)
+         :y (if (seq pts) (mid (map second pts)) ay)
+         :aimX ax :aimY ay :width w :height h}))
 
 (defn backend
   "\"WebGPU\" or \"WebGL2\", whichever this renderer is using."
@@ -208,9 +330,11 @@
 (def ^:private scratch (three/Object3D.))
 
 (defn draw!
-  "Draws one :ha/glyph-frame."
+  "Draws one :ha/glyph-frame. still? (reduced motion) keeps the camera from
+  easing after the block: it moves straight to it instead."
   [{:keys [^js renderer ^js scene ^js camera ^js canvas atlas ^js atlas-size ^js caret] :as r}
-   {:keys [poses] :as frame}]
+   {:keys [poses] :as frame}
+   still?]
   (let [n (count poses)
         ^js mesh (ensure-capacity! r n)
         ^js geometry (.-geometry mesh)
@@ -219,7 +343,7 @@
         wobble (attr "glyphWobble"), ghost (attr "glyphGhost")
         ^js o scratch]
     (fit-viewport! r canvas)
-    (view camera canvas)
+    (view! r canvas (follow! r frame still?))
     (dotimes [i n]
       (let [p (nth poses i)
             {:keys [rect size centre]} (glyph r (:char p))
@@ -252,17 +376,21 @@
         ^js atlas-size (tsl/uniform (three/Vector2. atlas-width (:height @atlas)))
         {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size)
         scene (three/Scene.)
-        camera (three/PerspectiveCamera. 35 1 0.1 500)
+        camera (three/PerspectiveCamera. fov-deg 1 0.1 500)
+        floor (floor-mesh)
         caret (three/Mesh. (three/PlaneGeometry. 0.06 1.1)
                            (three/MeshBasicNodeMaterial. #js {:color vermilion}))
         r {:renderer renderer :scene scene :camera camera :canvas canvas
            :atlas atlas :atlas-node atlas-node :atlas-size atlas-size
-           :material material :caret caret
+           :material material :caret caret :floor floor
+           :stage (atom {})
            :mesh (atom (glyph-mesh 256 material))
            :drawn (atom 0)
            :viewport (atom nil)
            :backend (if (.. renderer -backend -isWebGPUBackend) "WebGPU" "WebGL2")}]
-    (set! (.-background scene) (three/Color. "#141210"))
+    (set! (.-background scene) (three/Color. bg))
+    (set! (.-fog scene) (three/Fog. bg 20 50))
+    (.add scene floor)
     (.add scene @(:mesh r))
     (.add scene caret)
     (doseq [c (map char (range 32 127))] (glyph r (str c)))
@@ -291,7 +419,7 @@
   (-> (init canvas false)
       (.then (fn [r]
                (try
-                 (draw! r {:t-ms 0 :poses [] :caret {:x 0.0 :y 0.0}})
+                 (draw! r {:t-ms 0 :poses [] :caret {:x 0.0 :y 0.0}} true)
                  r
                  (catch :default e
                    (js/console.warn "WebGPU could not draw; falling back to WebGL2:" (.-message ^js e))

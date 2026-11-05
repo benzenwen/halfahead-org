@@ -43,6 +43,21 @@ upstream changes. The reference renderer (`halfahead.lab.render`) is
 three.js with an SDF glyph atlas, deliberately plain, so there is something
 real to replace.
 
+## Staging
+
+The reference renderer stages the block rather than the letters: its
+camera's axis passes through the centre of the live text (40 degree field
+of view, looking down 3 degrees), so letters stand upright at rest, within
+2 degrees of vertical anywhere in the block. A lens shift lifts the block a
+little above the middle without tilting it, and the camera eases after the
+block as lines are added (with reduced motion it moves straight there,
+never gliding). Type is sized so a line (18 em, about 36-40
+characters) fills about 70% of the width. A faint grid floor recedes under
+the text and fog dims what is further from the eye, so z motion reads as
+depth. This is presentation only: no new effects, nothing upstream changes.
+(In this scene +z points toward the camera, so births and launches come
+forward and brighten.)
+
 ## Accessibility
 
 The input is a real `<textarea>`, focused, with transparent text: IME,
@@ -64,9 +79,12 @@ bb lab:e2e    # the same page in headless Chromium (e2e/lab.mjs)
 `bb lab` serves `public/` on a free port and prints the URL of
 `/lab/index.html` (the local server maps only `/` to an index); Ctrl-C
 stops it. `bb lab:e2e` types a sentence, backspaces, waits for everything
-to settle, and repeats with reduced motion, asserting on `window.__lab`
-along the way; it leaves `typing-mid.png`, `embers.png` and `settled.png`
-in `out/lab/` and stops the server it started. It is not part of
+to settle (then asserts every letter is upright and the block centred),
+types on until the block wraps (still centred), and repeats with reduced
+motion (the camera already on the block on the next frame), asserting on
+`window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
+`settled.png` and `wrapped.png` in `out/lab/` and stops the server it
+started. It is not part of
 `bb test`.
 
 The status line names the backend. `halfahead.lab.render` asks three.js's
@@ -78,5 +96,8 @@ backends.
 
 The page is offline: no network, no downloaded fonts (the glyph atlas is
 rasterised with tiny-sdf from the system's sans faces), no sound.
-`window.__lab` exposes `backend`, `liveText()`, `lastFrame()` and
-`drawn()` for tests and for anyone poking at it from the console.
+`window.__lab` exposes `backend`, `liveText()`, `lastFrame()`,
+`drawn()`, `lean(i)` (degrees between drawn glyph i's projected left edge
+and the screen vertical) and `blockCentre()` (the block's drawn centre,
+where the camera aims, and the viewport size, in CSS pixels) for tests and for anyone poking at
+it from the console.

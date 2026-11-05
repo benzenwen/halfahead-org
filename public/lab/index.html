@@ -18,7 +18,9 @@
     /* The textarea is the real input; the canvas draws what it holds. */
     #type {
       position: fixed; inset: 0; width: 100%; height: 100%; box-sizing: border-box;
-      margin: 0; padding: 4.5rem 1rem 3rem; border: 0; resize: none;
+      /* Roughly over the drawn block, centred a little above the middle, so
+         selection and IME popups land near it; a readable measure. */
+      margin: 0; padding: 36vh max(1rem, calc((100% - 70ch) / 2)) 3rem; border: 0; resize: none;
       background: transparent; color: transparent; caret-color: transparent;
       font: 1.125rem/1.6 var(--condensed);
     }
