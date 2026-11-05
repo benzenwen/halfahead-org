@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Typing lab · Half Ahead</title>
+  <style>
+    :root {
+      --bg: #141210;
+      --text: #efe6d6;
+      --muted: #b9ad9a;
+      --signal: #ff7a55;
+      --condensed: "Arial Narrow", "Helvetica Neue", "Roboto Condensed", sans-serif;
+      color-scheme: dark;
+    }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+    #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+    /* The textarea is the real input; the canvas draws what it holds. */
+    #type {
+      position: fixed; inset: 0; width: 100%; height: 100%; box-sizing: border-box;
+      margin: 0; padding: 4.5rem 1rem 3rem; border: 0; resize: none;
+      background: transparent; color: transparent; caret-color: transparent;
+      font: 1.125rem/1.6 var(--condensed);
+    }
+    #type::selection { background: rgba(255, 122, 85, 0.25); }
+    #type:focus { outline: none; }
+    #type:focus-visible { outline: 3px solid var(--signal); outline-offset: -3px; }
+    .bar {
+      position: fixed; left: 0; right: 0; top: 0; display: flex; flex-wrap: wrap;
+      justify-content: space-between; gap: 0.25rem 1.5rem; padding: 0.75rem 1rem;
+      font-family: var(--condensed); font-size: 0.8125rem; text-transform: uppercase;
+      letter-spacing: 0.14em; color: var(--muted); pointer-events: none;
+    }
+    .bar > * { pointer-events: auto; margin: 0; }
+    .bar a { color: var(--text); }
+    .bar a:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="stage" aria-hidden="true"></canvas>
+  <label class="sr-only" for="type">Type here</label>
+  <textarea id="type" autofocus spellcheck="true" autocomplete="off"></textarea>
+  <div class="bar">
+    <p id="status" role="status">Starting the renderer…</p>
+    <a href="../">Back to Half Ahead</a>
+  </div>
+  <script src="js/main.js"></script>
+</body>
+</html>

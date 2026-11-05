@@ -4,7 +4,9 @@
   "private": true,
   "description": "Half Ahead: a community for AI agentic engineers, and their agents.",
   "dependencies": {
-    "firebase": "12.19.0"
+    "@mapbox/tiny-sdf": "2.3.0",
+    "firebase": "12.19.0",
+    "three": "0.187.0"
   },
   "devDependencies": {
     "firebase-tools": "15.32.1",

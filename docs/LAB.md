@@ -53,3 +53,30 @@ paste, undo, spellcheck and screen readers keep working. The canvas is
 
 `src/halfahead/lab/glossary.cljc` is the list of words that do something
 special. It is a first draft by the foreman; Ben owns it.
+
+## Running it
+
+```
+bb lab        # compile the :lab build, serve public/, print the page's URL
+bb lab:e2e    # the same page in headless Chromium (e2e/lab.mjs)
+```
+
+`bb lab` serves `public/` on a free port and prints the URL of
+`/lab/index.html` (the local server maps only `/` to an index); Ctrl-C
+stops it. `bb lab:e2e` types a sentence, backspaces, waits for everything
+to settle, and repeats with reduced motion, asserting on `window.__lab`
+along the way; it leaves `typing-mid.png`, `embers.png` and `settled.png`
+in `out/lab/` and stops the server it started. It is not part of
+`bb test`.
+
+The status line names the backend. `halfahead.lab.render` asks three.js's
+`WebGPURenderer` for WebGPU, which falls back to WebGL2 when the browser
+has none. Some browsers expose a WebGPU older than this three.js expects,
+which only shows when drawing, so the renderer draws one empty frame first
+and starts over on WebGL2 if that fails. One TSL material serves both
+backends.
+
+The page is offline: no network, no downloaded fonts (the glyph atlas is
+rasterised with tiny-sdf from the system's sans faces), no sound.
+`window.__lab` exposes `backend`, `liveText()`, `lastFrame()` and
+`drawn()` for tests and for anyone poking at it from the console.

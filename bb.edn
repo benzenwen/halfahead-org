@@ -57,6 +57,16 @@
               :requires ([halfahead.dev.play])
               :task     (halfahead.dev.play/inner! *command-line-args*)}
 
+  lab     {:doc      "Compile the typing lab and serve it locally; prints the URL of /lab/. Ctrl-C stops the server"
+           :depends  [deps]
+           :requires ([halfahead.dev.lab])
+           :task     (halfahead.dev.lab/-main)}
+
+  lab:e2e {:doc      "The typing lab in headless Chromium (e2e/lab.mjs); screenshots in out/lab (not part of bb test)"
+           :depends  [deps]
+           :requires ([halfahead.dev.lab])
+           :task     (halfahead.dev.lab/e2e!)}
+
   dev     {:doc     "Watch the app and serve public/ at http://localhost:8000"
            :depends [deps]
            :task    (shell "npx shadow-cljs watch app")}

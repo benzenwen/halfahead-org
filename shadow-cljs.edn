@@ -1,5 +1,6 @@
 ;; Two builds share one source tree:
 ;;   :app   the conversation client -> public/js/app (public/index.html)
+;;   :lab   the typing lab -> public/lab/js (public/lab/index.html)
 ;;   :test  every *-test namespace in a .cljc file, run under node by
 ;;          `bb test`, so the shared core is proven on both hosts
 {:source-paths ["src" "test"]
@@ -15,6 +16,13 @@
          :output-dir "public/js/app"
          :asset-path "js/app"
          :modules    {:main {:init-fn halfahead.app/init!}}}
+
+  ;; Warnings are errors, as in :test: the lab is all interop.
+  :lab  {:target           :browser
+         :output-dir       "public/lab/js"
+         :asset-path       "js"
+         :modules          {:main {:init-fn halfahead.lab.main/init!}}
+         :compiler-options {:warnings-as-errors true}}
 
   ;; Warnings are errors here only: this build compiles every halfahead
   ;; namespace (tests plus the browser shell), so an unhinted interop form
