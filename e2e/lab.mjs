@@ -335,6 +335,85 @@ try {
   }
   await styled.close();
 
+  begin('sound', null);
+  const sounding = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = sounding;
+  const soundUrl = new URL(url);
+  soundUrl.searchParams.set('debug', '');
+  await open(sounding, soundUrl.href);
+  // The overlay is redrawn on the next frame, which software rendering can
+  // take a few hundred ms to reach.
+  const overlayReads = (words) => sounding.waitForFunction(
+    (w) => document.getElementById('debug').textContent.includes(w), words, { timeout: 5000 })
+    .catch(() => {});
+  const soundState = () => sounding.evaluate(() => ({
+    checked: document.getElementById('sound').checked,
+    overlay: document.getElementById('debug').textContent,
+    focused: document.activeElement === document.getElementById('type'),
+    log: window.__lab.soundLog(),
+    bounds: window.__lab.bounds(),
+  }));
+  // Every voice within the bounds the pure core enforces, read from the page.
+  const assertBounded = (entry, b) => {
+    const vs = entry.sound.voices;
+    if (!vs.length) throw new Error(`a sound with no voices: ${JSON.stringify(entry)}`);
+    const sum = vs.reduce((a, v) => a + v.gain, 0);
+    if (!(sum <= b['max-sum-gain'] + 1e-9)) throw new Error(`summed gain ${sum} over ${b['max-sum-gain']}`);
+    for (const v of vs) {
+      if (!(v['at-ms'] >= 0 && v['at-ms'] + v.ms <= b['max-ms'] + 1e-9)) throw new Error(`voice outside ${b['max-ms']} ms: ${JSON.stringify(v)}`);
+      if (!(v.gain >= 0 && v.gain <= b['max-voice-gain'] + 1e-9)) throw new Error(`voice gain over ${b['max-voice-gain']}: ${JSON.stringify(v)}`);
+      if (!(v.hz >= b.hz[0] && v.hz <= b.hz[1])) throw new Error(`voice hz outside ${b.hz}: ${JSON.stringify(v)}`);
+      if (!(v.pan >= b.pan[0] && v.pan <= b.pan[1])) throw new Error(`voice pan outside ${b.pan}: ${JSON.stringify(v)}`);
+    }
+    return vs.length;
+  };
+  await overlayReads('sound off');
+  let heard = await soundState();
+  if (heard.checked) throw new Error('Sound starts on');
+  if (!heard.overlay.includes('sound off')) throw new Error(`the overlay does not read "sound off": "${heard.overlay}"`);
+  await sounding.keyboard.type('crash ', { delay: 70 });
+  await sounding.waitForTimeout(1200);
+  heard = await soundState();
+  if (heard.log.length) throw new Error(`with Sound off, ${heard.log.length} sound(s) logged`);
+  await sounding.locator('#sound').click();
+  await overlayReads('sound on');
+  heard = await soundState();
+  if (!heard.checked || !heard.overlay.includes('sound on'))
+    throw new Error(`after the click Sound is ${heard.checked}; overlay "${heard.overlay}"`);
+  if (!heard.focused) throw new Error('the textarea lost the focus to the Sound checkbox');
+  await sounding.locator('#type').fill('');
+  await sounding.keyboard.type('crash ', { delay: 70 });
+  // past the pause, so the phrase is directed too: a :line, which is silent
+  await sounding.waitForTimeout(1200);
+  heard = await soundState();
+  if (heard.log.length !== 1 || heard.log[0].kind !== 'cue' || heard.log[0].effect !== 'quake')
+    throw new Error(`after "crash " the log is ${JSON.stringify(heard.log)}`);
+  const crashVoices = assertBounded(heard.log[0], heard.bounds);
+  await sounding.keyboard.type('WHAT A DAY! ', { delay: 70 });
+  await sounding.waitForTimeout(1200);
+  heard = await soundState();
+  const hit = heard.log.find((e) => e.kind === 'shot' && e.shot === 'card');
+  if (!hit) throw new Error(`no card hit after "WHAT A DAY! ": ${JSON.stringify(heard.log)}`);
+  assertBounded(hit, heard.bounds);
+  if (!hit.sound.voices.some((v) => v.wave === 'noise') || !hit.sound.voices.some((v) => v.wave !== 'noise' && v.hz < 100))
+    throw new Error(`the card hit has no noise swell or no low thump: ${JSON.stringify(hit.sound)}`);
+  heard.log.forEach((e) => assertBounded(e, heard.bounds));
+  await sounding.reload();
+  await sounding.waitForFunction(() => window.__lab?.backend, null, { timeout: 30000 });
+  await overlayReads('sound on');
+  heard = await soundState();
+  if (!heard.checked || !heard.overlay.includes('sound on'))
+    throw new Error(`after a reload Sound is ${heard.checked}; overlay "${heard.overlay}"`);
+  // leave nothing remembered behind
+  await sounding.locator('#sound').click();
+  await sounding.reload();
+  await sounding.waitForFunction(() => window.__lab?.backend, null, { timeout: 30000 });
+  heard = await soundState();
+  if (heard.checked) throw new Error('Sound still on after turning it off and reloading');
+  done(`off by default and silent; on: "crash" -> quake in ${crashVoices} bounded voice(s), the :line after it silent; `
+    + `"WHAT A DAY!" -> card hit of ${hit.sound.voices.length} voices; remembered on, then off, across reloads`);
+  await sounding.close();
+
   begin('director', null);
   const directed = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
   current = directed;

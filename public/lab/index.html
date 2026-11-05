@@ -57,6 +57,9 @@
       border: 1px solid rgba(185, 173, 154, 0.35); border-radius: 0.25rem; padding: 0.2rem 0.35rem;
     }
     .styles select:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    .styles .sound { display: flex; align-items: center; gap: 0.3rem; }
+    .styles input[type="checkbox"] { margin: 0; accent-color: var(--signal); }
+    .styles input[type="checkbox"]:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -82,6 +85,7 @@
       <option value="drunken">Drunken</option>
       <option value="coarse">Coarse</option>
     </select>
+    <label class="sound"><input type="checkbox" id="sound"> Sound</label>
   </div>
   <pre id="debug" aria-hidden="true" hidden></pre>
   <script src="js/main.js"></script>
