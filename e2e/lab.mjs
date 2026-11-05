@@ -400,12 +400,18 @@ try {
   if (atRest.name !== 'grid') throw new Error(`?stage=grid shows the stage "${atRest.name}"`);
   if (atRest.state.brightness !== 0) throw new Error(`the grid starts at brightness ${atRest.state.brightness}`);
   if (!(atRest.state.visibility > 0.99)) throw new Error(`the grid floor is at visibility ${atRest.state.visibility} at level 3`);
-  // The brightest the floor gets, sampled on every frame: software rendering
-  // can be slow enough to miss a flash read only once.
+  // The floor's light, sampled on every frame. The flash is a function of
+  // time, so each frame is checked against the curve at its own t: software
+  // rendering draws a frame every few hundred ms, and how near one lands to
+  // the flash's peak depends on that phase, not on the grid.
   await staged.evaluate(() => {
-    window.__peak = 0;
+    window.__samples = [];
     const sample = () => {
-      window.__peak = Math.max(window.__peak, window.__lab.stageState().brightness);
+      const s = window.__lab.stageState();
+      window.__samples.push({
+        t: s.t, brightness: s.brightness,
+        flashAt: s['flash-at'] ?? null, flashIntensity: s['flash-intensity'] ?? null,
+      });
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
@@ -418,10 +424,28 @@ try {
   if (!sawQuake)
     throw new Error(`the overlay never showed the quake moment: "${await staged.locator('#debug').textContent()}"`);
   const settledFlash = await staged.waitForFunction(
-    () => window.__peak > 0 && window.__lab.stageState().brightness < 0.01,
+    () => window.__samples.some((s) => s.flashAt !== null) && window.__lab.stageState().brightness < 0.01,
     null, { polling: 'raf', timeout: 4000 }).then(() => true).catch(() => false);
-  const peak = await staged.evaluate(() => window.__peak);
-  if (!(peak > 0.3)) throw new Error(`the grid's brightness peaked at ${peak.toFixed(3)} on a quake of 1.0`);
+  const samples = await staged.evaluate(() => window.__samples);
+  const first = samples.find((s) => s.flashAt !== null);
+  if (!first) throw new Error('the grid never received the quake (no flash-at in its state)');
+  const { flashAt, flashIntensity } = first;
+  if (flashIntensity !== 1) throw new Error(`"crash" flashed the grid at intensity ${flashIntensity}, not 1.0`);
+  // one sample per update: our frame callback can read the same update twice
+  const frames = samples.filter((s, i) => typeof s.t === 'number' && (i === 0 || s.t !== samples[i - 1].t));
+  const gaps = frames.slice(1).map((s, i) => s.t - frames[i].t).filter((d) => d > 0).sort((a, b) => a - b);
+  const interval = gaps.length
+    ? `median ${gaps[Math.floor(gaps.length / 2)].toFixed(0)} ms (${gaps[0].toFixed(0)}-${gaps[gaps.length - 1].toFixed(0)})`
+    : 'unknown';
+  const inFlash = frames.filter((s) => s.flashAt === flashAt && (s.t - flashAt) / 900 >= 0 && (s.t - flashAt) / 900 < 1);
+  if (!inFlash.some((s) => s.brightness > 0))
+    throw new Error(`no frame inside the 900 ms flash was lit: ${inFlash.length} frames inside it; frame interval ${interval}`);
+  for (const s of inFlash) {
+    const u = (s.t - flashAt) / 900;
+    const expected = flashIntensity * (1 - u) ** 2;
+    if (!(Math.abs(s.brightness - expected) <= 1e-6))
+      throw new Error(`at t ${s.t} (u ${u.toFixed(3)}) the grid's brightness is ${s.brightness}, not ${expected.toFixed(6)} on its flash curve`);
+  }
   if (!settledFlash) {
     const now = await staged.evaluate(() => window.__lab.stageState().brightness);
     throw new Error(`the grid's brightness is still ${now} 4 s after the quake`);
@@ -432,7 +456,8 @@ try {
   const rested = await staged.evaluate(() => window.__lab.stageState());
   if (rested.brightness !== 0 || rested.pulse !== 0)
     throw new Error(`the grid is not at rest: ${JSON.stringify(rested)}`);
-  done(`?stage=grid; "crash" -> a quake moment in the overlay; brightness 0 -> peak ${peak.toFixed(2)} -> 0`);
+  done(`?stage=grid; "crash" -> quake in overlay; ${inFlash.length} frames inside the 900 ms flash, `
+    + `each on intensity x (1-u)^2; frame interval ${interval}; brightness -> 0`);
   await staged.close();
 
   begin('style auto', null);

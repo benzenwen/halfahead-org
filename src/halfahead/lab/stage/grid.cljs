@@ -5,17 +5,16 @@
   proportion to the cue's intensity (a hint of lightning), and a :card
   shot pulses its far lines once. With no moments it is the plain floor."
   (:require ["three/tsl" :as tsl]
-            ["three/webgpu" :as three]))
+            ["three/webgpu" :as three]
+            [halfahead.lab.stage.light :as light]))
 
 (def ^:private floor-drop
   "Gap between the line being written and the floor, in em."
   1.2)
 
-(def ^:private flash-ms 900)
 (def ^:private flash-gain
   "How much brighter the lines are at a flash of intensity 1."
   6.0)
-(def ^:private pulse-ms 700)
 (def ^:private pulse-gain 3.0)
 
 (defn- floor-mesh
@@ -43,14 +42,6 @@
       (-> .-rotation (.set (- (/ js/Math.PI 2)) 0 0))
       (aset "renderOrder" -1))))
 
-(defn- since
-  "How far through a span of ms that began at t0 time t is, from 0 to 1;
-  nil when there is no t0 or the span is over."
-  [t0 ms t]
-  (when t0
-    (let [u (/ (- t t0) ms)]
-      (when (<= 0 u 1) u))))
-
 (defn- init [^js scene {:keys [ink]}]
   (let [nodes {:visibility (tsl/uniform 0.0) :flash (tsl/uniform 0.0) :pulse (tsl/uniform 0.0)}
         ^js mesh (floor-mesh ink (:visibility nodes) (:flash nodes) (:pulse nodes))]
@@ -72,16 +63,14 @@
    {:keys [camera reveal]} t]
   (let [{:keys [level lights] :or {level 3 lights 1}} reveal
         visibility (if (>= level 2) lights 0)
-        brightness (if-let [u (since flash-at flash-ms t)]
-                     (* flash-intensity (* (- 1 u) (- 1 u)))
-                     0)
-        pulse (if-let [u (since pulse-at pulse-ms t)] (js/Math.sin (* js/Math.PI u)) 0)]
+        brightness (light/flash flash-at flash-intensity t)
+        pulse (light/pulse pulse-at t)]
     (when-let [{:keys [tx ty]} camera]
       (.set (.-position mesh) tx (- ty floor-drop) 0))
     (set! (.-value ^js (:visibility nodes)) visibility)
     (set! (.-value ^js (:flash nodes)) brightness)
     (set! (.-value ^js (:pulse nodes)) pulse)
-    (assoc state :visibility visibility :brightness brightness :pulse pulse)))
+    (assoc state :visibility visibility :brightness brightness :pulse pulse :t t)))
 
 (defn- dispose [{:keys [^js scene ^js mesh]}]
   (.remove scene mesh)
