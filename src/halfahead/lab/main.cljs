@@ -14,10 +14,11 @@
 (defn- by-id ^js [id] (js/document.getElementById id))
 
 (defn- width-em
-  "The layout width that fits the viewport, less a margin of 1 em a side."
+  "The layout width that fills about 70% of the viewport at the renderer's
+  type size: 18 em, a 36-40 character line, wherever em-px is not floored."
   []
   (let [w js/window.innerWidth]
-    (max 4 (- (/ w (render/em-px w)) 2))))
+    (max 4 (/ (* 0.7 w) (render/em-px w)))))
 
 (defn- frame [r reduced-motion?]
   (let [t (now-ms)]
@@ -27,9 +28,10 @@
                  :reduced-motion? reduced-motion?})))
 
 (defn- loop! [r ^js motion-query]
-  (let [f (frame r (.-matches motion-query))]
+  (let [still? (.-matches motion-query)
+        f (frame r still?)]
     (swap! state assoc :last-frame f)
-    (render/draw! r f)
+    (render/draw! r f still?)
     (js/requestAnimationFrame #(loop! r motion-query))))
 
 (defn- expose! [r]
@@ -37,7 +39,9 @@
         #js {:backend (render/backend r)
              :liveText #(apply str (map :char (remove :ghost? (:poses (:last-frame @state)))))
              :lastFrame #(clj->js (:last-frame @state))
-             :drawn #(render/drawn r)}))
+             :drawn #(render/drawn r)
+             :lean #(render/lean r %)
+             :blockCentre #(render/block-centre r)}))
 
 (defn- on-input [^js e]
   (swap! state update :draft draft/edit (.. e -target -value) (now-ms) cues/word-cue))

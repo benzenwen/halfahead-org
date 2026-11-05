@@ -5,6 +5,8 @@ import { mkdirSync } from 'node:fs';
 const url = process.argv[2];
 const out = 'out/lab';
 const text = 'we finally shipped it! then a crash ';
+// Typed after the settled step so the block wraps onto further lines.
+const more = 'and we fixed it before anyone noticed, so lunch was quiet ';
 mkdirSync(out, { recursive: true });
 
 const consoleErrors = new Map();
@@ -22,6 +24,19 @@ const track = (page) => {
 const begin = (name, page) => { step = name; current = page; };
 const done = (msg) => console.log(`ok   ${step}: ${msg}`);
 
+// Where the block sits: its drawn centre within 12% of the width of the
+// horizontal centre, and a little above the vertical centre (the lens shift
+// lifts it 8% of the height). Returns a summary for done().
+const assertCentred = (c) => {
+  const off = c.x - c.width / 2;
+  if (!(Math.abs(off) < 0.12 * c.width))
+    throw new Error(`block centre at x ${c.x.toFixed(1)} is ${off.toFixed(1)} px off a ${c.width} px centre`);
+  const above = c.height / 2 - c.y;
+  if (!(above > 0 && above < 0.2 * c.height))
+    throw new Error(`block centre at y ${c.y.toFixed(1)} is not a little above the middle of ${c.height} px`);
+  return `block centre ${off.toFixed(1)} px across, ${above.toFixed(1)} px above the middle`;
+};
+
 // The frame drawn after everything typed so far, read in the page.
 const nextFrame = (page) => page.evaluate(() => new Promise((resolve) =>
   requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -32,6 +47,8 @@ const nextFrame = (page) => page.evaluate(() => new Promise((resolve) =>
       drawn: window.__lab.drawn(),
       ghosts: f.poses.filter((p) => p['ghost?']).length,
       unscaled: f.poses.filter((p) => !p['ghost?'] && p.scale !== 1).length,
+      lines: new Set(f.poses.filter((p) => !p['ghost?']).map((p) => p.y)).size,
+      centre: window.__lab.blockCentre(),
     });
   }))));
 
@@ -90,24 +107,65 @@ try {
   const settled = await nextFrame(page);
   if (settled.ghosts !== 0) throw new Error(`${settled.ghosts} ghosts after 2 s`);
   if (settled.unscaled !== 0) throw new Error(`${settled.unscaled} live poses not at scale 1`);
-  done('no ghosts; every live pose at scale 1');
+  // Upright at rest: every live glyph's projected left edge within 2 degrees
+  // of the screen vertical, and the block centred under the camera.
+  const stage = await page.evaluate(() => {
+    const leans = window.__lab.lastFrame().poses
+      .map((p, i) => ({ i, char: p.char, ghost: p['ghost?'] }))
+      .filter((g) => !g.ghost)
+      .map((g) => ({ ...g, lean: window.__lab.lean(g.i) }));
+    return { leans, centre: window.__lab.blockCentre() };
+  });
+  if (stage.leans.length !== settled.live.length)
+    throw new Error(`measured ${stage.leans.length} glyphs of ${settled.live.length}`);
+  const worst = stage.leans.reduce((a, b) => (Math.abs(b.lean) > Math.abs(a.lean) ? b : a));
+  if (!(Math.abs(worst.lean) < 2))
+    throw new Error(`glyph ${worst.i} ("${worst.char}") leans ${worst.lean.toFixed(2)} degrees`);
+  done(`no ghosts; every live pose at scale 1; worst lean ${worst.lean.toFixed(2)} deg `
+    + `("${worst.char}"); ${assertCentred(stage.centre)}`);
+
+  begin('wrapped', page);
+  await page.keyboard.type(more, { delay: 30 });
+  await page.waitForTimeout(2000);
+  await page.screenshot({ path: `${out}/wrapped.png` });
+  const wrapped = await nextFrame(page);
+  if (wrapped.live !== wrapped.value) throw new Error(`live text "${wrapped.live}" != "${wrapped.value}"`);
+  if (wrapped.lines < 2) throw new Error(`the block did not wrap: ${wrapped.lines} line(s)`);
+  done(`${wrapped.lines} lines; ${assertCentred(wrapped.centre)}`);
 
   begin('reduced motion', null);
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const still = track(await context.newPage());
   current = still;
   await open(still);
+  // On every frame while typing, how far the camera's aim trails the
+  // block's centre (lifted by the lens shift); the worst is kept.
+  await still.evaluate(() => {
+    window.__worstLag = 0;
+    const sample = () => {
+      const c = window.__lab.blockCentre();
+      const lag = Math.hypot(c.aimX - c.width / 2, c.aimY - c.height * (0.5 - 0.08));
+      window.__worstLag = Math.max(window.__worstLag, lag);
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
   await still.keyboard.type(text, { delay: 70 });
   const calm = await nextFrame(still);
   if (calm.live !== text) throw new Error(`live text "${calm.live}"`);
   if (calm.unscaled !== 0) throw new Error(`${calm.unscaled} live poses not at scale 1`);
   if (calm.ghosts !== 0) throw new Error(`${calm.ghosts} ghosts with reduced motion`);
-  done('every live pose at scale 1 right after typing');
+  // The camera does not glide after the block: on every frame drawn while
+  // typing, its aim is already on the block, with no settle wait.
+  const lag = await still.evaluate(() => window.__worstLag);
+  if (!(lag < 1.5)) throw new Error(`the camera trailed the block by up to ${lag.toFixed(1)} px with reduced motion`);
+  done(`every live pose at scale 1 right after typing; camera never more than ${lag.toFixed(2)} px off the block`);
 
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
+  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped'].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);
