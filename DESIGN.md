@@ -101,6 +101,15 @@ docs/SCHEMA.md, and the reasons behind both in DECISIONS.md.
 - Every acceptance criterion becomes a test that would fail if the feature
   were deleted. Prefer property checks where a pure function has an
   invariant.
+- A property returns the conjunction of everything it claims. A `let`
+  whose body holds two checks returns only the last; combine them with
+  `and` (0026 shipped one that never asserted its first half).
+- Browser checks of motion never assume a frame rate. Headless Chromium
+  in a cloud container draws with software WebGL at 3 to 5 frames a
+  second, so a sampled peak or a fixed wait passes or fails with the frame
+  phase. Keep the curve a pure function of time and assert that each
+  sampled frame matches it at that frame's t (0039 shipped a peak check
+  that failed at 4 fps; 0041 fixed it this way).
 - `bb test` runs offline: the Babashka suite over `test/**/*_test.clj[c]`,
   then every `.cljc` test again under node (so the shared core is proven
   on both hosts), then a compile of the app. Tests of shared code are
