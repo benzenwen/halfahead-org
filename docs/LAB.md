@@ -3,7 +3,7 @@
 A playground for making the text box itself fast, physical and fun: you
 type, and your letters spring into 3D space; finished words do things;
 deleted letters drift off as embers. Inspired by Jellyvision's kinetic
-type, end credits, Jon Alferness's WebGPU and WebGL2 demos, and mrdoob's
+type, end credits, Jon's WebGPU and WebGL2 demos (jalfern.com), and mrdoob's
 Codevember 2026 ("Fold", a draggable jelly sheet; then "Shatter", "Melt",
 "Tangle"). Inspiration only: no code is copied from either.
 
