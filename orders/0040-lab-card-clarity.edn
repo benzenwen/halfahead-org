@@ -1,0 +1,43 @@
+{:id "0040-lab-card-clarity"
+ :title "Lab card clarity: the rest of the line steps back while a card holds the stage"
+ :lupa/deps #{"0039-lab-stage-seam"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "A card (the director's trailer shot) sets its phrase large on the
+        current line's height, 0.3 em in front, while the other letters dim
+        to 0.25 (the foreman's spec in 0035). In the screenshots the dimmed
+        letters show through between the card's strokes ('hello there'
+        under 'WHAT A DAY!'), because glyph quads are transparent, so the
+        card reads as a muddle rather than a title. A trailer card owns the
+        frame. Make the rest of the line step back: much fainter and
+        further away, then return exactly as before."
+ :scope ["src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "In halfahead.lab.pose's card performance only: every live glyph
+          that is not in the card blends, by the same envelope that dims it
+          today, towards opacity at most 0.08 and z at its unperformed z
+          minus 2.0 em (behind the line, so perspective also shrinks it
+          towards the vanishing point). Card letters are unchanged. Fix the
+          card-z docstring, which claims the dimmed line never shows
+          through; say what is true instead. Ghosts are untouched.
+          Tests (pose_test.cljc): at the middle of a card's hold every
+          non-card live pose has opacity <= 0.08 and z <= its pose without
+          the shot minus 1.9; 5 s after the card began every pose equals
+          the frame without the direction (the existing settle check);
+          reduced motion still performs no card. Update 'the rest dims to
+          0.25' accordingly.
+          e2e/lab.mjs: the director's card step asserts opacity <= 0.08 and
+          z recession for the others instead of 0.25, and saves card.png as
+          before. docs/LAB.md: the two lines that say 0.25."
+ :acceptance
+ ["pose tests: the hold-time fade and recession, and the full return after
+   the card, as above; every existing pose property still passes"
+  "`bb lab:e2e` passes with the updated card step and all other steps;
+   `bb test` stays green; out/lab/card.png for the foreman"]
+ :non-goals
+ ["No change to the card's timing, size or position, to push or pull, to
+   the director's rules, cues, styles, sound, reveal or stage"
+  "Do not edit the schema; do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+           "e2e/lab.mjs" "docs/LAB.md"]
+ :budget-usd 8.0}
