@@ -16,10 +16,11 @@
   (shell "npx" "shadow-cljs" "compile" "lab"))
 
 (defn- lab-url
-  "The lab page under a stop function from serve/start!. The static server
-  only maps / to index.html, so the page is named in full."
+  "The lab page under a stop function from serve/start!. The directory URL,
+  because the static server maps a directory to its index.html and a short
+  URL survives terminals that clip the last characters of a printed link."
   [stop]
-  (str "http://127.0.0.1:" (:port (meta stop)) "/lab/index.html"))
+  (str "http://127.0.0.1:" (:port (meta stop)) "/lab/"))
 
 (defn- e2e-exit
   "The e2e script's exit code, or 1 when it passed but left a screenshot out."

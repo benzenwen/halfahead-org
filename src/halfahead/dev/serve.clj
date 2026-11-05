@@ -32,16 +32,27 @@
     (catch IllegalArgumentException _ nil)))
 
 (defn handler
-  "Ring handler serving files under root."
+  "Ring handler serving files under root. A directory serves its
+  index.html; asked for without a trailing slash, it redirects to one so
+  the page's relative paths resolve against the directory."
   [root]
   (let [root (fs/normalize (fs/absolutize root))]
     (fn [{:keys [uri]}]
       (let [file (requested-file root uri)]
-        (if (and file (fs/regular-file? file))
+        (cond
+          (and file (fs/regular-file? file))
           {:status  200
            :headers {"Content-Type" (get content-types (fs/extension file) "application/octet-stream")}
            :body    (fs/file file)}
-          not-found)))))
+
+          (and file (fs/directory? file) (fs/regular-file? (fs/path file "index.html")))
+          (if (str/ends-with? uri "/")
+            {:status  200
+             :headers {"Content-Type" (get content-types "html")}
+             :body    (fs/file (fs/path file "index.html"))}
+            {:status 301 :headers {"Location" (str uri "/")} :body ""})
+
+          :else not-found)))))
 
 (defn start!
   "Serves root on port (a free one when omitted). Returns the stop function;
