@@ -649,13 +649,21 @@ try {
   const others = live.filter((p) => !onCard.has(p.id));
   await directed.screenshot({ path: `${out}/card.png` });
   if (!(biggest > 2)) throw new Error(`900 ms into the card its largest glyph is at scale ${biggest}`);
-  const undimmed = others.filter((p) => Math.abs(p.opacity - 0.25) > 0.03);
+  const undimmed = others.filter((p) => p.opacity > 0.08 + 1e-6);
   if (undimmed.length)
-    throw new Error(`${undimmed.length} glyph(s) off the card not dimmed to 0.25, e.g. "${undimmed[0].char}" at ${undimmed[0].opacity}`);
+    throw new Error(`${undimmed.length} glyph(s) off the card above opacity 0.08, e.g. "${undimmed[0].char}" at ${undimmed[0].opacity}`);
   await directed.clock.fastForward(5000);
   onStage = await look();
   const unsettled = onStage.frame.poses.filter((p) => !p['ghost?'] && p.scale !== 1);
   if (unsettled.length) throw new Error(`${unsettled.length} glyph(s) not back at scale 1 5 s after the card`);
+  // "hello there" was at rest before the card and is again now, so where it
+  // settles is where it would have been without the card.
+  const settledZ = new Map(onStage.frame.poses.filter((p) => !p['ghost?']).map((p) => [p.id, p.z]));
+  const behind = others.filter((p) => p.char.trim() && p.id < card['glyph-ids'][0]);
+  const unreceded = behind.filter((p) => !(p.z <= settledZ.get(p.id) - 1.9));
+  if (behind.length !== 10 || unreceded.length)
+    throw new Error(`of ${behind.length} letters of "hello there", ${unreceded.length} not 1.9 em behind where they settle, e.g. `
+      + `"${unreceded[0]?.char}" at z ${unreceded[0]?.z} (settles at ${settledZ.get(unreceded[0]?.id)})`);
   // Within 10 s of the card the budget is spent: a question stays in the line.
   await typeKeys('why not? ');
   onStage = await look();
@@ -675,7 +683,7 @@ try {
   await directed.screenshot({ path: `${out}/push.png` });
   if (!(pushed <= 0.75 * restDistance))
     throw new Error(`800 ms into the push the camera is ${pushed.toFixed(2)} em from its target, at rest ${restDistance.toFixed(2)}`);
-  done(`card: a glyph at scale ${biggest.toFixed(2)}, ${others.length} others at opacity 0.25, all back at scale 1 5 s later; `
+  done(`card: a glyph at scale ${biggest.toFixed(2)}, ${others.length} others at opacity <= 0.08 and "hello there" receded, all back at scale 1 5 s later; `
     + `"why not?" ${spent.shot} within 10 s; "is it?" ${push.shot}: camera ${restDistance.toFixed(2)} -> ${pushed.toFixed(2)} em`);
   await directed.close();
 

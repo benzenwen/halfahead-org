@@ -441,9 +441,17 @@
   0.7)
 
 (def ^:private card-z
-  "How far in front of the line a card stands, so the dimmed line behind
-  never shows through it."
+  "How far in front of the line a card stands. Glyph quads are transparent,
+  so this only orders the card ahead of the line: the rest of the line
+  would still show between its strokes, which is why it steps back."
   0.3)
+
+(def ^:private card-backdrop
+  "Where the rest of the line steps back to while a card holds the stage:
+  this faint at most, and this many em behind where it would be, so
+  perspective shrinks it towards the vanishing point and the card owns the
+  frame."
+  {:opacity 0.08 :recede 2.0})
 
 (def ^:private camera-moves
   "Rise, hold and fall in ms, and how far the camera's distance changes."
@@ -512,7 +520,8 @@
   each word, a beat after the one before, leaves the line for the centre
   of the view (the camera's target), set large enough that the phrase
   spans 70% of the view's width; held 1200 ms, folded back over 400 ms,
-  while every other glyph dims to 0.25. Positions assume a glyph scales
+  while every other glyph fades to at most 0.08 and recedes 2 em behind
+  where it would be, by the same envelope, then returns exactly. Positions assume a glyph scales
   about the middle of its advance and 0.35 em above its baseline."
   [poses glyphs d u {:keys [tx ty tz]} {:keys [advance width-em]}]
   (let [words (card-words glyphs (:glyph-ids d))
@@ -542,7 +551,9 @@
                      {:x (+ left (* s x) (* 0.5 (- s 1.0) a)) :y (- ty 0.35) :z (+ tz card-z)
                       :rx 0.0 :ry 0.0 :rz 0.0 :scale s :opacity 1.0}
                      (envelope u (* k beat) beat hold-end card-fold-ms))
-              (blend p {:opacity (min (:opacity p) 0.25)} dim)))
+              (blend p {:opacity (min (:opacity p) (:opacity card-backdrop))
+                        :z (- (:z p) (:recede card-backdrop))}
+                     dim)))
           poses))))
 
 (defn- moved-camera

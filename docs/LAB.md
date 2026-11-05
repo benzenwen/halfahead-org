@@ -302,7 +302,9 @@ once.)
   view (the camera's target), set large enough that the phrase spans 70%
   of the view's width (at most 8 times its size), one word per 220 ms beat
   (shorter beats for long phrases), held 1200 ms, then folded back to the
-  line over 400 ms. Every other letter dims to 0.25 meanwhile. Under
+  line over 400 ms. Every other letter fades to at most 0.08 and recedes
+  2 em behind the line meanwhile (so perspective shrinks it), then
+  returns exactly. Under
   4500 ms in all. Positions assume the renderer scales a glyph about the
   middle of its advance and 0.35 em above its baseline.
 - **`:push`**: the camera comes 35% nearer, looking at the phrase's centre,
@@ -472,7 +474,8 @@ card hit with a noise swell and a low thump; reloads to see Sound still
 on, then turns it off and reloads to see it off. With the clock held on
 another page it directs: after "hello there " and a pause, it types
 "WHAT A DAY! " and checks that 900 ms later a letter of the card is at
-scale > 2 and every other letter at opacity 0.25 (`card.png`), and that
+scale > 2, every other letter at opacity ≤ 0.08 and the letters of "hello
+there" at least 1.9 em behind where they settle (`card.png`), and that
 5 s later all are at scale 1; types "why not? " within 10 s of the card
 and checks it was directed `:line` (the budget); and 11 s after the card
 types "is it? " and checks that a `:push` brought the camera at least 25%
