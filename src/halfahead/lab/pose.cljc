@@ -4,7 +4,10 @@
   bright and wobbly it is. Every frame is computed from scratch, never
   simulated, so a renderer may ask for any moment in any order, and every
   motion ends exactly on the layout (births within 400 ms, cues within
-  1500 ms, ghosts within 600 ms). Units are em; angles are radians."
+  1500 ms, ghosts within 600 ms). A cued letter never strays more than
+  half an em sideways from its place, so a word's motion stays out of its
+  neighbours' room: effects that gather or scatter use depth and height.
+  Units are em; angles are radians."
   (:require [clojure.string :as str]))
 
 ;; --- arithmetic --------------------------------------------------------------
@@ -128,8 +131,8 @@
 
 (defn- effect-delta
   "The delta for one effect at local time u (0 <= u < its duration), at
-  intensity k, for the glyph at pos of n in the cue."
-  [effect u k id pos n]
+  intensity k, for the glyph at position pos in the cue."
+  [effect u k id pos]
   (let [d (double (effect-ms effect))
         p (/ u d)
         fade (- 1.0 p)]
@@ -161,7 +164,11 @@
 
       :rewind {:rz (* (- tau) k (- 1.0 (smoothstep p)))}
 
-      :fuse {:x (* 0.5 k (- pos (/ (dec n) 2.0)) (- 1.0 (smoothstep p)))}
+      ;; the letters come in from a staggered layer in front of the line,
+      ;; alternately above and below it; nothing moves sideways
+      :fuse (let [apart (* k (- 1.0 (smoothstep p)))]
+              {:z (* 0.6 apart (if (even? pos) 1.0 0.5))
+               :y (* 0.2 apart (if (even? pos) 1.0 -1.0))})
 
       :jitter {:x (* 0.04 k fade (sin (+ (/ (* tau u) 60.0) (phase id 3))))
                :y (* 0.04 k fade (sin (+ (/ (* tau u) 75.0) (phase id 4))))}
@@ -190,7 +197,7 @@
           (let [pos (if (= :rewind effect) (- n 1 i) i)
                 u (- t (double at-ms) (* step pos))]
             (if (and (>= u 0) (< u d))
-              (update acc id (fnil conj []) (effect-delta effect u (double intensity) id i n))
+              (update acc id (fnil conj []) (effect-delta effect u (double intensity) id i))
               acc)))
         acc
         ;; a glyph listed twice moves once, at its first position
@@ -206,10 +213,18 @@
    :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
    :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0})
 
-(defn- apply-deltas [pose deltas]
+(def ^:private x-reach
+  "How far, in em, motion may carry a letter sideways from its place: less
+  than a space on either side, however many cues overlap on it."
+  0.5)
+
+(defn- apply-deltas
+  "base plus every delta, with x held within x-reach of the base x."
+  [{base-x :x :as base} deltas]
   (if (empty? deltas)
-    pose
-    (-> (apply merge-with + pose deltas)
+    base
+    (-> (apply merge-with + base deltas)
+        (update :x #(clamp (- base-x x-reach) (+ base-x x-reach) %))
         (update :scale #(max 0.0 %))
         (update :opacity #(clamp 0.0 1.0 %))
         (update :glow #(clamp 0.0 1.0 %))

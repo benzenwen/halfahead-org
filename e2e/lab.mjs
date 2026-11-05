@@ -7,6 +7,8 @@ const out = 'out/lab';
 const text = 'we finally shipped it! then a crash ';
 // Typed after the settled step so the block wraps onto further lines.
 const more = 'and we fixed it before anyone noticed, so lunch was quiet ';
+// Ends a word with "merge" (a fuse) right after "a", its near neighbour.
+const sentence = 'This is a merge of a ';
 mkdirSync(out, { recursive: true });
 
 const consoleErrors = new Map();
@@ -134,6 +136,76 @@ try {
   if (wrapped.lines < 2) throw new Error(`the block did not wrap: ${wrapped.lines} line(s)`);
   done(`${wrapped.lines} lines; ${assertCentred(wrapped.centre)}`);
 
+  begin('steady line', null);
+  const steady = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = steady;
+  await open(steady);
+  // Where the first glyph's place on the layout (the column's origin) lands,
+  // every 100 ms while typing: the letter's own motion does not count.
+  await steady.evaluate(() => {
+    window.__originXs = [];
+    window.__sampler = setInterval(() => window.__originXs.push(window.__lab.project(0, 0, 0).x), 100);
+  });
+  await steady.keyboard.type(sentence, { delay: 70 });
+  const xs = await steady.evaluate(() => { clearInterval(window.__sampler); return window.__originXs; });
+  await steady.screenshot({ path: `${out}/steady.png` });
+  if (xs.length < 10) throw new Error(`only ${xs.length} samples while typing`);
+  const drift = Math.max(...xs) - Math.min(...xs);
+  if (!(drift <= 2)) throw new Error(`the line moved ${drift.toFixed(1)} px while typing "${sentence}"`);
+  done(`the line's start stayed within ${drift.toFixed(2)} px over ${xs.length} samples while typing`);
+  await steady.close();
+
+  begin('contained fuse', null);
+  const fusing = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = fusing;
+  // The page's clock is held, so the whole fuse is checked in fixed slices
+  // and the screenshot is taken mid-fuse, however slowly headless draws.
+  await fusing.clock.install();
+  await open(fusing);
+  await fusing.clock.pauseAt(await fusing.evaluate(() => Date.now() + 1000));
+  for (const ch of 'This is a merge ') {
+    await fusing.keyboard.type(ch);
+    await fusing.clock.runFor(70);
+  }
+  // How far the leftmost letter of "merge" lands right of the right edge of
+  // the "a" before it, and how far any of its letters is off the line.
+  const sampleFuse = () => fusing.evaluate(() => {
+    const lab = window.__lab;
+    const at = lab.liveText().indexOf(' a merge ');
+    if (at < 0) return null;
+    const poses = lab.lastFrame().poses;
+    const a = poses[at + 1];
+    const merge = poses.slice(at + 3, at + 8);
+    const edge = lab.project(a.x + lab.advance(a.char), a.y, a.z).x;
+    return {
+      margin: Math.min(...merge.map((p) => lab.project(p.x, p.y, p.z).x)) - edge,
+      lift: Math.max(...merge.map((p) => Math.abs(p.y))),
+    };
+  });
+  const slices = [];
+  let shot = null;
+  for (let t = 0; t <= 1000; t += 50) {
+    const s = await sampleFuse();
+    if (!s) throw new Error(`"a merge " is not on the line ${t} ms after the space`);
+    slices.push(s);
+    // births move in depth too, but only the fuse moves letters off the line
+    if (shot === null && t >= 100 && s.lift > 0.05) {
+      await fusing.screenshot({ path: `${out}/fuse.png` });
+      shot = { t, lift: s.lift };
+    }
+    await fusing.clock.runFor(50);
+  }
+  if (shot === null)
+    throw new Error(`no letter of "merge" left the line by 0.05 em: lifts ${slices.map((s) => s.lift.toFixed(3)).join(' ')}`);
+  const nearest = Math.min(...slices.map((s) => s.margin));
+  if (!(nearest >= 0))
+    throw new Error(`a letter of "merge" landed ${(-nearest).toFixed(1)} px left of the "a" before it`);
+  const resting = slices[slices.length - 1].lift;
+  if (!(resting < 0.01)) throw new Error(`"merge" still ${resting.toFixed(3)} em off the line after 1 s`);
+  done(`"merge" checked in ${slices.length} slices of 50 ms; never nearer than ${nearest.toFixed(1)} px `
+    + `to the "a" before it; fuse.png at ${shot.t} ms, a letter ${shot.lift.toFixed(2)} em off the line`);
+  await fusing.close();
+
   begin('debug', null);
   const debugged = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
   current = debugged;
@@ -189,7 +261,7 @@ try {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
-  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'debug'].map((n) => `${out}/${n}.png`).join(', ')}`);
+  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'steady', 'fuse', 'debug'].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);

@@ -25,10 +25,10 @@
   (let [w js/window.innerWidth]
     (max 4 (/ (* 0.7 w) (render/em-px w)))))
 
-(defn- frame [r t reduced-motion?]
+(defn- frame [r t width reduced-motion?]
   (pose/frame (draft/prune (:draft @state) t) t
               {:advance #(render/advance r %)
-               :width-em (width-em)
+               :width-em width
                :reduced-motion? reduced-motion?}))
 
 (defn- show-debug! [r t]
@@ -43,9 +43,11 @@
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
         still? (.-matches motion-query)
-        f (frame r t still?)]
+        ;; one width for the layout and the column it is staged on
+        width (width-em)
+        f (frame r t width still?)]
     (swap! state assoc :last-frame f)
-    (render/draw! r f still?)
+    (render/draw! r f {:still? still? :column-em width})
     (when debug? (show-debug! r t))
     (js/requestAnimationFrame #(loop! r motion-query))))
 
@@ -56,7 +58,9 @@
              :lastFrame #(clj->js (:last-frame @state))
              :drawn #(render/drawn r)
              :lean #(render/lean r %)
-             :blockCentre #(render/block-centre r)}))
+             :blockCentre #(render/block-centre r)
+             :project #(render/screen-point r %1 %2 %3)
+             :advance #(render/advance r %)}))
 
 (defn- edit! [text]
   (let [t (now-ms)]
