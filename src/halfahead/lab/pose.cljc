@@ -7,7 +7,11 @@
   1500 ms, ghosts within 600 ms). A cued letter never strays more than
   half an em sideways from its place, so a word's motion stays out of its
   neighbours' room: effects that gather or scatter use depth and height.
-  Units are em; angles are radians."
+  The camera is part of every frame: it looks at the line being written,
+  easing to a new line over 450 ms, and lines more than three above it
+  recede up and back into the dark like an end-credits crawl, so a long
+  draft uses depth instead of running off the screen. Units are em; angles
+  are radians."
   (:require [clojure.string :as str]))
 
 ;; --- arithmetic --------------------------------------------------------------
@@ -208,10 +212,52 @@
 
 ;; --- poses -------------------------------------------------------------------
 
-(defn- base-pose [{:keys [id char]} {:keys [x y]}]
-  {:id id :char char :ghost? false
-   :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
-   :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0})
+(defn- line-of
+  "The line number of a laid-out position (line n has y = -1.35 n)."
+  [{:keys [y]}]
+  (long (Math/round (/ (- (double y)) line-height))))
+
+(def ^:private line-ease-ms 450)
+
+(defn- line-progress
+  "The current line (that of the last glyph, or 0) as a fractional line
+  that eases up from the line before over 450 ms, timed from the birth of
+  the first glyph on the current line. Exactly the current line once the
+  ease is over, at line 0, and with reduced motion. Derived from the draft
+  alone: deleting back to an earlier line has no line to ease from, so it
+  snaps."
+  [glyphs lines t reduced-motion?]
+  (let [cur (if (seq lines) (peek lines) 0)]
+    (if (or reduced-motion? (zero? cur))
+      cur
+      (let [first-born (some (fn [[g l]] (when (= l cur) (:born-ms g)))
+                             (map vector glyphs lines))
+            age (- t (double first-born))]
+        (if (>= age line-ease-ms)
+          cur
+          (+ (dec cur) (smoothstep (clamp 0.0 1.0 (/ age line-ease-ms)))))))))
+
+(def ^:private crawl-keep
+  "Lines just above the current one that stay at full size and brightness."
+  3)
+
+(defn- recession
+  "How a line recedes when it is more than crawl-keep lines above the
+  current (fractional) line: back 0.9 em, dimmer by 0.18 (never below
+  0.12) and tilted back 0.1 rad (never past 0.5) for each line beyond;
+  nil when it is not receding."
+  [current line]
+  (let [k (- current line crawl-keep)]
+    (when (pos? k)
+      {:z (* -0.9 k)
+       :opacity (max 0.12 (- 1.0 (* 0.18 k)))
+       :rx (max -0.5 (* -0.1 k))})))
+
+(defn- base-pose [current {:keys [id char]} {:keys [x y] :as position}]
+  (merge {:id id :char char :ghost? false
+          :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
+          :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0}
+         (recession current (line-of position))))
 
 (def ^:private x-reach
   "How far, in em, motion may carry a letter sideways from its place: less
@@ -242,19 +288,50 @@
          :rx 0.0 :ry 0.0 :rz (* (if (even? id) 1.0 -1.0) tau p)
          :scale (- 1.0 (* 0.4 p)) :opacity (- 1.0 p) :glow (* 0.5 (- 1.0 p)) :wobble 0.0}))))
 
+;; --- camera ------------------------------------------------------------------
+
+(def ^:private fov-deg 40.0)
+
+(def ^:private pitch
+  "How far the camera looks down at the line, in radians (2 degrees): a
+  steeper pitch shows more floor but lifts receded lines off the top."
+  (* 2.0 (/ Math/PI 180.0)))
+
+(def ^:private fill
+  "The share of the view's width the column fills."
+  0.75)
+
+(defn- camera
+  "Looking at the column's centre on the current (fractional) line, from
+  in front and a little above, at the distance where the column fills 75%
+  of the view's width for aspect (width / height)."
+  [width-em aspect current]
+  (let [width (double width-em)
+        tx (/ width 2.0)
+        ty (line-y current)
+        half-fov (* 0.5 fov-deg (/ Math/PI 180.0))
+        dist (/ width (* fill 2.0 (double aspect) (Math/tan half-fov)))]
+    {:x tx :y (+ ty (* dist (sin pitch))) :z (* dist (cos pitch))
+     :tx tx :ty ty :tz 0.0 :fov fov-deg}))
+
+;; --- frame -------------------------------------------------------------------
+
 (defn frame
   "The :ha/glyph-frame for draft at t-ms: one live pose per glyph, in
-  order, then one ember per ghost younger than 600 ms, and the caret.
-  opts: {:advance fn :width-em n :reduced-motion? b}; with reduced motion
-  every live pose is its resting place and there are no embers."
-  [draft t-ms {:keys [advance width-em reduced-motion?]
-               :or {advance default-advance width-em 40}}]
+  order, then one ember per ghost younger than 600 ms, the caret and the
+  camera. opts: {:advance fn :width-em n :aspect n :reduced-motion? b},
+  aspect being the viewport's width over its height; with reduced motion
+  every live pose is its (possibly receded) resting place, there are no
+  embers, and the camera is on the current line without easing."
+  [draft t-ms {:keys [advance width-em aspect reduced-motion?]
+               :or {advance default-advance width-em 40 aspect 1.6}}]
   (let [{:keys [glyphs ghosts cues]} draft
         chars (mapv :char glyphs)
         positions (layout chars advance width-em)
         end (end-position chars positions advance)
-        bases (mapv base-pose glyphs positions)
         t (double t-ms)
+        current (line-progress glyphs (mapv line-of positions) t reduced-motion?)
+        bases (mapv #(base-pose current %1 %2) glyphs positions)
         live (if reduced-motion?
                bases
                (let [moving (cue-deltas cues t)]
@@ -267,4 +344,5 @@
                  (keep #(ember % t positions end) ghosts))]
     {:t-ms t-ms
      :poses (into live embers)
-     :caret end}))
+     :caret end
+     :camera (camera width-em aspect current)}))

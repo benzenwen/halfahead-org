@@ -31,14 +31,19 @@ textarea value --edit--> :ha/draft --frame(t)--> :ha/glyph-frame --> renderer
 - **`:ha/glyph-frame`**: for every letter at time *t*, its position and
   rotation (em units, radians), scale, opacity, glow, and a *wobble*
   amplitude the renderer applies as a jelly deformation of the glyph's
-  own quad. Plus the caret.
+  own quad. Plus the caret, and the `:ha/camera` (position, target and
+  field of view, in em), so where the frame is seen from is data too.
 
 Invariants, tested: the live letters of every frame spell exactly what is
 in the textarea; every number is finite; everything settles exactly onto
 the layout within 1.5 s of the last event; reduced motion means no motion;
 a cued letter never moves more than half an em sideways from its place, so
 a word's effect never reaches its neighbours (effects that gather or
-scatter, like `:fuse`, move in depth and height instead).
+scatter, like `:fuse`, move in depth and height instead); every frame has
+a valid camera, a pure function of the draft, the time and the options,
+whose target is on the current line 450 ms after that line's first letter
+(and at once with reduced motion); and lines receded by the crawl settle
+exactly onto their receded place.
 
 **For a renderer author (Jon):** implement "take a `:ha/glyph-frame`, draw
 it" in anything (WebGPU compute, raymarched lightning, cloth). Nothing
@@ -48,20 +53,35 @@ real to replace.
 
 ## Staging
 
-The reference renderer stages the page rather than the letters: its
-camera's axis passes through the centre of a fixed-width column (the
-layout width), not of the live text (40 degree field of view, looking down
-3 degrees), so letters stand upright at rest, within 2 degrees of vertical
-anywhere in the block. Text is left-aligned in the column like a page, so a
-line grows rightward and never moves while you type. A lens shift lifts the
-block a little above the middle without tilting it, and the camera eases
-upward once per new line (with reduced motion it moves straight there,
-never gliding). Type is sized so a line (18 em, about 36-40
-characters) fills about 70% of the width. A faint grid floor recedes under
-the text and fog dims what is further from the eye, so z motion reads as
-depth. This is presentation only: no new effects, nothing upstream changes.
-(In this scene +z points toward the camera, so births and launches come
-forward and brighten.)
+The camera is decided in `halfahead.lab.pose`, as part of every frame; the
+renderer puts its camera where the frame says and decides nothing. It looks
+at the line being written (the line of the last letter): its target is
+the centre of the column (the layout width) on that line's baseline, not
+the centre of the live text, so a line grows rightward from a fixed start
+and never moves while you type. When a new line starts, the target eases
+from the line before to the new one over 450 ms, timed from the birth of
+the new line's first letter (with reduced motion it is there at once). It
+is derived from the draft alone, so deleting back to an earlier line snaps
+rather than eases. The camera sits in front of the target, looking down 2
+degrees (40 degree field of view), at the distance where the column fills
+75% of the view's width for the viewport's aspect (`:aspect`, which the
+shell passes in), so letters stand upright at rest, within 2 degrees of
+vertical anywhere in the block. Type is sized so a line (18 em, about
+36-40 characters) fills about that width. A faint grid floor recedes
+under the current line and fog dims what is further from the eye, so z
+motion reads as depth. (In this scene +z points toward the camera, so
+births and launches come forward and brighten.)
+
+### The crawl
+
+A draft taller than the screen does not fall off the top: like an
+end-credits crawl, finished lines recede up and back into the dark. The
+current line and the three above it are untouched; each line beyond that
+moves back 0.9 em, loses 0.18 of its opacity (never below 0.12) and tilts
+back 0.1 rad (never past 0.5 rad), one step more per line. The recession is
+part of each letter's resting pose, so it holds when settled, every motion
+still ends exactly on it, and it slides along with the camera's 450 ms ease
+when a new line starts.
 
 ## Accessibility
 
@@ -79,6 +99,7 @@ frame 1234 · t 12.345 s · 60 fps · mean 16.6 ms · worst 18.0 ms
 WebGPU · 36 glyphs
 shipped -> launch 1.0 (glossary)
 we -> pop 0.3 (default)
+camera target x 9.00 · y -5.40 · z 0.00
 ```
 
 - **frame**: frames drawn since the page loaded.
@@ -91,6 +112,10 @@ we -> pop 0.3 (default)
   instances it drew in that frame.
 - **cues**: up to six cues fired in the last eight seconds, newest first,
   each as word -> effect, intensity, and the source that chose it.
+- **camera target**: where this frame's camera looks, in em.
+
+The panel grows as wide as its longest line, up to the viewport, and wraps
+beyond that, so no line is cut off.
 
 It exists so that a screen recording, read as still frames, carries its own
 numbers: what was felt can be tied to what the code did. It is display
@@ -114,17 +139,21 @@ bb lab:e2e    # the same page in headless Chromium (e2e/lab.mjs)
 `/lab/index.html` (the local server maps only `/` to an index); Ctrl-C
 stops it. `bb lab:e2e` types a sentence, backspaces, waits for everything
 to settle (then asserts every letter is upright and the block centred),
-types on until the block wraps (still centred), types "This is a merge
+types on until the block wraps (still centred), types 14 lines on a fresh
+page and checks that every letter is either on screen or dimmed to 0.3
+opacity or less and that the current line is in the middle 60% of the
+height, types "This is a merge
 of a " on a fresh page while sampling where the line's start lands every
 100 ms (it may not move more than 2 px), types "This is a merge " on
 another with the page's clock held (Playwright's clock API) and steps
 through the `:fuse` in 50 ms slices, checking at each that no letter of
 "merge" lands left of the "a" before it, opens `?debug` and checks
 the overlay (frame number, fps, backend, and a `shipped -> launch` line;
-without the flag it must not show), and repeats with reduced motion (the
-camera already on the block on the next frame), asserting on
+a camera target line, and no line cut off; without the flag it must not
+show), and repeats with reduced motion (on every frame the camera target
+is on the current line and drawn at the canvas centre), asserting on
 `window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
-`settled.png`, `wrapped.png`, `steady.png`, `fuse.png` (taken at the
+`settled.png`, `wrapped.png`, `crawl.png`, `steady.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight) and `debug.png` in `out/lab/` and stops the
 server it started. It is not part of
@@ -142,7 +171,8 @@ rasterised with tiny-sdf from the system's sans faces), no sound.
 `window.__lab` exposes `backend`, `liveText()`, `lastFrame()`,
 `drawn()`, `lean(i)` (degrees between drawn glyph i's projected left edge
 and the screen vertical) and `blockCentre()` (the block's drawn centre,
-where the camera aims, and the viewport size, in CSS pixels),
+where the frame's camera target lands, and the viewport size, in CSS
+pixels),
 `project(x, y, z)` (where a point in em landed on the canvas, in CSS
 pixels) and `advance(c)` (a character's advance in em) for tests and for anyone poking at
 it from the console.
