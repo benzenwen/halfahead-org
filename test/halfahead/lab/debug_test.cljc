@@ -5,6 +5,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [halfahead.lab.debug :as debug]
+            [halfahead.lab.director :as director]
             [halfahead.lab.draft :as draft]))
 
 ;; --- helpers ----------------------------------------------------------------
@@ -99,6 +100,37 @@
     (is (= ["ship" "it"]
            (mapv :word (debug/new-cues d (draft/edit d "ship it " 5 cue-fn)))))))
 
+;; --- new directions ---------------------------------------------------------
+
+(defn- direct-out
+  "[draft new-directions-per-edit] after typing text one unit at a time
+  from t0, 10 ms apart, directing on every edit as the shell does."
+  [d text t0]
+  (reduce (fn [[d found] k]
+            (let [d' (-> (draft/edit d (subs text 0 k) (+ t0 (* 10 k)) cue-fn)
+                         (assoc :directions (:directions d []))
+                         (director/direct (+ t0 (* 10 k))))]
+              [d' (into found (debug/new-directions d d'))]))
+          [d []]
+          (range (inc (count (:text d))) (inc (count text)))))
+
+(deftest directing-finds-each-new-direction-once
+  (let [[d found] (direct-out (draft/empty-draft) "WHAT A DAY! why not? " 0)]
+    (is (= [{:phrase "WHAT A DAY!" :shot :card :energy 0.9 :at-ms 110}
+            {:phrase "why not?" :shot :line :energy 0.2 :at-ms 200}]
+           found))
+    (testing "an edit that places none"
+      (is (= [] (debug/new-directions d (director/direct d 210)))))
+    (testing "a shrunk direction is not new"
+      (let [d' (-> (draft/edit d "WHAT DAY! why not? " 300 cue-fn)
+                   (assoc :directions (:directions d))
+                   (director/direct 300))]
+        (is (= [] (debug/new-directions d d')))))))
+
+(deftest a-long-phrase-is-cut-to-sixteen-characters
+  (let [[_ found] (direct-out (draft/empty-draft) "so this is how it ends. " 0)]
+    (is (= "so this is how i…" (:phrase (first found))))))
+
 ;; --- cue log ----------------------------------------------------------------
 
 (defn- entry [word at-ms]
@@ -146,6 +178,19 @@
     (is (= ["shipped -> pop 0.5 (default)"
             "shipped -> launch 1.0 (glossary)"
             "deploy -> launch 0.9 (glossary)"]
+           (drop 2 lines)))))
+
+(deftest the-overlay-lists-directions-after-cues
+  (let [lines (str/split-lines
+               (debug/overlay-text
+                {:summary (debug/summary nil) :t-ms 0 :backend "WebGL2" :glyphs 3
+                 :style :plain :style-choice :plain
+                 :log [(entry "day" 1000)]
+                 :directions [{:phrase "WHAT A DAY!" :shot :card :energy 0.9 :at-ms 1000}
+                              {:phrase "so it goes." :shot :line :energy 0.2 :at-ms 900}]}))]
+    (is (= ["day -> pop 0.5 (default)"
+            "WHAT A DAY! -> card 0.9"
+            "so it goes. -> line 0.2"]
            (drop 2 lines)))))
 
 (deftest the-overlay-renders-before-any-timing

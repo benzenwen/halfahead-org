@@ -18,11 +18,14 @@ textarea value --edit--> :ha/draft --frame(t)--> :ha/glyph-frame --> renderer
                  (lab.draft)   ^         (lab.pose)                (lab.render)
                                |
             finished word --> :ha/word-cue (lab.cues, from lab.glossary)
+          finished phrase --> :ha/direction (lab.director)
 ```
 
 - **`:ha/draft`**: the text, one glyph per character with a stable id and
   the time it was typed, ghosts of deleted characters, and cues placed on
-  finished words.
+  finished words, and directions placed on finished phrases.
+- **`:ha/direction`**: how a finished phrase is staged, one shot from a
+  closed set (`:line :card :push :pull`) with an energy; see Directing.
 - **`:ha/word-cue`**: what a finished word does, chosen from a closed set
   (`:pop :launch :shimmer :skitter :quake :melt :rewind :fuse :jitter
   :glow :wobble`). Lookup order: Half Ahead's glossary, punctuation, the
@@ -36,8 +39,10 @@ textarea value --edit--> :ha/draft --frame(t)--> :ha/glyph-frame --> renderer
 
 Invariants, tested: the live letters of every frame spell exactly what is
 in the textarea; every number is finite; everything settles exactly onto
-the layout within 2.5 s of the last event, in every style; reduced motion
-means no motion; no letter ever moves more than half an em sideways from its place, so
+the layout within 2.5 s of the last event, in every style, and within
+5 s of the latest direction; reduced motion means no motion and no shots;
+apart from a card, which takes a phrase out of the line on purpose, no
+letter ever moves more than half an em sideways from its place, so
 a word's effect never reaches its neighbours (effects that gather or
 scatter, like `:fuse`, move in depth and height instead); every frame has
 a valid camera, a pure function of the draft, the time and the options,
@@ -141,6 +146,59 @@ always works.
 
 Every frame names the style in force at its time (`:style`).
 
+## Directing
+
+Ben: "Think first about using the whole space. Then restraint. Like the
+best movie trailers." The director (`halfahead.lab.director`, pure) reads
+each finished phrase and chooses how it is staged. The shell calls
+`(direct draft now)` after every edit and on every frame (for phrases a
+pause ended). Rules only, on the device; a local model can later sit
+behind the same function.
+
+A **phrase** is the run of letters after the previous phrase's end, up to
+a `.`, `!`, `?` or newline, or, once no letter has been born for 1200 ms,
+up to the last letter. A phrase a pause ended stays ended when typing
+resumes. Its glyph ids are its non-whitespace letters; a phrase with no
+word (`?!`, `...`) is not directed, and a phrase is directed once, however
+it is edited later.
+
+| First match | Shot | Energy |
+|---|---|---|
+| ends in `!`, or more than half its words in CAPITALS | `:card` | 0.9 |
+| ends in `?` | `:push` | 0.6 |
+| 12 or more words, ending in `.` | `:pull` | 0.5 |
+| anything else | `:line` | 0.2 |
+
+**The spectacle budget.** A shot other than `:line` is placed only if the
+previous one is at least 10 s earlier; otherwise the phrase gets `:line`.
+So the big moments stay rare and land, and a paste of several `!`
+sentences gives one card. This is tested as a property over any sequence
+of edits and times. Directions keep only the ids of letters still present,
+and one left with none is dropped, as cues are, with one exception: a
+spectacle whose letters were all deleted stays, unperformed, until its 10 s
+are up, because it is the only record of when the last spectacle was.
+(Otherwise deleting a card and typing `!` again would fire another at
+once.)
+
+`pose/frame` performs the shots, at most one at a time (the latest begun):
+
+- **`:card`**: the phrase's letters leave the line for the centre of the
+  view (the camera's target), set large enough that the phrase spans 70%
+  of the view's width (at most 8 times its size), one word per 220 ms beat
+  (shorter beats for long phrases), held 1200 ms, then folded back to the
+  line over 400 ms. Every other letter dims to 0.25 meanwhile. Under
+  4500 ms in all. Positions assume the renderer scales a glyph about the
+  middle of its advance and 0.35 em above its baseline.
+- **`:push`**: the camera comes 35% nearer, looking at the phrase's centre,
+  over 500 ms, holds 700 ms, and eases back over 500 ms.
+- **`:pull`**: the camera goes 40% further back over 600 ms, holds 900 ms,
+  and eases back over 600 ms.
+- **`:line`**: nothing extra.
+
+Shots are blended on top of births and cues, so everything is exactly at
+rest 5 s after the latest direction. With reduced motion no shot is
+performed.
+
 ## Accessibility
 
 The input is a real `<textarea>`, focused, with transparent text: IME,
@@ -157,6 +215,7 @@ frame 1234 · t 12.345 s · 60 fps · mean 16.6 ms · worst 18.0 ms
 WebGPU · 36 glyphs · style caffeinated (auto)
 shipped -> launch 1.0 (glossary)
 we -> pop 0.3 (default)
+WHAT A DAY! -> card 0.9
 camera target x 9.00 · y -5.40 · z 0.00
 ```
 
@@ -172,6 +231,8 @@ camera target x 9.00 · y -5.40 · z 0.00
   chose it.
 - **cues**: up to six cues fired in the last eight seconds, newest first,
   each as word -> effect, intensity, and the source that chose it.
+- **directions**: likewise up to six recent directions, newest first, each
+  as the phrase (its first 16 characters) -> shot and energy.
 - **camera target**: where this frame's camera looks, in em.
 
 The panel grows as wide as its longest line, up to the viewport, and wraps
@@ -215,10 +276,17 @@ then slowly (450 ms a key) on a fresh page with the clock held, checking
 that Auto reads caffeinated and then elegant. On one more page it picks
 each explicit style, with the picker or with Ctrl+4 and Ctrl+6, checks
 that the textarea keeps the focus, and types "we shipped it " to check
-that the frames are performed in that style. Finally it repeats with reduced motion (on every frame the camera target
+that the frames are performed in that style. With the clock held on
+another page it directs: after "hello there " and a pause, it types
+"WHAT A DAY! " and checks that 900 ms later a letter of the card is at
+scale > 2 and every other letter at opacity 0.25 (`card.png`), and that
+5 s later all are at scale 1; types "why not? " within 10 s of the card
+and checks it was directed `:line` (the budget); and 11 s after the card
+types "is it? " and checks that a `:push` brought the camera at least 25%
+nearer its target (`push.png`). Finally it repeats with reduced motion (on every frame the camera target
 is on the current line and drawn at the canvas centre), asserting on
 `window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
-`settled.png`, `wrapped.png`, `crawl.png`, `steady.png`, `fuse.png` (taken at the
+`settled.png`, `wrapped.png`, `crawl.png`, `steady.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
@@ -235,7 +303,7 @@ backends.
 The page is offline: no network, no downloaded fonts (the glyph atlas is
 rasterised with tiny-sdf from the system's sans faces), no sound.
 `window.__lab` exposes `backend`, `liveText()`, `lastFrame()`,
-`drawn()`, `lean(i)` (degrees between drawn glyph i's projected left edge
+`directions()` (the draft's directions), `drawn()`, `lean(i)` (degrees between drawn glyph i's projected left edge
 and the screen vertical) and `blockCentre()` (the block's drawn centre,
 where the frame's camera target lands, and the viewport size, in CSS
 pixels),
