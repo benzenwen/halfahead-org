@@ -1,0 +1,208 @@
+(ns halfahead.lab.pose-test
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [clojure.test.check.clojure-test :refer [defspec]]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [halfahead.lab.pose :as pose]
+            [halfahead.schema :as schema]))
+
+;; --- generators -------------------------------------------------------------
+
+(def ^:private effects
+  [:pop :launch :shimmer :skitter :quake :melt :rewind :fuse :jitter :glow :wobble])
+
+(def gen-char
+  (gen/elements ["a" "b" "W" "é" "日" "😀" " " " " "\n" "\t" "-" "'" "."]))
+
+(def gen-ms (gen/choose 0 3000))
+
+(defn- gen-cue [ids]
+  (gen/hash-map
+   :glyph-ids (gen/fmap (fn [[start len]] (vec (take len (drop start ids))))
+                        (gen/tuple (gen/choose 0 (dec (count ids)))
+                                   (gen/choose 1 (count ids))))
+   :cue (gen/hash-map :word (gen/elements ["boom" "wow" "hello" "!"])
+                      :effect (gen/elements effects)
+                      :intensity (gen/one-of [(gen/elements [0 0.5 1 1.0])
+                                              (gen/double* {:min 0 :max 1 :NaN? false})])
+                      :source (gen/elements [:glossary :punctuation :shape :default]))
+   :at-ms gen-ms))
+
+(def gen-draft
+  (gen/bind
+   (gen/tuple (gen/vector gen-char 0 40) (gen/choose 0 8))
+   (fn [[chars n-ghosts]]
+     (let [n (count chars)
+           ids (vec (range n))]
+       (gen/fmap
+        (fn [[borns ghosts cues]]
+          {:text (str/join chars)
+           :glyphs (mapv (fn [id c b] {:id id :char c :born-ms b}) ids chars borns)
+           :ghosts (vec (map-indexed (fn [i g] (assoc g :id (+ n i))) ghosts))
+           :cues cues
+           :next-id (+ n n-ghosts)})
+        (gen/tuple (gen/vector gen-ms n)
+                   (gen/vector (gen/hash-map :char gen-char :died-ms gen-ms
+                                             :index (gen/choose 0 (+ n 5))
+                                             :id (gen/return 0))
+                               n-ghosts)
+                   (if (pos? n) (gen/vector (gen-cue ids) 0 6) (gen/return []))))))))
+
+(defn- event-times [{:keys [glyphs ghosts cues]}]
+  (concat (map :born-ms glyphs) (map :died-ms ghosts) (map :at-ms cues)))
+
+(defn- latest [draft] (reduce max 0 (event-times draft)))
+
+(def gen-opts
+  (gen/hash-map :width-em (gen/choose 3 40)
+                :advance (gen/elements [pose/default-advance
+                                        (fn [c] (if (#{"W" "日" "😀"} c) 1.0 0.5))])))
+
+(def gen-case
+  "A draft, opts, and a time before, during or after its motion."
+  (gen/bind
+   (gen/tuple gen-draft gen-opts)
+   (fn [[draft opts]]
+     (let [events (vec (event-times draft))
+           near (if (seq events)
+                  (gen/fmap (fn [[e d]] (+ e d))
+                            (gen/tuple (gen/elements events) (gen/choose -50 1600)))
+                  (gen/return 0))]
+       (gen/fmap (fn [t] [draft opts t])
+                 (gen/one-of [near near near (gen/choose -500 6000)]))))))
+
+;; --- helpers ----------------------------------------------------------------
+
+(defn- rest-poses [draft {:keys [advance width-em]}]
+  (mapv (fn [{:keys [id char]} {:keys [x y]}]
+          {:id id :char char :ghost? false :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
+           :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0})
+        (:glyphs draft)
+        (pose/layout (map :char (:glyphs draft)) advance width-em)))
+
+(defn- live [frame] (filterv (complement :ghost?) (:poses frame)))
+(defn- ghosts [frame] (filterv :ghost? (:poses frame)))
+
+(defn- close? [a b] (< (abs (- a b)) 1e-9))
+
+;; --- properties -------------------------------------------------------------
+
+(defspec drafts-are-valid 100
+  (prop/for-all [d gen-draft] (schema/valid? :ha/draft d)))
+
+(defspec frame-is-valid 300
+  (prop/for-all [[draft opts t] gen-case]
+    (schema/valid? :ha/glyph-frame (pose/frame draft t opts))))
+
+(defspec live-poses-spell-the-draft 300
+  (prop/for-all [[draft opts t] gen-case]
+    (let [ls (live (pose/frame draft t opts))]
+      (and (= (:text draft) (str/join (map :char ls)))
+           (= (map :id (:glyphs draft)) (map :id ls))))))
+
+(defspec everything-settles-onto-the-layout 300
+  (prop/for-all [[draft opts _] gen-case
+                 k (gen/choose 0 3000)]
+    (let [f (pose/frame draft (+ (latest draft) 1500 k) opts)]
+      (and (= (rest-poses draft opts) (live f))
+           (empty? (ghosts f))))))
+
+(defspec reduced-motion-is-still 300
+  (prop/for-all [[draft opts t] gen-case]
+    (let [f (pose/frame draft t (assoc opts :reduced-motion? true))]
+      (and (= (rest-poses draft opts) (live f))
+           (empty? (ghosts f))))))
+
+(defspec frames-are-deterministic 100
+  (prop/for-all [[draft opts t] gen-case]
+    (= (pose/frame draft t opts) (pose/frame draft t opts))))
+
+;; --- examples ---------------------------------------------------------------
+
+(deftest layout-lines-and-wrapping
+  (let [at #(pose/layout (map str %1) pose/default-advance %2)]
+    (testing "a space advances; d of \"ab cd\" at width 10 sits at x 2.4"
+      (is (= {:x 2.4 :y 0.0} (nth (at "ab cd" 10) 4))))
+    (testing "a newline starts a new line at y -1.35"
+      (let [ps (at "ab\ncd" 10)]
+        (is (= {:x 0.0 :y -1.35} (nth ps 3)))
+        (is (close? 0.6 (:x (nth ps 4))))))
+    (testing "a word that would cross the width moves whole to the next line"
+      (let [ps (at "ab cdef" 3)]
+        (is (= {:x 0.0 :y -1.35} (nth ps 3)))
+        (is (every? #(= -1.35 (:y %)) (subvec ps 3)))
+        (is (= 0.0 (:y (nth ps 2))) "the space stays behind")))
+    (testing "a word wider than the width breaks anywhere"
+      (let [ps (at "abcdefghij" 3)]
+        (is (= [0.0 0.0 0.0 0.0 0.0 -1.35 -1.35 -1.35 -1.35 -1.35]
+               (map :y (take 10 ps))))
+        (is (= 0.0 (:x (nth ps 5))))))))
+
+(defn- draft-of [text born cues]
+  {:text text
+   :glyphs (vec (map-indexed (fn [i c] {:id i :char (str c) :born-ms born}) text))
+   :ghosts []
+   :cues cues
+   :next-id (count text)})
+
+(deftest quake-flashes-then-rests
+  (let [t 10000
+        cue {:glyph-ids [0 1 2 3]
+             :cue {:word "boom" :effect :quake :intensity 1 :source :glossary}
+             :at-ms t}
+        draft (draft-of "boom " 0 [cue])
+        opts {}
+        base (rest-poses draft {:advance pose/default-advance :width-em 40})]
+    (testing "at t+100 ms every quaking glyph glows and is off its base"
+      (let [ps (live (pose/frame draft (+ t 100) opts))]
+        (doseq [i (range 4)
+                :let [p (nth ps i) b (nth base i)]]
+          (is (pos? (:glow p)))
+          (is (or (not= (:x p) (:x b)) (not= (:y p) (:y b)))))
+        (is (= (nth base 4) (nth ps 4)) "the space was not in the cue")))
+    (testing "at t+1500 ms they are back at base"
+      (is (= base (live (pose/frame draft (+ t 1500) opts)))))))
+
+(deftest every-effect-moves-then-settles
+  (doseq [effect effects]
+    (let [cue {:glyph-ids (vec (range 30))
+               :cue {:word "w" :effect effect :intensity 1 :source :default}
+               :at-ms 5000}
+          draft (draft-of (apply str (repeat 30 "x")) 0 [cue])
+          base (rest-poses draft {:advance pose/default-advance :width-em 40})]
+      (testing (str effect)
+        (is (some true? (for [dt [50 150 300 500 800]]
+                          (not= base (live (pose/frame draft (+ 5000 dt) {}))))))
+        (is (= base (live (pose/frame draft 6500 {}))))))))
+
+(deftest births-spring-in
+  (let [draft (draft-of "a" 1000 [])
+        at #(first (:poses (pose/frame draft % {})))]
+    (is (= 0.0 (:opacity (at 1000))))
+    (is (< 0.3 (:opacity (at 1030)) 0.4))
+    (is (< 1.1 (reduce max (map (comp :scale at) (range 1000 1400 5))) 1.2)
+        "overshoots by about 15%")
+    (is (= 1.0 (:scale (at 1400))))))
+
+(deftest ghosts-drift-away-as-embers
+  (let [draft (assoc (draft-of "ab" 0 [])
+                     :ghosts [{:id 7 :char "c" :died-ms 1000 :index 1}
+                              {:id 8 :char "d" :died-ms 1000 :index 9}])
+        f (pose/frame draft 1100 {})
+        [g1 g2] (ghosts f)]
+    (testing "embers come after the live poses"
+      (is (= [false false true true] (map :ghost? (:poses f)))))
+    (testing "an ember rises and fades from where its index stands"
+      (is (close? 0.6 (:x g1)))
+      (is (< 0 (:y g1)))
+      (is (< 0 (:opacity g1) 1)))
+    (testing "an index past the end is clamped to the caret"
+      (is (= (:x (:caret f)) (:x g2))))
+    (testing "at 600 ms the ember is gone"
+      (is (empty? (ghosts (pose/frame draft 1600 {})))))))
+
+(deftest caret
+  (is (= {:x 0.0 :y 0.0} (:caret (pose/frame (draft-of "" 0 []) 0 {}))))
+  (is (close? 1.2 (:x (:caret (pose/frame (draft-of "ab" 0 []) 0 {})))))
+  (is (= {:x 0.0 :y -1.35} (:caret (pose/frame (draft-of "ab\n" 0 []) 0 {})))))
