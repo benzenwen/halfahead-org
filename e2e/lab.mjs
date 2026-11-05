@@ -387,6 +387,54 @@ try {
   // page left running would starve the next one.
   await debugged.close();
 
+  // The stage behind the letters hears each moment: "crash" is a :quake
+  // cue, and the grid floor's lines flash with it, then settle back.
+  begin('stage', null);
+  const staged = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = staged;
+  const stageUrl = new URL(url);
+  stageUrl.searchParams.set('debug', '');
+  stageUrl.searchParams.set('stage', 'grid');
+  await open(staged, stageUrl.href);
+  const atRest = await staged.evaluate(() => ({ name: window.__lab.stage, state: window.__lab.stageState() }));
+  if (atRest.name !== 'grid') throw new Error(`?stage=grid shows the stage "${atRest.name}"`);
+  if (atRest.state.brightness !== 0) throw new Error(`the grid starts at brightness ${atRest.state.brightness}`);
+  if (!(atRest.state.visibility > 0.99)) throw new Error(`the grid floor is at visibility ${atRest.state.visibility} at level 3`);
+  // The brightest the floor gets, sampled on every frame: software rendering
+  // can be slow enough to miss a flash read only once.
+  await staged.evaluate(() => {
+    window.__peak = 0;
+    const sample = () => {
+      window.__peak = Math.max(window.__peak, window.__lab.stageState().brightness);
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await staged.keyboard.type('crash ', { delay: 70 });
+  // Read at once: the pause after "crash" places a :line shot, a newer moment.
+  const sawQuake = await staged.waitForFunction(
+    () => /stage grid · moment cue quake 1\.0 at \d/.test(document.getElementById('debug').textContent),
+    null, { polling: 'raf', timeout: 5000 }).then(() => true).catch(() => false);
+  if (!sawQuake)
+    throw new Error(`the overlay never showed the quake moment: "${await staged.locator('#debug').textContent()}"`);
+  const settledFlash = await staged.waitForFunction(
+    () => window.__peak > 0 && window.__lab.stageState().brightness < 0.01,
+    null, { polling: 'raf', timeout: 4000 }).then(() => true).catch(() => false);
+  const peak = await staged.evaluate(() => window.__peak);
+  if (!(peak > 0.3)) throw new Error(`the grid's brightness peaked at ${peak.toFixed(3)} on a quake of 1.0`);
+  if (!settledFlash) {
+    const now = await staged.evaluate(() => window.__lab.stageState().brightness);
+    throw new Error(`the grid's brightness is still ${now} 4 s after the quake`);
+  }
+  // at rest again, so the screenshot is the plain floor
+  await staged.waitForTimeout(1000);
+  await staged.screenshot({ path: `${out}/stage-grid.png` });
+  const rested = await staged.evaluate(() => window.__lab.stageState());
+  if (rested.brightness !== 0 || rested.pulse !== 0)
+    throw new Error(`the grid is not at rest: ${JSON.stringify(rested)}`);
+  done(`?stage=grid; "crash" -> a quake moment in the overlay; brightness 0 -> peak ${peak.toFixed(2)} -> 0`);
+  await staged.close();
+
   begin('style auto', null);
   const auto = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
   current = auto;
@@ -648,7 +696,7 @@ try {
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'card', 'push',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'card', 'push',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;

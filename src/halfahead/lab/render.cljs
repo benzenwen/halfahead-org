@@ -5,7 +5,9 @@
   where to look. WebGPU where the browser has it, WebGL2
   otherwise (three's WebGPURenderer picks), with one TSL material for both.
   The frame's :reveal sets the house lights: ink on paper with them up, the
-  dark stage with them down, and the floor only from level 2."
+  dark stage with them down. What stands behind the letters (a floor, a
+  storm) is the stage's (lab.stage): the renderer hands it each frame and
+  each of the frame's moments, and draws the scene it keeps."
   (:require ["@mapbox/tiny-sdf" :default TinySDF]
             ["three/tsl" :as tsl]
             ["three/webgpu" :as three]))
@@ -153,34 +155,10 @@
         (.add scene bigger)
         (reset! mesh bigger)))))
 
-;; --- stage -------------------------------------------------------------------
+;; --- house -------------------------------------------------------------------
 
 (def ^:private bg "#141210")
 (def ^:private paper "#f6f1e7")
-
-(def ^:private floor-drop
-  "Gap between the line being written and the floor, in em."
-  1.2)
-
-(defn- floor-mesh
-  "A wide plane under the text, receding into the distance: fine grid lines
-  in ink at low alpha (blending is in linear light, so 0.02 shows as about
-  8% of the way from the background to ink), anti-aliased by their
-  screen-space width, fixed in world space so they never slide as the
-  plane follows the block. Fog fades it into the background. floor-node
-  is a uniform from 0 (no floor) to 1, ink-node the ink's colour."
-  [^js ink-node ^js floor-node]
-  (let [^js p (.div (.-xz tsl/positionWorld) 2.0)
-        ^js cell (.div (tsl/abs (.sub (tsl/fract (.sub p 0.5)) 0.5)) (tsl/fwidth p))
-        line (.oneMinus (tsl/min (tsl/min (.-x cell) (.-y cell)) 1.0))
-        ^js m (three/MeshBasicNodeMaterial.)]
-    (set! (.-transparent m) true)
-    (set! (.-depthWrite m) false)
-    (set! (.-colorNode m) (tsl/vec4 ink-node 1.0))
-    (set! (.-opacityNode m) (.mul (.mul line 0.02) floor-node))
-    (doto (three/Mesh. (three/PlaneGeometry. 400 400) m)
-      (-> .-rotation (.set (- (/ js/Math.PI 2)) 0 0))
-      (aset "renderOrder" -1))))
 
 ;; --- camera ------------------------------------------------------------------
 
@@ -198,11 +176,10 @@
       (.updateProjectionMatrix camera))))
 
 (defn- view!
-  "Puts the camera where the frame says, looking at its target; rests the
-  floor under the target and sets the fog just past it, so letters at rest
-  keep full ink and those pushed back into the scene (receded lines among
-  them) dim into the dark."
-  [{:keys [^js camera ^js scene ^js floor]} {:keys [x y z tx ty tz fov]}]
+  "Puts the camera where the frame says, looking at its target, and sets
+  the fog just past it, so letters at rest keep full ink and those pushed
+  back into the scene (receded lines among them) dim into the dark."
+  [{:keys [^js camera ^js scene]} {:keys [x y z tx ty tz fov]}]
   (let [^js fog (.-fog scene)
         dist (js/Math.hypot (- x tx) (- y ty) (- z tz))]
     (when (not= fov (.-fov camera))
@@ -210,7 +187,6 @@
       (.updateProjectionMatrix camera))
     (.set (.-position camera) x y z)
     (.lookAt camera tx ty tz)
-    (.set (.-position floor) tx (- ty floor-drop) 0)
     (set! (.-near fog) (+ dist 0.5))
     (set! (.-far fog) (+ dist 12))))
 
@@ -298,19 +274,31 @@
 (def ^:private lights-down {:bg (three/Color. bg) :ink (three/Color. ink)})
 
 (defn- light!
-  "Background, fog, ink and floor for the frame's :reveal: paper and ink at
-  :lights 0, the dark stage at 1, in between as they go down; the floor
-  shows from level 2, as far as the lights are down."
-  [{:keys [^js scene ^js ink-node ^js floor-node]} {:keys [level lights] :or {level 3 lights 1}}]
+  "Background, fog and ink for the frame's :reveal: paper and ink at
+  :lights 0, the dark stage at 1, in between as they go down."
+  [{:keys [^js scene ^js ink-node]} {:keys [lights] :or {lights 1}}]
   (.lerpColors (.-background scene) (:bg lights-up) (:bg lights-down) lights)
   (.copy (.-color (.-fog scene)) (.-background scene))
-  (.lerpColors (.-value ink-node) (:ink lights-up) (:ink lights-down) lights)
-  (set! (.-value floor-node) (if (>= level 2) lights 0)))
+  (.lerpColors (.-value ink-node) (:ink lights-up) (:ink lights-down) lights))
+
+(defn- stage!
+  "The stage told of each moment, in order, then brought to the frame."
+  [{:keys [stage stage-state]} frame moments]
+  (swap! stage-state
+         (fn [s]
+           ((:update stage) (reduce (:moment stage) s moments) frame (:t-ms frame)))))
+
+(defn stage-state
+  "The stage's state as plain data (its numbers, keywords and strings),
+  for tests and the debug overlay."
+  [r]
+  (into {} (filter (comp (some-fn number? keyword? string?) val)) @(:stage-state r)))
 
 (defn draw!
-  "Draws one :ha/glyph-frame, seen from its :camera."
+  "Draws one :ha/glyph-frame, seen from its :camera, with the stage behind
+  it told of moments (lab.moments, each given once) first."
   [{:keys [^js renderer ^js scene ^js camera ^js canvas atlas ^js atlas-size ^js caret] :as r}
-   {:keys [poses] :as frame}]
+   {:keys [poses] :as frame} moments]
   (let [n (count poses)
         ^js mesh (ensure-capacity! r n)
         ^js geometry (.-geometry mesh)
@@ -321,6 +309,7 @@
     (fit-viewport! r canvas)
     (light! r (:reveal frame))
     (view! r (:camera frame))
+    (stage! r frame moments)
     (reset! (:last r) {:camera (:camera frame)
                        :live (keep-indexed (fn [i p] (when-not (:ghost? p) i)) poses)})
     (dotimes [i n]
@@ -349,22 +338,21 @@
     (reset! (:drawn r) n)))
 
 (defn- build
-  "Everything drawn, around a renderer that has finished init."
-  [^js renderer ^js canvas]
+  "Everything drawn, around a renderer that has finished init, with stage
+  set up behind the letters."
+  [^js renderer ^js canvas stage]
   (let [atlas (atom (new-atlas))
         ^js atlas-size (tsl/uniform (three/Vector2. atlas-width (:height @atlas)))
         ^js ink-node (tsl/uniform (three/Color. ink))
-        ^js floor-node (tsl/uniform 1.0)
         {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size ink-node)
         scene (three/Scene.)
         camera (three/PerspectiveCamera. 40 1 0.1 500)
-        floor (floor-mesh ink-node floor-node)
         caret (three/Mesh. (three/PlaneGeometry. 0.06 1.1)
                            (three/MeshBasicNodeMaterial. #js {:color vermilion}))
         r {:renderer renderer :scene scene :camera camera :canvas canvas
            :atlas atlas :atlas-node atlas-node :atlas-size atlas-size
-           :material material :caret caret :floor floor
-           :ink-node ink-node :floor-node floor-node
+           :material material :caret caret
+           :ink-node ink-node :stage stage
            :last (atom {})
            :mesh (atom (glyph-mesh 256 material))
            :drawn (atom 0)
@@ -372,16 +360,15 @@
            :backend (if (.. renderer -backend -isWebGPUBackend) "WebGPU" "WebGL2")}]
     (set! (.-background scene) (three/Color. bg))
     (set! (.-fog scene) (three/Fog. bg 20 50))
-    (.add scene floor)
     (.add scene @(:mesh r))
     (.add scene caret)
     (doseq [c (map char (range 32 127))] (glyph r (str c)))
-    r))
+    (assoc r :stage-state (atom ((:init stage) scene {:ink ink-node})))))
 
-(defn- init [^js canvas webgl?]
+(defn- init [^js canvas webgl? stage]
   (let [^js renderer (three/WebGPURenderer. #js {:canvas canvas :antialias true
                                                   :forceWebGL webgl?})]
-    (.then (.init renderer) #(build renderer canvas))))
+    (.then (.init renderer) #(build renderer canvas stage))))
 
 (defn- fresh-canvas
   "A copy of canvas in its place: a canvas that has handed out a WebGPU
@@ -397,14 +384,16 @@
   otherwise; `backend` says which. Some browsers expose a WebGPU whose
   interface is older than this three.js expects, and only the first frame
   shows it, hence the probe, drawn from probe-frame (an :ha/glyph-frame
-  the shell supplies, so the camera comes from the core here too)."
-  [^js canvas probe-frame]
-  (-> (init canvas false)
+  the shell supplies, so the camera comes from the core here too). stage
+  (a lab.stage) draws behind the letters."
+  [^js canvas probe-frame stage]
+  (-> (init canvas false stage)
       (.then (fn [r]
                (try
-                 (draw! r probe-frame)
+                 (draw! r probe-frame [])
                  r
                  (catch :default e
                    (js/console.warn "WebGPU could not draw; falling back to WebGL2:" (.-message ^js e))
+                   ((:dispose stage) @(:stage-state r))
                    (.dispose ^js (:renderer r))
-                   (init (fresh-canvas canvas) true)))))))
+                   (init (fresh-canvas canvas) true stage)))))))
