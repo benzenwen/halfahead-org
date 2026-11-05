@@ -174,13 +174,37 @@
      [:cue :ha/word-cue]
      [:at-ms :int]]
 
+    ;; How the whole draft moves: a named set of physics parameters
+    ;; (tempo, springiness, amplitude, drift) that every effect is tuned by.
+    ;; :auto means inferred from the writer's own typing rhythm.
+    :ha/style [:enum :plain :elegant :caffeinated :drunken :coarse]
+    :ha/style-choice [:enum :auto :plain :elegant :caffeinated :drunken :coarse]
+
+    ;; How a finished phrase is staged, like a trailer editor's cut. Closed:
+    ;; a director (rules now, an on-device model later) chooses; the pure
+    ;; core performs.
+    ;;   :line  stays in the line (the default)
+    ;;   :card  takes over the stage, big, a beat per word, then folds back
+    ;;   :push  the camera moves in on the phrase, then returns
+    ;;   :pull  the camera pulls back to reveal the paragraph, then returns
+    :ha/shot [:enum :line :card :push :pull]
+
+    :ha/direction
+    [:map {:closed true}
+     [:glyph-ids [:vector {:min 1} [:int {:min 0}]]]
+     [:shot :ha/shot]
+     [:energy :ha/unit]
+     [:at-ms :int]
+     [:source [:enum :rules :model]]]
+
     :ha/draft
     [:map {:closed true}
      [:text :string]
      [:glyphs [:vector :ha/glyph]]
      [:ghosts [:vector :ha/ghost]]
      [:cues [:vector :ha/placed-cue]]
-     [:next-id [:int {:min 0}]]]
+     [:next-id [:int {:min 0}]]
+     [:directions optional [:vector :ha/direction]]]
 
     ;; One glyph as the renderer should draw it at a moment. Units: em
     ;; (1 = the font size); angles in radians. :wobble is the amplitude of a
@@ -197,11 +221,22 @@
      [:glow :ha/unit]
      [:wobble :ha/unit]]
 
+    ;; Where the camera is and what it looks at, in the same em units as the
+    ;; poses. Part of the frame so shots are data and testable; a renderer
+    ;; follows it and decides nothing.
+    :ha/camera
+    [:map {:closed true}
+     [:x :ha/finite] [:y :ha/finite] [:z :ha/finite]
+     [:tx :ha/finite] [:ty :ha/finite] [:tz :ha/finite]
+     [:fov [:and :ha/finite [:> 0] [:< 180]]]]
+
     :ha/glyph-frame
     [:map {:closed true}
      [:t-ms :int]
      [:poses [:vector :ha/glyph-pose]]
-     [:caret [:map {:closed true} [:x :ha/finite] [:y :ha/finite]]]]}))
+     [:caret [:map {:closed true} [:x :ha/finite] [:y :ha/finite]]]
+     [:camera optional :ha/camera]
+     [:style optional :ha/style]]}))
 
 (def ^:private compiled
   (memoize (fn [k] (m/schema k {:registry registry}))))

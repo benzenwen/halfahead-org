@@ -1,0 +1,73 @@
+{:id "0034-lab-styles"
+ :title "Lab styles: Elegant, Caffeinated, Drunken, Coarse, picked or inferred from your typing"
+ :lupa/deps #{"0033-lab-crawl-camera"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Ben asked for stylistic modes (Elegant, Coarse, Drunken,
+        Caffeinated) chosen both by the writer and inferred from how they
+        type. A style is a named set of physics parameters every effect is
+        tuned by; :auto infers it from typing rhythm, locally and privately.
+        Every invariant still holds in every style."
+ :scope ["src/halfahead/lab/style.cljc" "test/halfahead/lab/style_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+         "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (already present; do not edit): :ha/style (:plain :elegant
+          :caffeinated :drunken :coarse), :ha/style-choice (those plus
+          :auto), optional :style on :ha/glyph-frame.
+          halfahead.lab.style (.cljc, pure):
+            (params style) -> {:tempo :overshoot :amplitude :sway :steps}
+              :plain       tempo 1.0, the current motion exactly
+              :elegant     tempo 1.5, overshoot near 0, amplitude 0.8,
+                           everything eases (a glide)
+              :caffeinated tempo 0.6, high overshoot, amplitude 1.15, a
+                           small fast tremor that decays
+              :drunken     tempo 1.4, low damping, amplitude 1.1, a slow
+                           sway and late catch-up that decays
+              :coarse      tempo 0.5, no easing: motion in 3 hard steps
+                           (:steps 3), amplitude 1.25
+            (infer glyphs t) -> a :ha/style from the inter-key intervals of
+              the last 12 glyphs born at or before t (within 6 s): median
+              under 110 ms and steady (coefficient of variation < 0.5) ->
+              :caffeinated; median under 110 ms and erratic -> :coarse;
+              median over 320 ms and steady -> :elegant; median over 320
+              ms and erratic -> :drunken; otherwise, or with fewer than 4
+              intervals, :plain.
+          pose/frame: opts gain :style-choice (default :plain). Each glyph
+          and each cue is performed in the style in force at its own birth
+          or firing time (for :auto, (infer glyphs born-ms) using only
+          glyphs born before it), so a change of style never jerks letters
+          already moving. :tempo scales every duration, :amplitude scales
+          every displacement, :steps quantises progress. The frame's :style
+          is the style in force at t. The settle bound becomes 2500 ms
+          after the latest event for every style; durations stay well under
+          the 5 s cap.
+          main.cljs and index.html: a quiet style picker bottom-right (Auto,
+          Plain, Elegant, Caffeinated, Drunken, Coarse; Auto default),
+          Ctrl+1..6 to switch; picking never leaves focus off the textarea.
+          The debug overlay names the style in force.
+          debug.cljc: summary gains the style.
+          e2e/lab.mjs: a step per explicit style typing a short line and
+          asserting lastFrame().style; an Auto step typing fast (40 ms/key)
+          then slowly (450 ms/key) asserting the style moves from
+          :caffeinated toward :elegant; screenshots out/lab/style-*.png."
+ :acceptance
+ ["style tests: params for every style; infer on synthetic rhythms (fast
+   steady -> :caffeinated, fast erratic -> :coarse, slow steady ->
+   :elegant, slow erratic -> :drunken, too few -> :plain)"
+  "Property, for every style choice: frames are valid, live chars spell
+   the draft, everything settles exactly 2500 ms after the latest event,
+   reduced motion leaves live poses at base, and every effect's x stays
+   within half an em of base"
+  "Property: with :auto, a glyph's motion depends only on glyphs born
+   before it (appending a glyph never changes earlier glyphs' poses at an
+   earlier t)"
+  "`bb lab:e2e` passes with the style steps; `bb test` stays green"]
+ :non-goals
+ ["No director, shots, or models; no schema edits"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/schema.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+           "e2e/lab.mjs" "docs/LAB.md"]
+ :budget-usd 12.0}

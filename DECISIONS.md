@@ -179,3 +179,26 @@ every keystroke (a word takes about a second, so this fits). Shape:
   the canvas is decoration.
 - Inspiration from Jon's demos and mrdoob's Codevember 2026 is taken as
   ideas only; no code is copied without a licence (this repo is public).
+
+### H20 ★ Space, restraint and styles; drafts never leave the device — Ben
+From Ben's second recording and the notes he typed into the lab
+("use the whole space, then restraint, like the best movie trailers";
+phrases, not only words; modes like Elegant, Coarse, Drunken,
+Caffeinated):
+- **Shots** above word cues (:line, :card, :push, :pull), chosen per
+  phrase by a **director**: rules first (order 0035), an on-device model
+  later behind the same function. **Restraint is a tested property:** at
+  most one non-line shot per 10 s.
+- **The camera is data in every frame** (pure, testable); finished lines
+  recede up and back like a credits crawl, so long drafts use depth
+  instead of running off the stage (0033).
+- **Styles** are named physics parameter sets, **picked or inferred**
+  from typing rhythm (both, Ben), each glyph performed in the style in
+  force at its birth (0034).
+- **On-device only (Ben):** drafts never leave the machine; no cloud
+  director, even opt-in. A model director must run in the browser.
+- Ben is moving to bigger-picture product thinking in `docs/product/` and
+  asked the factory to run ahead ("go a little dark"). The review rate
+  stays 1.0 per the charter: nothing records review outcomes yet, so
+  nothing has earned darkness; "dark" here means Ben is not watching each
+  tick, not that review is skipped.
