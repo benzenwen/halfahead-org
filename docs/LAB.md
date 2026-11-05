@@ -40,7 +40,8 @@ textarea value --edit--> :ha/draft --frame(t)--> :ha/glyph-frame --> renderer
 Invariants, tested: the live letters of every frame spell exactly what is
 in the textarea; every number is finite; everything settles exactly onto
 the layout within 2.5 s of the last event, in every style, and within
-5 s of the latest direction; reduced motion means no motion and no shots;
+5 s of the latest direction, and within 900 ms of a reveal level being
+reached; reduced motion means no motion and no shots;
 apart from a card, which takes a phrase out of the line on purpose, no
 letter ever moves more than half an em sideways from its place, so
 a word's effect never reaches its neighbours (effects that gather or
@@ -56,6 +57,48 @@ upstream changes. The reference renderer (`halfahead.lab.render`) is
 three.js with an SDF glyph atlas, deliberately plain, so there is something
 real to replace.
 
+## The reveal
+
+Experiment 1 of the product outline: start with a box that looks like
+every chat box, and let it show what it can do as it is used. Four levels,
+decided in `halfahead.lab.reveal` (pure) and carried in every frame as
+`:reveal {:level :lights}`:
+
+| Level | What you see | Reached by |
+|---|---|---|
+| 0 | flat and familiar: ink on paper (`#f6f1e7`), the camera straight on, no floor, each letter only a third of its usual pop, in the plane; words do nothing | the start |
+| 1 | small in-line word effects (the iMessage level): cues perform, but in the plane only (no depth, no turning out of it), within the half-em bound | 3 finished words |
+| 2 | depth: cues and births in full, the floor fades in and the house lights go down to the dark stage; the director starts reading phrases | 4 cues that are not the quiet default (glossary, punctuation or shape) |
+| 3 | the full stage: shots (cards, pushes, pulls) and the crawl | a phrase directed with a shot other than `:line` |
+
+**Wands.** Ctrl+. or a mouse flick over the stage (at least 600 px in
+under 250 ms; slow pointing never counts) raises the level by one, from
+whatever it is then. **`?reveal=N`** (0 to 3) starts there; a plain
+`/lab/` starts at 0. Levels never go down: the shell passes back the
+levels reached so far (`:reached`), so deleting words, which takes their
+cues away, cannot undo a level.
+
+Level 3 counts only a spectacle placed after level 2 on a phrase with a
+letter written since: the director's first pass at level 2 may direct a
+phrase finished earlier, and that card neither opens level 3 nor is
+performed. Every birth, cue and shot is performed at the level in force
+when it happened, so reaching a level never jerks a letter already moving.
+
+**The transition is the moment.** On reaching level 2, the house lights
+(`:lights`, 0 up to 1 down) go down over 900 ms, eased; the background,
+the ink, the fog and the floor follow them (the floor only from level 2),
+the page's own chrome switches palette at the half-way point
+(`<html data-lights>`), and the camera tilts from straight on to its 2
+degrees. Every letter then on the page peels off it: a lift of 0.6 em that
+settles over 700 ms. On reaching level 3 the crawl eases in over 900 ms.
+Started at a level with `?reveal`, none of this plays; it is just there.
+With reduced motion levels still advance, but the lights are at the
+level's value at once, nothing peels and the crawl is just there.
+
+`pose/frame` without `:reveal-opts` is the full stage (level 3), so every
+invariant below is tested at every level, started anywhere and with
+wands.
+
 ## Staging
 
 The camera is decided in `halfahead.lab.pose`, as part of every frame; the
@@ -68,7 +111,8 @@ from the line before to the new one over 450 ms, timed from the birth of
 the new line's first letter (with reduced motion it is there at once). It
 is derived from the draft alone, so deleting back to an earlier line snaps
 rather than eases. The camera sits in front of the target, looking down 2
-degrees (40 degree field of view), at the distance where the column fills
+degrees on the dark stage (straight on with the house lights up; 40
+degree field of view), at the distance where the column fills
 75% of the view's width for the viewport's aspect (`:aspect`, which the
 shell passes in), so letters stand upright at rest, within 2 degrees of
 vertical anywhere in the block. Type is sized so a line (18 em, about
@@ -79,8 +123,8 @@ births and launches come forward and brighten.)
 
 ### The crawl
 
-A draft taller than the screen does not fall off the top: like an
-end-credits crawl, finished lines recede up and back into the dark. The
+At level 3, a draft taller than the screen does not fall off the top (below
+it, older lines scroll up like a chat box's): like an end-credits crawl, finished lines recede up and back into the dark. The
 current line and the three above it are untouched; each line beyond that
 moves back 0.9 em, loses 0.18 of its opacity (never below 0.12) and tilts
 back 0.1 rad (never past 0.5 rad), one step more per line. The recession is
@@ -268,6 +312,7 @@ shipped -> launch 1.0 (glossary)
 we -> pop 0.3 (default)
 WHAT A DAY! -> card 0.9
 camera target x 9.00 · y -5.40 · z 0.00
+reveal level 3 · lights 1.00
 sound off
 ```
 
@@ -286,6 +331,7 @@ sound off
 - **directions**: likewise up to six recent directions, newest first, each
   as the phrase (its first 16 characters) -> shot and energy.
 - **camera target**: where this frame's camera looks, in em.
+- **reveal**: the frame's reveal level and house lights (0 up, 1 down).
 - **sound**: whether Sound is on.
 
 The panel grows as wide as its longest line, up to the viewport, and wraps
@@ -309,11 +355,23 @@ bb lab        # compile the :lab build, serve public/, print the page's URL
 bb lab:e2e    # the same page in headless Chromium (e2e/lab.mjs)
 ```
 
+Add `?reveal=3` to the URL for the full stage at once (see The reveal).
+
 `bb lab` serves `public/` on a free port and prints the URL of
 `/lab/index.html` (the local server maps only `/` to an index); Ctrl-C
-stops it. `bb lab:e2e` types a sentence, backspaces, waits for everything
+stops it. `bb lab:e2e` runs every step on the full stage (`?reveal=3`)
+except the reveal's. It types a sentence, backspaces, waits for everything
 to settle (then asserts every letter is upright and the block centred),
-types on until the block wraps (still centred), types 14 lines on a fresh
+types on until the block wraps (still centred). On a plain `/lab/` it
+then walks the reveal: level 0 with a paper background (the luminance of
+one screenshot pixel at the left edge, decoded from the PNG, since a WebGPU
+canvas cannot be read back reliably); level 1 after "one two three ";
+level 2 after "deploy crash merge finally " and a dark background 1.5 s
+later; level 3 after "WHAT A DAY! " with the card performed (a letter of
+it at scale > 1.5), leaving `reveal-0.png` to `reveal-3.png`. On a fresh
+plain page Ctrl+. raises level 0 to 1, a slow sweep of the mouse does
+nothing, and a synthesized flick (pointer moves dispatched at once)
+raises it to 2. It types 14 lines on a fresh
 page and checks that every letter is either on screen or dimmed to 0.3
 opacity or less and that the current line is in the middle 60% of the
 height, types "This is a merge
@@ -323,7 +381,8 @@ another with the page's clock held (Playwright's clock API) and steps
 through the `:fuse` in 50 ms slices, checking at each that no letter of
 "merge" lands left of the "a" before it, opens `?debug` and checks
 the overlay (frame number, fps, backend, the style in force, and a
-`shipped -> launch` line; a camera target line, and no line cut off;
+`shipped -> launch` line; a camera target line, a `reveal level 3`
+line, and no line cut off;
 without the flag it must not show). It then types fast (40 ms a key) and
 then slowly (450 ms a key) on a fresh page with the clock held, checking
 that Auto reads caffeinated and then elegant. On one more page it picks
@@ -345,7 +404,7 @@ types "is it? " and checks that a `:push` brought the camera at least 25%
 nearer its target (`push.png`). Finally it repeats with reduced motion (on every frame the camera target
 is on the current line and drawn at the canvas centre), asserting on
 `window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
-`settled.png`, `wrapped.png`, `crawl.png`, `steady.png`, `card.png`, `push.png`, `fuse.png` (taken at the
+`settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in

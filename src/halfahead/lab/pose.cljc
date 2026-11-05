@@ -15,8 +15,16 @@
   easing to a new line over 450 ms, and lines more than three above it
   recede up and back into the dark like an end-credits crawl, so a long
   draft uses depth instead of running off the screen. Units are em; angles
-  are radians."
+  are radians.
+  Every frame is performed at the reveal level in force (see lab.reveal):
+  at 0 only a third of each birth's pop, in the plane, and no cues; at 1
+  cues in the plane; at 2 everything in depth, as the house lights go down
+  and the letters peel off the page; at 3 shots and the crawl too. Each
+  birth, cue and shot is performed at the level in force when it happened,
+  so reaching a level never jerks a letter already moving; what a level
+  adds (the peel, the crawl) is eased in and settled within 900 ms of it."
   (:require [clojure.string :as str]
+            [halfahead.lab.reveal :as reveal]
             [halfahead.lab.style :as style]))
 
 ;; --- arithmetic --------------------------------------------------------------
@@ -339,11 +347,20 @@
        :opacity (max 0.12 (- 1.0 (* 0.18 k)))
        :rx (max -0.5 (* -0.1 k))})))
 
-(defn- base-pose [current {:keys [id char]} {:keys [x y] :as position}]
+(defn- eased-recession
+  "recession weighted w of the way in from none (w 1 is it exactly)."
+  [w current line]
+  (when (pos? w)
+    (when-let [{:keys [z opacity rx] :as r} (recession current line)]
+      (if (= 1.0 w)
+        r
+        {:z (* w z) :opacity (+ 1.0 (* w (- opacity 1.0))) :rx (* w rx)}))))
+
+(defn- base-pose [current crawl {:keys [id char]} {:keys [x y] :as position}]
   (merge {:id id :char char :ghost? false
           :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
           :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0}
-         (recession current (line-of position))))
+         (eased-recession crawl current (line-of position))))
 
 (def ^:private x-reach
   "How far, in em, motion may carry a letter sideways from its place: less
@@ -364,23 +381,27 @@
 
 (def ^:private ember-ms 600)
 
-(defn- ember [{:keys [id char died-ms index]} t positions end]
+(defn- ember
+  "A ghost drifting up and away as it fades; in the plane below level 2,
+  and without its spin at level 0."
+  [{:keys [id char died-ms index]} t positions end level]
   (let [age (- t (double died-ms))]
     (when (and (>= age 0) (< age ember-ms))
       (let [p (/ age ember-ms)
             {:keys [x y]} (get positions index end)]
         {:id id :char char :ghost? true
-         :x x :y (+ y (* 1.5 p)) :z (* 0.3 p)
-         :rx 0.0 :ry 0.0 :rz (* (if (even? id) 1.0 -1.0) tau p)
+         :x x :y (+ y (* 1.5 p)) :z (if (< level 2) 0.0 (* 0.3 p))
+         :rx 0.0 :ry 0.0 :rz (if (zero? level) 0.0 (* (if (even? id) 1.0 -1.0) tau p))
          :scale (- 1.0 (* 0.4 p)) :opacity (- 1.0 p) :glow (* 0.5 (- 1.0 p)) :wobble 0.0}))))
 
 ;; --- camera ------------------------------------------------------------------
 
 (def ^:private fov-deg 40.0)
 
-(def ^:private pitch
-  "How far the camera looks down at the line, in radians (2 degrees): a
-  steeper pitch shows more floor but lifts receded lines off the top."
+(def ^:private stage-pitch
+  "How far the camera looks down at the line on the dark stage, in radians
+  (2 degrees): a steeper pitch shows more floor but lifts receded lines off
+  the top. With the house lights up it looks straight on, like a page."
   (* 2.0 (/ Math/PI 180.0)))
 
 (def ^:private fill
@@ -389,9 +410,9 @@
 
 (defn- camera
   "Looking at the column's centre on the current (fractional) line, from
-  in front and a little above, at the distance where the column fills 75%
-  of the view's width for aspect (width / height)."
-  [width-em aspect current]
+  in front and pitch radians above, at the distance where the column fills
+  75% of the view's width for aspect (width / height)."
+  [width-em aspect current pitch]
   (let [width (double width-em)
         tx (/ width 2.0)
         ty (line-y current)
@@ -582,46 +603,107 @@
                          [b (style/params ((style-of style-choice before) b))]))))
           glyphs)))
 
+(def ^:private flat-births
+  "How much of a birth's displacement level 0 keeps: the gentlest pop."
+  (/ 1.0 3.0))
+
+(defn- at-level
+  "delta as a level performs it: at 0 a third of its displacement, in the
+  plane and unturned; at 1 in the plane (turning in it only); from 2 as it
+  is."
+  [level delta]
+  (case level
+    0 (dissoc (amplified delta flat-births) :z :rx :ry :rz)
+    1 (dissoc delta :z :rx :ry)
+    delta))
+
+(def ^:private peel-ms 700)
+(def ^:private peel-em 0.6)
+
+(defn- peel
+  "The lift of a letter born by t2 (when level 2 was reached by use or a
+  wand) off the flat page, t ms in: up 0.6 em and back down within 700 ms;
+  nil outside it."
+  [t2 born-ms t]
+  (when t2
+    (let [u (- t t2)]
+      (when (and (<= born-ms t2) (>= u 0) (< u peel-ms))
+        {:z (* peel-em (sin (* Math/PI (/ u peel-ms))))}))))
+
+(def ^:private crawl-ease-ms 900)
+
+(defn- crawl-weight
+  "How far the crawl has come in at level, 0 to 1: eased over 900 ms from
+  reaching level 3, unless the lab started there or motion is reduced."
+  [level t3 started-there? reduced-motion? t]
+  (cond
+    (< level 3) 0.0
+    (or started-there? reduced-motion?) 1.0
+    :else (smoothstep (clamp 0.0 1.0 (/ (- t t3) crawl-ease-ms)))))
+
 (defn frame
   "The :ha/glyph-frame for draft at t-ms: one live pose per glyph, in
   order, then one ember per ghost younger than 600 ms, the caret and the
-  camera, and the :style in force at t. opts: {:advance fn :width-em n
-  :aspect n :reduced-motion? b :style-choice c}, aspect being the
-  viewport's width over its height and c a :ha/style-choice (default
-  :plain). Each birth and each cue is performed in the style in force when
+  camera, the :style in force at t, and the :reveal level and house
+  lights. opts: {:advance fn :width-em n :aspect n :reduced-motion? b
+  :style-choice c :reveal-opts r}, aspect being the viewport's width over
+  its height, c a :ha/style-choice (default :plain) and r the opts for
+  lab.reveal (default {:start-level 3}, the full stage). Births, cues and
+  shots are performed at the level in force when they happened (see the
+  namespace doc); on reaching level 2 by use or a wand every letter then
+  present peels up 0.6 em off the page and back over 700 ms; the camera
+  pitches down with the lights; the crawl eases in over 900 ms at level
+  3. Each birth and each cue is performed in the style in force when
   it happened, so a change of style never jerks a letter already moving.
   The draft's :directions are performed as shots (a :card takes the
   phrase centre stage, a :push or :pull moves the camera), each over by
   4500 ms after its :at-ms. With reduced motion every live pose is its
   (possibly receded) resting place, there are no embers or shots, and the
-  camera is on the current line without easing."
-  [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice]
+  camera is on the current line without easing; levels still advance, but
+  the lights are at the level's value at once and nothing peels."
+  [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice reveal-opts]
                :or {advance default-advance width-em 40 aspect 1.6
-                    style-choice :plain}}]
-  (let [{:keys [glyphs ghosts cues]} draft
+                    style-choice :plain reveal-opts {:start-level 3}}}]
+  (let [{:keys [glyphs ghosts cues directions]} draft
         chars (mapv :char glyphs)
         positions (layout chars advance width-em)
         end (end-position chars positions advance)
         t (double t-ms)
+        {:keys [level lights reached]} (reveal/state draft t reveal-opts)
+        lights (if reduced-motion? (if (>= level 2) 1.0 0.0) lights)
+        level-when #(reveal/level-at reached reveal-opts %)
+        start-level (level-when ##-Inf)
         current (line-progress glyphs (mapv line-of positions) t reduced-motion?)
-        bases (mapv #(base-pose current %1 %2) glyphs positions)
+        crawl (crawl-weight level (reached 3) (>= start-level 3) reduced-motion? t)
+        bases (mapv #(base-pose current crawl %1 %2) glyphs positions)
         live (if reduced-motion?
                bases
-               (let [moving (cue-deltas cues t (style-of style-choice glyphs))
-                     born (birth-styles glyphs t style-choice)]
+               (let [cue-style (style-of style-choice glyphs)
+                     cues-at (group-by #(min 2 (level-when (:at-ms %))) cues)
+                     moving (merge-with into
+                                        (update-vals (cue-deltas (cues-at 1 []) t cue-style)
+                                                     #(mapv (partial at-level 1) %))
+                                        (cue-deltas (cues-at 2 []) t cue-style))
+                     born (birth-styles glyphs t style-choice)
+                     t2 (when (< start-level 2) (reached 2))]
                  (mapv (fn [{:keys [id born-ms]} base]
-                         (apply-deltas base (into (get moving id [])
-                                                  (when-let [ps (born born-ms)]
-                                                    (birth (- t (double born-ms)) ps id)))))
+                         (apply-deltas base (cond-> (get moving id [])
+                                              (born born-ms)
+                                              (into (map (partial at-level (level-when born-ms)))
+                                                    (birth (- t (double born-ms)) (born born-ms) id))
+                                              true
+                                              (into (keep identity) [(peel t2 born-ms t)]))))
                        glyphs bases)))
         embers (when-not reduced-motion?
-                 (keep #(ember % t positions end) ghosts))
-        cam (camera width-em aspect current)
+                 (keep #(ember % t positions end level) ghosts))
+        cam (camera width-em aspect current (* lights stage-pitch))
+        staged (assoc draft :directions (filterv #(>= (level-when (:at-ms %)) 3) directions))
         [live cam] (if reduced-motion?
                      [live cam]
-                     (perform-shot live cam draft positions t {:advance advance :width-em width-em}))]
+                     (perform-shot live cam staged positions t {:advance advance :width-em width-em}))]
     {:t-ms t-ms
      :poses (into live embers)
      :caret end
      :camera cam
-     :style ((style-of style-choice glyphs) t)}))
+     :style ((style-of style-choice glyphs) t)
+     :reveal {:level level :lights lights}}))

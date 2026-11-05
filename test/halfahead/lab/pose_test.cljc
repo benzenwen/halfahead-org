@@ -6,6 +6,7 @@
             [clojure.test.check.properties :as prop]
             [halfahead.lab.director :as director]
             [halfahead.lab.pose :as pose]
+            [halfahead.lab.reveal :as reveal]
             [halfahead.lab.style :as style]
             [halfahead.schema :as schema]))
 
@@ -59,12 +60,31 @@
 
 (def ^:private style-choices (into [:auto] style/styles))
 
+(def gen-reveal-opts
+  (gen/hash-map :start-level (gen/choose 0 3)
+                :wands (gen/vector (gen/choose 0 6000) 0 3)))
+
 (def gen-opts
-  (gen/hash-map :style-choice (gen/elements style-choices)
-                :width-em (gen/choose 3 40)
-                :aspect (gen/double* {:min 0.4 :max 3 :NaN? false :infinite? false})
-                :advance (gen/elements [pose/default-advance
-                                        (fn [c] (if (#{"W" "日" "😀"} c) 1.0 0.5))])))
+  "Frame opts, at every reveal level: started anywhere, with wands, or
+  with no :reveal-opts at all (the full stage)."
+  (gen/fmap
+   (fn [[opts reveal-opts]] (cond-> opts reveal-opts (assoc :reveal-opts reveal-opts)))
+   (gen/tuple (gen/hash-map :style-choice (gen/elements style-choices)
+                            :width-em (gen/choose 3 40)
+                            :aspect (gen/double* {:min 0.4 :max 3 :NaN? false :infinite? false})
+                            :advance (gen/elements [pose/default-advance
+                                                    (fn [c] (if (#{"W" "日" "😀"} c) 1.0 0.5))]))
+              (gen/one-of [(gen/return nil) gen-reveal-opts]))))
+
+(defn- reveal-opts [opts] (:reveal-opts opts {:start-level 3}))
+
+(defn- level-latest
+  "The last time the reveal moves anything: 900 ms after the last level
+  was reached (the lights and the crawl; the peel takes 700)."
+  [draft opts]
+  (+ 900 (reduce max 0 (keep identity (reveal/levels draft 1e9 (reveal-opts opts))))))
+
+(defn- level [draft opts t] (:level (reveal/state draft t (reveal-opts opts))))
 
 (def gen-case
   "A draft, opts, and a time before, during or after its motion."
@@ -84,14 +104,15 @@
 (defn- line-number [y] (long (Math/round (/ (- (double y)) 1.35))))
 
 (defn- rest-poses
-  "Where every glyph rests: on the layout, and for lines more than 3 above
-  the last glyph's, receded by 0.9 em, 0.18 opacity (floor 0.12) and
-  -0.1 rad (floor -0.5) per line beyond."
-  [draft {:keys [advance width-em]}]
+  "Where every glyph rests: on the layout, and at level 3 (the default) for
+  lines more than 3 above the last glyph's, receded by 0.9 em, 0.18
+  opacity (floor 0.12) and -0.1 rad (floor -0.5) per line beyond."
+  ([draft opts] (rest-poses draft opts 3))
+  ([draft {:keys [advance width-em]} level]
   (let [ps (pose/layout (map :char (:glyphs draft)) advance width-em)
         cur (if (seq ps) (line-number (:y (peek ps))) 0)]
     (mapv (fn [{:keys [id char]} {:keys [x y]}]
-            (let [k (- cur (line-number y) 3)]
+            (let [k (if (= 3 level) (- cur (line-number y) 3) 0)]
               (merge {:id id :char char :ghost? false :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
                       :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0}
                      (when (pos? k)
@@ -99,7 +120,7 @@
                         :opacity (max 0.12 (- 1.0 (* 0.18 k)))
                         :rx (max -0.5 (* -0.1 k))}))))
           (:glyphs draft)
-          ps)))
+          ps))))
 
 (defn- current-line-y [draft opts]
   (let [ps (pose/layout (map :char (:glyphs draft))
@@ -118,7 +139,9 @@
 
 (defspec frame-is-valid 300
   (prop/for-all [[draft opts t] gen-case]
-    (schema/valid? :ha/glyph-frame (pose/frame draft t opts))))
+    (let [f (pose/frame draft t opts)]
+      (and (schema/valid? :ha/glyph-frame f)
+           (= (level draft opts t) (:level (:reveal f)))))))
 
 (defspec live-poses-spell-the-draft 300
   (prop/for-all [[draft opts t] gen-case]
@@ -129,16 +152,21 @@
 (defspec everything-settles-onto-the-layout 300
   (prop/for-all [[draft opts _] gen-case
                  k (gen/choose 0 3000)]
-    (let [f (pose/frame draft (+ (latest draft) 2500 k) opts)]
-      (and (= (rest-poses draft opts) (live f))
-           (empty? (ghosts f))))))
+    (let [t (+ (max (+ (latest draft) 2500) (level-latest draft opts)) k)
+          f (pose/frame draft t opts)]
+      (and (= (rest-poses draft opts (level draft opts t)) (live f))
+           (empty? (ghosts f))
+           (= (if (>= (level draft opts t) 2) 1.0 0.0) (:lights (:reveal f)))))))
 
 (defspec reduced-motion-is-still 300
+  ;; levels still advance, but nothing moves into them
   (prop/for-all [[draft opts t] gen-case]
-    (let [f (pose/frame draft t (assoc opts :reduced-motion? true))]
-      (and (= (rest-poses draft opts) (live f))
+    (let [f (pose/frame draft t (assoc opts :reduced-motion? true))
+          lv (level draft opts t)]
+      (and (= (rest-poses draft opts lv) (live f))
            (empty? (ghosts f))
-           (= (current-line-y draft opts) (:ty (:camera f)))))))
+           (= (current-line-y draft opts) (:ty (:camera f)))
+           (= {:level lv :lights (if (>= lv 2) 1.0 0.0)} (:reveal f))))))
 
 (defspec frame-has-a-camera 300
   (prop/for-all [[draft opts t] gen-case]
@@ -479,16 +507,21 @@
 (defspec everything-settles-after-directions 300
   (prop/for-all [[draft opts _] gen-directed-case
                  k (gen/choose 0 3000)]
-    (let [t (+ (max (+ (latest draft) 2500) (+ (latest-direction draft) 5000)) k)
+    (let [t (+ (max (+ (latest draft) 2500) (+ (latest-direction draft) 5000)
+                    (level-latest draft opts))
+               k)
           f (pose/frame draft t opts)]
-      (and (= (rest-poses draft opts) (live f))
+      (and (= (rest-poses draft opts (level draft opts t)) (live f))
            (empty? (ghosts f))
            (= (:camera (pose/frame (dissoc draft :directions) t opts)) (:camera f))))))
 
 (defspec reduced-motion-performs-no-shots 300
+  ;; a direction may open level 3, but it is not performed
   (prop/for-all [[draft opts t] gen-directed-case]
-    (let [opts (assoc opts :reduced-motion? true)]
-      (= (pose/frame (dissoc draft :directions) t opts) (pose/frame draft t opts)))))
+    (let [opts (assoc opts :reduced-motion? true)
+          f (pose/frame draft t opts)]
+      (and (= (rest-poses draft opts (level draft opts t)) (live f))
+           (= (:camera (pose/frame (dissoc draft :directions) t opts)) (:camera f))))))
 
 (defn- directed [text shot at]
   (let [d (draft-of text 0 [])]
@@ -551,3 +584,115 @@
     (doseq [dt [0 100 500 1000]]
       (is (= (pose/frame (dissoc draft :directions) (+ 10000 dt) {})
              (pose/frame draft (+ 10000 dt) {}))))))
+
+;; --- reveal levels ------------------------------------------------------------
+
+(def ^:private gen-flat-case
+  "As gen-case, at level 0 throughout: started there, no wands, and at
+  most two cues, too few to reach level 1."
+  (gen/fmap (fn [[draft opts t]]
+              [(update draft :cues #(vec (take 2 %))) (assoc opts :reveal-opts {:start-level 0}) t])
+            gen-case))
+
+(defspec level-0-is-a-flat-page 300
+  (prop/for-all [[draft opts t] gen-flat-case]
+    (let [f (pose/frame draft t opts)
+          stage (pose/frame (assoc draft :cues []) t (dissoc opts :reveal-opts))
+          {:keys [y ty]} (:camera f)]
+      (and (= {:level 0 :lights 0.0} (:reveal f))
+           (every? #(= [0.0 0.0 0.0 0.0] [(:z %) (:rx %) (:ry %) (:rz %)]) (live f))
+           (every? #(zero? (:z %)) (ghosts f))
+           (close? y ty)
+           ;; cues perform nothing
+           (= f (pose/frame (assoc draft :cues []) t opts))
+           ;; a third of the birth the full stage gives, where that is not
+           ;; clamped at scale 0
+           (every? (fn [[p s]] (or (zero? (:scale s))
+                                   (< (abs (- (- (:scale p) 1.0) (/ (- (:scale s) 1.0) 3.0))) 1e-9)))
+                   (map vector (live f) (live stage)))))))
+
+(def ^:private gen-inline-case
+  "As gen-case, at level 1: started there, no wands, and only quiet
+  default cues, so use never reaches level 2."
+  (gen/fmap (fn [[draft opts t]]
+              [(update draft :cues (fn [cs] (mapv #(assoc-in % [:cue :source] :default) cs)))
+               (assoc opts :reveal-opts {:start-level 1}) t])
+            gen-case))
+
+(defspec level-1-performs-in-the-plane 300
+  (prop/for-all [[draft opts t] gen-inline-case]
+    (let [f (pose/frame draft t opts)
+          rest-x (into {} (map (juxt :id :x)) (rest-poses draft opts 1))]
+      (and (= 1 (:level (:reveal f)))
+           (= 0.0 (:lights (:reveal f)))
+           (every? #(= [0.0 0.0 0.0] [(:z %) (:rx %) (:ry %)]) (live f))
+           (every? (fn [{:keys [id x]}] (<= (abs (- x (rest-x id))) (+ 0.5 1e-9))) (live f))))))
+
+(deftest level-1-still-performs-cues
+  (let [cue {:glyph-ids [0 1 2 3]
+             :cue {:word "back" :effect :rewind :intensity 1 :source :default}
+             :at-ms 10000}
+        draft (draft-of "back " 0 [cue])
+        f (pose/frame draft 10200 {:reveal-opts {:start-level 1}})]
+    (is (some #(not= 0.0 (:rz %)) (live f)) "a rewind turns in the plane")
+    (is (= (live (pose/frame draft 12000 {:reveal-opts {:start-level 1}}))
+           (rest-poses draft {:advance pose/default-advance :width-em 40} 1)))))
+
+(deftest level-2-has-depth-but-no-shots
+  (let [text (str/join "\n" (map #(str "line " %) (range 8)))
+        opts {:reveal-opts {:start-level 1 :wands [5000]}}  ; level 2 at 5000
+        plain (draft-of text 0 [])
+        early-card (assoc plain :directions [{:glyph-ids [0 1 2 3] :shot :card :energy 0.9
+                                              :at-ms 4000 :source :rules}])
+        old-card (assoc plain :directions [{:glyph-ids [0 1 2 3] :shot :card :energy 0.9
+                                            :at-ms 5500 :source :rules}])]
+    (is (= 2 (:level (:reveal (pose/frame plain 6000 opts)))))
+    (testing "a card placed before level 2, or on letters older than it, opens nothing and is not performed"
+      (doseq [d [early-card old-card], t [5600 6000 6500]]
+        (is (= (pose/frame plain t opts) (pose/frame d t opts)))))
+    (testing "old lines do not recede"
+      (is (every? #(= 1.0 (:opacity %)) (live (pose/frame plain 9000 opts)))))
+    (testing "births come forward in depth"
+      (let [born (assoc plain :glyphs (conj (:glyphs plain) {:id 99 :char "x" :born-ms 8000}))]
+        (is (pos? (:z (peek (live (pose/frame born 8100 opts))))))))))
+
+(deftest level-3-is-the-full-stage
+  (let [text (str/join "\n" (map #(str "line " %) (range 8)))
+        draft (directed text :card 10000)]
+    (doseq [t [0 10500 11000 20000]]
+      (is (= (pose/frame draft t {}) (pose/frame draft t {:reveal-opts {:start-level 3}}))))
+    (is (= {:level 3 :lights 1.0} (:reveal (pose/frame draft 0 {}))))
+    (testing "reached by a wand, the crawl eases in over 900 ms"
+      (let [opts {:reveal-opts {:start-level 2 :wands [5000]}}
+            z0 #(:z (first (live (pose/frame draft % opts))))]
+        (is (= 0.0 (z0 4999)))
+        (is (< -3.6 (z0 5450) 0.0))
+        (is (close? -3.6 (z0 5900)) "line 0 is four lines back from line 7")))))
+
+(deftest letters-peel-off-the-page
+  (let [draft (assoc (draft-of "abc" 0 [])
+                     :glyphs [{:id 0 :char "a" :born-ms 0} {:id 1 :char "b" :born-ms 0}
+                              {:id 2 :char "c" :born-ms 5100}])
+        opts {:reveal-opts {:start-level 1 :wands [5000]}}
+        z (fn [i t & [o]] (:z (nth (live (pose/frame draft t (or o opts))) i)))]
+    (testing "every letter present when level 2 is reached lifts 0.6 em"
+      (is (close? 0.6 (z 0 5350)))
+      (is (< 0.0 (z 1 5100) 0.6)))
+    (testing "and is back on the page by 700 ms"
+      (is (= 0.0 (z 0 5700)))
+      (is (= 0.0 (z 0 9000))))
+    (testing "a letter written after it does not peel"
+      (is (= 0.0 (z 2 5600))))
+    (testing "not with reduced motion"
+      (is (= 0.0 (z 0 5350 (assoc opts :reduced-motion? true)))))
+    (testing "not when the lab started at level 2"
+      (is (= 0.0 (z 0 5350 {:reveal-opts {:start-level 2}}))))))
+
+(deftest the-camera-pitches-with-the-lights
+  (let [draft (draft-of "ab" 0 [])
+        pitch (fn [t o] (let [{:keys [y ty z tz]} (:camera (pose/frame draft t o))]
+                          (Math/atan2 (- y ty) (- z tz))))
+        opts {:reveal-opts {:start-level 1 :wands [5000]}}]
+    (is (close? 0.0 (pitch 4000 opts)) "frontal with the house lights up")
+    (is (< 0.0 (pitch 5450 opts) (pitch 5900 opts)))
+    (is (close? (pitch 5900 opts) (pitch 0 {})) "the stage's 2 degrees once they are down")))

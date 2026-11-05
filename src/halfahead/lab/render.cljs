@@ -3,7 +3,9 @@
   three.js or the GPU: it draws :ha/glyph-frames as SDF glyphs on instanced
   quads, seen from each frame's :camera, and decides nothing, not even
   where to look. WebGPU where the browser has it, WebGL2
-  otherwise (three's WebGPURenderer picks), with one TSL material for both."
+  otherwise (three's WebGPURenderer picks), with one TSL material for both.
+  The frame's :reveal sets the house lights: ink on paper with them up, the
+  dark stage with them down, and the floor only from level 2."
   (:require ["@mapbox/tiny-sdf" :default TinySDF]
             ["three/tsl" :as tsl]
             ["three/webgpu" :as three]))
@@ -84,14 +86,16 @@
 ;; --- material ----------------------------------------------------------------
 
 (def ^:private ink "#efe6d6")
+(def ^:private page-ink "#1d1a16")
 (def ^:private vermilion "#ff7a55")
 (def ^:private ember "#ff8a3d")
 
 (defn- glyph-material
   "Alpha from the distance field with a smooth edge; glow as a wider, softer
   halo from the same field, tinted vermilion; ghosts in ember orange; wobble
-  as a jelly sway of the quad's corners."
-  [^js atlas-texture ^js atlas-size]
+  as a jelly sway of the quad's corners. ink-node is the ink's colour, a
+  uniform that follows the house lights."
+  [^js atlas-texture ^js atlas-size ^js ink-node]
   (let [rect (tsl/attribute "glyphRect" "vec4")
         opacity (tsl/attribute "glyphOpacity" "float")
         glow (tsl/attribute "glyphGlow" "float")
@@ -106,7 +110,7 @@
         edge 0.75
         fill (tsl/smoothstep (- edge 0.06) (+ edge 0.06) d)
         halo (.mul (.mul (tsl/smoothstep 0.15 edge d) glow) 0.85)
-        base (tsl/mix (tsl/color ink) (tsl/color ember) ghost)
+        base (tsl/mix ink-node (tsl/color ember) ghost)
         rgb (tsl/mix (tsl/color vermilion) base fill)
         ^js g tsl/positionGeometry
         sway (tsl/vec3 (.mul (tsl/sin (.add (.mul tsl/time 11.0) (.mul (.-y g) 5.0))) 0.18)
@@ -152,6 +156,7 @@
 ;; --- stage -------------------------------------------------------------------
 
 (def ^:private bg "#141210")
+(def ^:private paper "#f6f1e7")
 
 (def ^:private floor-drop
   "Gap between the line being written and the floor, in em."
@@ -162,16 +167,17 @@
   in ink at low alpha (blending is in linear light, so 0.02 shows as about
   8% of the way from the background to ink), anti-aliased by their
   screen-space width, fixed in world space so they never slide as the
-  plane follows the block. Fog fades it into the background."
-  []
+  plane follows the block. Fog fades it into the background. floor-node
+  is a uniform from 0 (no floor) to 1, ink-node the ink's colour."
+  [^js ink-node ^js floor-node]
   (let [^js p (.div (.-xz tsl/positionWorld) 2.0)
         ^js cell (.div (tsl/abs (.sub (tsl/fract (.sub p 0.5)) 0.5)) (tsl/fwidth p))
         line (.oneMinus (tsl/min (tsl/min (.-x cell) (.-y cell)) 1.0))
         ^js m (three/MeshBasicNodeMaterial.)]
     (set! (.-transparent m) true)
     (set! (.-depthWrite m) false)
-    (set! (.-colorNode m) (tsl/vec4 (tsl/color ink) 1.0))
-    (set! (.-opacityNode m) (.mul line 0.02))
+    (set! (.-colorNode m) (tsl/vec4 ink-node 1.0))
+    (set! (.-opacityNode m) (.mul (.mul line 0.02) floor-node))
     (doto (three/Mesh. (three/PlaneGeometry. 400 400) m)
       (-> .-rotation (.set (- (/ js/Math.PI 2)) 0 0))
       (aset "renderOrder" -1))))
@@ -288,6 +294,19 @@
 
 (def ^:private scratch (three/Object3D.))
 
+(def ^:private lights-up {:bg (three/Color. paper) :ink (three/Color. page-ink)})
+(def ^:private lights-down {:bg (three/Color. bg) :ink (three/Color. ink)})
+
+(defn- light!
+  "Background, fog, ink and floor for the frame's :reveal: paper and ink at
+  :lights 0, the dark stage at 1, in between as they go down; the floor
+  shows from level 2, as far as the lights are down."
+  [{:keys [^js scene ^js ink-node ^js floor-node]} {:keys [level lights] :or {level 3 lights 1}}]
+  (.lerpColors (.-background scene) (:bg lights-up) (:bg lights-down) lights)
+  (.copy (.-color (.-fog scene)) (.-background scene))
+  (.lerpColors (.-value ink-node) (:ink lights-up) (:ink lights-down) lights)
+  (set! (.-value floor-node) (if (>= level 2) lights 0)))
+
 (defn draw!
   "Draws one :ha/glyph-frame, seen from its :camera."
   [{:keys [^js renderer ^js scene ^js camera ^js canvas atlas ^js atlas-size ^js caret] :as r}
@@ -300,6 +319,7 @@
         wobble (attr "glyphWobble"), ghost (attr "glyphGhost")
         ^js o scratch]
     (fit-viewport! r canvas)
+    (light! r (:reveal frame))
     (view! r (:camera frame))
     (reset! (:last r) {:camera (:camera frame)
                        :live (keep-indexed (fn [i p] (when-not (:ghost? p) i)) poses)})
@@ -333,15 +353,18 @@
   [^js renderer ^js canvas]
   (let [atlas (atom (new-atlas))
         ^js atlas-size (tsl/uniform (three/Vector2. atlas-width (:height @atlas)))
-        {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size)
+        ^js ink-node (tsl/uniform (three/Color. ink))
+        ^js floor-node (tsl/uniform 1.0)
+        {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size ink-node)
         scene (three/Scene.)
         camera (three/PerspectiveCamera. 40 1 0.1 500)
-        floor (floor-mesh)
+        floor (floor-mesh ink-node floor-node)
         caret (three/Mesh. (three/PlaneGeometry. 0.06 1.1)
                            (three/MeshBasicNodeMaterial. #js {:color vermilion}))
         r {:renderer renderer :scene scene :camera camera :canvas canvas
            :atlas atlas :atlas-node atlas-node :atlas-size atlas-size
            :material material :caret caret :floor floor
+           :ink-node ink-node :floor-node floor-node
            :last (atom {})
            :mesh (atom (glyph-mesh 256 material))
            :drawn (atom 0)
