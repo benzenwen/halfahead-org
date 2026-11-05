@@ -67,4 +67,20 @@
    ;; the community
    "half"          {:effect :pop     :intensity 0.6}
    "ahead"         {:effect :launch  :intensity 0.6}
-   "scout"         {:effect :glow    :intensity 0.7}})
+   "scout"         {:effect :glow    :intensity 0.7}
+
+   ;; every effect performs its own name, so the vocabulary can be found by
+   ;; playing (added 2026-11-05 after Ben typed "wobble" and "lift" in his
+   ;; first recording and they only popped)
+   "pop"           {:effect :pop     :intensity 0.8}
+   "launch"        {:effect :launch  :intensity 0.9}
+   "lift"          {:effect :launch  :intensity 0.7}
+   "shimmer"       {:effect :shimmer :intensity 0.9}
+   "skitter"       {:effect :skitter :intensity 0.9}
+   "quake"         {:effect :quake   :intensity 0.9}
+   "melt"          {:effect :melt    :intensity 0.9}
+   "rewind"        {:effect :rewind  :intensity 0.9}
+   "fuse"          {:effect :fuse    :intensity 0.9}
+   "jitter"        {:effect :jitter  :intensity 0.9}
+   "glow"          {:effect :glow    :intensity 0.9}
+   "wobble"        {:effect :wobble  :intensity 0.9}})
