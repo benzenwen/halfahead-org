@@ -1,0 +1,65 @@
+{:id "0037-lab-sound"
+ :title "Lab sound: synthesized cues that calm, excite or intrigue, opt-in and on the device"
+ :lupa/deps #{"0036-draft-property-fix"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Experiment 3 of Ben's product outline (docs/product): sound to calm,
+        to excite, to intrigue. Every word cue and every shot can sound,
+        synthesized in the browser (no audio files), shaped by the style in
+        force: Elegant calms, Caffeinated excites, Drunken intrigues, Coarse
+        thumps; a card gets a trailer 'hit'. Off by default, never
+        autoplayed, quiet, always redundant with what is seen."
+ :scope ["src/halfahead/lab/sound.cljc" "test/halfahead/lab/sound_test.cljc"
+         "src/halfahead/lab/audio.cljs" "src/halfahead/lab/main.cljs"
+         "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md"]
+ :design "halfahead.lab.sound (.cljc, pure). A sound is data:
+            {:voices [{:wave (:sine :triangle :square :noise) :hz n
+                       :at-ms n :ms n :gain g :detune cents :pan p} ...]}
+          (cue-sound cue style) -> a sound for a placed word cue, from the
+            effect and its intensity, voiced by the style's palette:
+              :elegant     soft sines, slow attack, consonant intervals
+              :caffeinated short bright triangle ticks
+              :drunken     detuned pairs with slow wobble (vibrato via
+                           detune), a little late
+              :coarse      noise bursts and low square thuds
+              :plain       a single soft blip
+            :pop and the default cue are the quietest; :quake, :launch and
+            :shimmer are the most characterful.
+          (shot-sound direction style) -> nil for :line; :card a trailer
+            hit (a low thump plus a short rising noise swell, under 900
+            ms); :push a rising tone; :pull a falling one.
+          Bounds, enforced and tested: every sound lasts at most 900 ms,
+          every voice's gain is at most 0.12, the summed gain of a sound at
+          most 0.25, frequencies within 40..4000 Hz, pan within -1..1.
+          halfahead.lab.audio (.cljs, the only Web Audio code): (play!
+          sound) with one lazily created AudioContext (created or resumed on
+          the click that turns sound on, which is a user gesture), a master
+          gain, oscillators or a noise buffer per voice with short attack
+          and release envelopes; never throws to the caller.
+          main.cljs and index.html: a 'Sound' checkbox beside the motion
+          style picker, off by default, remembered per viewer in
+          localStorage (every access in try/catch; the page works without
+          it). When on, every new cue and new direction plays its sound
+          (use the debug namespace's new-cues/new-directions or the same
+          logic). Expose window.__lab.soundLog() (the last 20 sounds played
+          as data, empty when sound is off). The debug overlay shows
+          'sound on/off'.
+          e2e/lab.mjs: with sound off, typing 'crash ' logs nothing; click
+          Sound on, type 'crash ' and assert one sound logged whose voices
+          are within the bounds; type 'WHAT A DAY! ' and assert a card hit
+          was logged; reload and assert the setting was remembered."
+ :acceptance
+ ["sound tests: a sound for every effect x style and every shot x style;
+   the bounds as properties over generated cues and directions; :line and
+   sound-off give nothing"
+  "`bb lab:e2e` passes with the sound steps; `bb test` stays green"]
+ :non-goals
+ ["No audio files, music, voice, or network; no schema edits"
+  "Do not change motion, cues, the director, or the renderer"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/halfahead-org-product-outline.md"
+           "docs/research/conversation-design.md" "src/halfahead/lab/main.cljs"
+           "src/halfahead/lab/debug.cljc" "src/halfahead/lab/style.cljc"
+           "src/halfahead/sound.cljc" "src/halfahead/fx/audio.cljs"
+           "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md"]
+ :budget-usd 10.0}

@@ -236,7 +236,13 @@
      [:poses [:vector :ha/glyph-pose]]
      [:caret [:map {:closed true} [:x :ha/finite] [:y :ha/finite]]]
      [:camera optional :ha/camera]
-     [:style optional :ha/style]]}))
+     [:style optional :ha/style]
+     ;; How much of the stage has been revealed: level 0 is a familiar
+     ;; flat chat box with the house lights up (:lights 0); level 3 is the
+     ;; full dark stage (:lights 1). See docs/product (experiment 1).
+     [:reveal optional [:map {:closed true}
+                        [:level [:int {:min 0 :max 3}]]
+                        [:lights :ha/unit]]]]}))
 
 (def ^:private compiled
   (memoize (fn [k] (m/schema k {:registry registry}))))
