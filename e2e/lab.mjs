@@ -52,8 +52,8 @@ const nextFrame = (page) => page.evaluate(() => new Promise((resolve) =>
     });
   }))));
 
-async function open(page) {
-  await page.goto(url);
+async function open(page, at = url) {
+  await page.goto(at);
   await page.waitForFunction(() => window.__lab?.backend, null, { timeout: 30000 });
   return page.evaluate(() => window.__lab.backend);
 }
@@ -69,8 +69,9 @@ try {
   if (!['WebGPU', 'WebGL2'].includes(backend)) throw new Error(`backend is "${backend}"`);
   const status = await page.locator('#status').textContent();
   if (!status.includes(backend)) throw new Error(`status line reads "${status}"`);
+  if (await page.locator('#debug').isVisible()) throw new Error('the debug overlay shows without ?debug');
   console.log(`backend: ${backend}`);
-  done(`renderer started with ${backend}; status reads "${status}"`);
+  done(`renderer started with ${backend}; status reads "${status}"; no debug overlay`);
 
   begin('accessibility', page);
   if ((await page.locator('canvas[aria-hidden="true"]').count()) !== 1)
@@ -133,6 +134,29 @@ try {
   if (wrapped.lines < 2) throw new Error(`the block did not wrap: ${wrapped.lines} line(s)`);
   done(`${wrapped.lines} lines; ${assertCentred(wrapped.centre)}`);
 
+  begin('debug', null);
+  const debugged = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = debugged;
+  const debugUrl = new URL(url);
+  debugUrl.searchParams.set('debug', '');
+  const debugBackend = await open(debugged, debugUrl.href);
+  await debugged.keyboard.type('we shipped it ', { delay: 70 });
+  await debugged.waitForTimeout(400);
+  await debugged.screenshot({ path: `${out}/debug.png` });
+  const overlay = debugged.locator('#debug');
+  if (!(await overlay.isVisible())) throw new Error('no visible overlay with ?debug');
+  const shown = await overlay.textContent();
+  const frameNo = Number(/frame (\d+)/.exec(shown)?.[1]);
+  if (!(frameNo > 10)) throw new Error(`overlay frame number is ${frameNo}: "${shown}"`);
+  if (!/\d+ fps/.test(shown)) throw new Error(`no fps in the overlay: "${shown}"`);
+  if (!shown.includes(debugBackend)) throw new Error(`overlay does not name ${debugBackend}: "${shown}"`);
+  if (!shown.split('\n').some((l) => l.includes('shipped -> launch')))
+    throw new Error(`no "shipped -> launch" line in the overlay: "${shown}"`);
+  done(`overlay reads "${shown.split('\n').join(' / ')}"`);
+  // Its console errors are already collected; a second software-rendered
+  // page left running would starve the next one.
+  await debugged.close();
+
   begin('reduced motion', null);
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const still = track(await context.newPage());
@@ -165,7 +189,7 @@ try {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
-  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped'].map((n) => `${out}/${n}.png`).join(', ')}`);
+  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'debug'].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);
