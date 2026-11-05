@@ -78,10 +78,15 @@
       (str (quot n scale) "."
            (apply str (repeat (- places (count frac)) "0")) frac))))
 
+(defn- style-text
+  "The style in force, and (auto) when the rhythm chose it."
+  [style style-choice]
+  (str "style " (name style) (when (= :auto style-choice) " (auto)")))
+
 (defn overlay-text
-  "The overlay: a timing line, a backend line, then one line per log entry,
-  newest first."
-  [{:keys [summary t-ms backend glyphs log]}]
+  "The overlay: a timing line, a backend line naming the motion style in
+  force, then one line per log entry, newest first."
+  [{:keys [summary t-ms backend glyphs style style-choice log]}]
   (let [{:keys [frame fps mean-ms worst-ms]} summary]
     (str/join "\n"
               (into [(str "frame " frame
@@ -89,7 +94,7 @@
                           " · " (fixed fps 0) " fps"
                           " · mean " (fixed mean-ms 1) " ms"
                           " · worst " (fixed worst-ms 1) " ms")
-                     (str backend " · " glyphs " glyphs")]
+                     (str backend " · " glyphs " glyphs · " (style-text style style-choice))]
                     (map (fn [{:keys [word effect intensity source]}]
                            (str word " -> " (name effect) " " (fixed intensity 1)
                                 " (" (name source) ")")))

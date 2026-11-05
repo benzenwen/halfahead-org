@@ -3,16 +3,18 @@
   draft and a time, where every letter stands, how it is turned, how big,
   bright and wobbly it is. Every frame is computed from scratch, never
   simulated, so a renderer may ask for any moment in any order, and every
-  motion ends exactly on the layout (births within 400 ms, cues within
-  1500 ms, ghosts within 600 ms). A cued letter never strays more than
-  half an em sideways from its place, so a word's motion stays out of its
-  neighbours' room: effects that gather or scatter use depth and height.
+  motion ends exactly on the layout within 2500 ms of its cause, in every
+  style (plain births take 400 ms, cues 1500 ms, ghosts 600 ms; a style
+  stretches or squeezes the first two by its tempo, see lab.style). No
+  letter ever strays more than half an em sideways from its place, so a
+  word's motion stays out of its neighbours' room: effects that gather or scatter use depth and height.
   The camera is part of every frame: it looks at the line being written,
   easing to a new line over 450 ms, and lines more than three above it
   recede up and back into the dark like an end-credits crawl, so a long
   draft uses depth instead of running off the screen. Units are em; angles
   are radians."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [halfahead.lab.style :as style]))
 
 ;; --- arithmetic --------------------------------------------------------------
 ;; Math/* reads the same in Clojure and ClojureScript, so no reader
@@ -117,16 +119,71 @@
      :omega-d (* omega (Math/sqrt (- 1.0 (* zeta zeta))))
      :ratio (/ zeta (Math/sqrt (- 1.0 (* zeta zeta))))}))
 
-(defn- birth [age]
-  (when (< age birth-ms)
-    (let [{:keys [decay omega-d ratio]} spring
-          s (if (neg? age)
-              0.0
-              (- 1.0 (* (exp (- (* decay age)))
-                        (+ (cos (* omega-d age)) (* ratio (sin (* omega-d age)))))))]
-      {:scale (- s 1.0)
-       :z (* 0.6 (- 1.0 s))
-       :opacity (- (clamp 0.0 1.0 (/ age 90.0)) 1.0)})))
+;; --- style -------------------------------------------------------------------
+;; A style is applied around the plain motion: real time is mapped onto the
+;; plain shape's time, and the plain deltas are scaled, so :plain (tempo,
+;; overshoot and amplitude 1, no sway, no steps) is the plain motion exactly.
+
+(defn- plain-ms
+  "How far into a plain motion d ms long a styled one is, u real ms after
+  it began: slowed or hurried by tempo, and held in hard steps if any."
+  [u d {:keys [tempo steps]}]
+  (let [v (/ u tempo)]
+    (if steps
+      (* (Math/floor (/ (* v steps) d)) (/ (double d) steps))
+      v)))
+
+(def ^:private displacements #{:x :y :z :rx :ry :rz :scale})
+
+(defn- amplified [delta amplitude]
+  (reduce-kv (fn [m k v] (assoc m k (if (displacements k) (* amplitude v) v)))
+             {} delta))
+
+(defn- sway
+  "A drift around the place of glyph id, u ms into a styled motion dur ms
+  long, fading as (1-p)^2 so it is gone before the motion ends; nil for a
+  style without one."
+  [sway-params u dur id]
+  (when-let [{:keys [amp period-ms]} sway-params]
+    (let [f (- 1.0 (/ u dur))
+          a (+ (/ (* tau u) period-ms) (phase id 5))]
+      {:x (* amp f f (sin a))
+       :y (* 0.6 amp f f (cos a))})))
+
+(defn- performed
+  "The deltas of a styled motion u real ms into its dur ms, given the plain
+  delta for it."
+  [delta {:keys [amplitude] :as ps} u dur id]
+  (let [d (amplified delta amplitude)]
+    (if-let [s (and (>= u 0) (sway (:sway ps) u dur id))]
+      [d s]
+      [d])))
+
+;; --- births --------------------------------------------------------------------
+
+(defn- spring-at [a]
+  (if (neg? a)
+    0.0
+    (let [{:keys [decay omega-d ratio]} spring]
+      (- 1.0 (* (exp (- (* decay a)))
+                (+ (cos (* omega-d a)) (* ratio (sin (* omega-d a)))))))))
+
+(defn- birth
+  "The deltas of a glyph age ms after its birth in style params ps, or nil
+  once it has landed. The spring's overshoot is kept in proportion to
+  :overshoot (0 is a smoothstep glide)."
+  [age {:keys [tempo overshoot] :as ps} id]
+  (let [dur (* tempo birth-ms)]
+    (when (< age dur)
+      (let [a (plain-ms age birth-ms ps)
+            sp (spring-at a)
+            ease (smoothstep (clamp 0.0 1.0 (/ a birth-ms)))
+            ;; written so overshoot 1 leaves the spring bit for bit
+            s (+ sp (* (- overshoot 1.0) (- sp ease)))]
+        (performed {:scale (- s 1.0)
+                    :z (* 0.6 (- 1.0 s))
+                    :opacity (- (clamp 0.0 1.0 (/ a 90.0)) 1.0)}
+                   ps age dur id)))))
 
 (def ^:private effect-ms
   "How long each effect moves a glyph; none exceeds 1400 ms."
@@ -187,26 +244,52 @@
   [n]
   (if (> n 5) (/ 100.0 (dec n)) 25.0))
 
+(def ^:private slowest-tempo
+  (reduce max (map (comp :tempo style/params) style/styles)))
+
+(def ^:private longest-cue-ms
+  "The last glyph of a cue starts within 100 ms and moves at most 1400."
+  (* slowest-tempo (+ 100 (reduce max (vals effect-ms)))))
+
+(defn- cue-ms
+  "The plain effect time for a styled cue u real ms into a glyph's part:
+  below full overshoot its progress is eased, so elegant glides."
+  [u d {:keys [overshoot] :as ps}]
+  (let [v (plain-ms u d ps)
+        glide (- 1.0 (min 1.0 overshoot))]
+    (if (pos? glide)
+      (let [p (/ v d)]
+        (* d (+ p (* glide (- (smoothstep p) p)))))
+      v)))
+
 (defn- cue-deltas
-  "id -> [delta ...] for every glyph a cue is moving at time t."
-  [cues t]
+  "id -> [delta ...] for every glyph a cue is moving at time t, each cue
+  performed in the style style-of gives for its firing time."
+  [cues t style-of]
   (reduce
    (fn [acc {:keys [glyph-ids cue at-ms]}]
-     (let [{:keys [effect intensity]} cue
-           n (count glyph-ids)
-           step (stagger-step n)
-           d (effect-ms effect)]
-       (reduce
-        (fn [acc [i id]]
-          (let [pos (if (= :rewind effect) (- n 1 i) i)
-                u (- t (double at-ms) (* step pos))]
-            (if (and (>= u 0) (< u d))
-              (update acc id (fnil conj []) (effect-delta effect u (double intensity) id i))
-              acc)))
-        acc
-        ;; a glyph listed twice moves once, at its first position
-        (vals (reduce (fn [m [i id]] (if (m id) m (assoc m id [i id])))
-                      {} (map-indexed vector glyph-ids))))))
+     (let [since (- t (double at-ms))]
+       (if (or (neg? since) (>= since longest-cue-ms))
+         acc
+         (let [{:keys [effect intensity]} cue
+               {:keys [tempo] :as ps} (style/params (style-of at-ms))
+               n (count glyph-ids)
+               step (stagger-step n)
+               d (effect-ms effect)
+               dur (* d tempo)]
+           (reduce
+            (fn [acc [i id]]
+              (let [pos (if (= :rewind effect) (- n 1 i) i)
+                    u (- since (* step tempo pos))]
+                (if (and (>= u 0) (< u dur))
+                  (update acc id (fnil into [])
+                          (performed (effect-delta effect (cue-ms u d ps) (double intensity) id i)
+                                     ps u dur id))
+                  acc)))
+            acc
+            ;; a glyph listed twice moves once, at its first position
+            (vals (reduce (fn [m [i id]] (if (m id) m (assoc m id [i id])))
+                          {} (map-indexed vector glyph-ids))))))))
    {}
    cues))
 
@@ -316,15 +399,43 @@
 
 ;; --- frame -------------------------------------------------------------------
 
+(defn- style-of
+  "fn from a time to the style in force then: the choice itself, or for
+  :auto the style the rhythm of the glyphs born at or before it suggests."
+  [style-choice glyphs]
+  (if (= :auto style-choice)
+    #(style/infer glyphs %)
+    (constantly style-choice)))
+
+(defn- birth-styles
+  "born-ms -> params for the glyphs still being born at t: the style in
+  force at each birth, read (for :auto) from the glyphs born strictly
+  before it, so a later keystroke never restyles a letter in flight."
+  [glyphs t style-choice]
+  (let [longest (* slowest-tempo birth-ms)]
+    (into {}
+          (comp (map :born-ms)
+                (filter #(< (- t %) longest))
+                (distinct)
+                (map (fn [b]
+                       (let [before (filterv #(< (:born-ms %) b) glyphs)]
+                         [b (style/params ((style-of style-choice before) b))]))))
+          glyphs)))
+
 (defn frame
   "The :ha/glyph-frame for draft at t-ms: one live pose per glyph, in
   order, then one ember per ghost younger than 600 ms, the caret and the
-  camera. opts: {:advance fn :width-em n :aspect n :reduced-motion? b},
-  aspect being the viewport's width over its height; with reduced motion
-  every live pose is its (possibly receded) resting place, there are no
-  embers, and the camera is on the current line without easing."
-  [draft t-ms {:keys [advance width-em aspect reduced-motion?]
-               :or {advance default-advance width-em 40 aspect 1.6}}]
+  camera, and the :style in force at t. opts: {:advance fn :width-em n
+  :aspect n :reduced-motion? b :style-choice c}, aspect being the
+  viewport's width over its height and c a :ha/style-choice (default
+  :plain). Each birth and each cue is performed in the style in force when
+  it happened, so a change of style never jerks a letter already moving.
+  With reduced motion every live pose is its (possibly receded) resting
+  place, there are no embers, and the camera is on the current line
+  without easing."
+  [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice]
+               :or {advance default-advance width-em 40 aspect 1.6
+                    style-choice :plain}}]
   (let [{:keys [glyphs ghosts cues]} draft
         chars (mapv :char glyphs)
         positions (layout chars advance width-em)
@@ -334,15 +445,17 @@
         bases (mapv #(base-pose current %1 %2) glyphs positions)
         live (if reduced-motion?
                bases
-               (let [moving (cue-deltas cues t)]
+               (let [moving (cue-deltas cues t (style-of style-choice glyphs))
+                     born (birth-styles glyphs t style-choice)]
                  (mapv (fn [{:keys [id born-ms]} base]
                          (apply-deltas base (into (get moving id [])
-                                                  (keep identity)
-                                                  [(birth (- t (double born-ms)))])))
+                                                  (when-let [ps (born born-ms)]
+                                                    (birth (- t (double born-ms)) ps id)))))
                        glyphs bases)))
         embers (when-not reduced-motion?
                  (keep #(ember % t positions end) ghosts))]
     {:t-ms t-ms
      :poses (into live embers)
      :caret end
-     :camera (camera width-em aspect current)}))
+     :camera (camera width-em aspect current)
+     :style ((style-of style-choice glyphs) t)}))

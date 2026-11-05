@@ -260,12 +260,80 @@ try {
   if (!shown.split('\n').some((l) => l.includes('shipped -> launch')))
     throw new Error(`no "shipped -> launch" line in the overlay: "${shown}"`);
   if (!/camera target x -?\d/.test(shown)) throw new Error(`no camera target in the overlay: "${shown}"`);
+  if (!/style (plain|elegant|caffeinated|drunken|coarse) \(auto\)/.test(shown))
+    throw new Error(`the overlay does not name the style in force: "${shown}"`);
   const clipped = await overlay.evaluate((el) => el.scrollWidth > el.clientWidth);
   if (clipped) throw new Error('the overlay is cut off on the right');
   done(`overlay reads "${shown.split('\n').join(' / ')}"`);
   // Its console errors are already collected; a second software-rendered
   // page left running would starve the next one.
   await debugged.close();
+
+  begin('style auto', null);
+  const auto = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = auto;
+  // Held clock, so the typing rhythm is exactly what the step says.
+  await auto.clock.install();
+  await open(auto);
+  await auto.bringToFront();
+  await auto.clock.pauseAt(await auto.evaluate(() => Date.now() + 1000));
+  // pauseAt can draw a frame at the time it jumps to and still leave the
+  // page's clock behind it, which stalls the animation loop until the clock
+  // catches up; run it past that frame first.
+  const lead = await auto.evaluate(() => window.__lab.lastFrame()['t-ms'] - performance.now());
+  await auto.clock.runFor(Math.max(0, Math.ceil(lead)) + 100);
+  const picker = await auto.locator('#style').inputValue();
+  if (picker !== 'auto') throw new Error(`the picker starts on "${picker}", not Auto`);
+  // fastForward fires a due animation frame once per key, not every 16 ms:
+  // seconds of software-rendered frames would back up behind a screenshot.
+  const typeAt = async (chars, ms) => {
+    for (const ch of chars) {
+      await auto.keyboard.type(ch);
+      await auto.clock.fastForward(ms);
+    }
+    return auto.evaluate(() => window.__lab.lastFrame().style);
+  };
+  const fast = await typeAt('quick brown fox', 40);
+  await auto.screenshot({ path: `${out}/style-auto-fast.png` });
+  if (fast !== 'caffeinated') throw new Error(`typing at 40 ms a key reads as "${fast}"`);
+  const slow = await typeAt(' and a slow dog', 450);
+  await auto.screenshot({ path: `${out}/style-auto-slow.png` });
+  if (slow !== 'elegant') throw new Error(`typing at 450 ms a key then reads as "${slow}"`);
+  done(`40 ms a key reads ${fast}; 450 ms a key then reads ${slow}`);
+  await auto.close();
+
+  // Each explicit style, picked one way or the other, on one page: the
+  // textarea keeps the focus, and the frames are performed in that style.
+  const styled = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = styled;
+  await open(styled);
+  const picks = [['elegant', 'picker'], ['caffeinated', 'Control+4'], ['drunken', 'picker'],
+                 ['coarse', 'Control+6'], ['plain', 'picker']];
+  for (const [name, how] of picks) {
+    begin(`style ${name}`, styled);
+    if (how === 'picker') await styled.selectOption('#style', name);
+    else await styled.keyboard.press(how);
+    const picked = await styled.evaluate(() => ({
+      value: document.getElementById('style').value,
+      focused: document.activeElement === document.getElementById('type'),
+    }));
+    if (picked.value !== name) throw new Error(`the picker shows "${picked.value}" after ${how}`);
+    if (!picked.focused) throw new Error(`the textarea lost the focus after ${how}`);
+    await styled.locator('#type').fill('');
+    await styled.keyboard.type('we shipped it ', { delay: 70 });
+    await styled.waitForTimeout(150);
+    const f = await styled.evaluate(() => new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+        style: window.__lab.lastFrame().style,
+        live: window.__lab.liveText(),
+        value: document.getElementById('type').value,
+      })))));
+    await styled.screenshot({ path: `${out}/style-${name}.png` });
+    if (f.style !== name) throw new Error(`the frame's style is "${f.style}"`);
+    if (f.live !== f.value || f.value !== 'we shipped it ') throw new Error(`live text "${f.live}" for "${f.value}"`);
+    done(`picked with ${how}; textarea kept the focus; frames performed ${f.style}`);
+  }
+  await styled.close();
 
   begin('reduced motion', null);
   const context = await browser.newContext({ reducedMotion: 'reduce' });
@@ -308,7 +376,8 @@ try {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
-  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'crawl', 'steady', 'fuse', 'debug'].map((n) => `${out}/${n}.png`).join(', ')}`);
+  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'crawl', 'steady', 'fuse', 'debug',
+    ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);

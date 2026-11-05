@@ -36,8 +36,8 @@ textarea value --edit--> :ha/draft --frame(t)--> :ha/glyph-frame --> renderer
 
 Invariants, tested: the live letters of every frame spell exactly what is
 in the textarea; every number is finite; everything settles exactly onto
-the layout within 1.5 s of the last event; reduced motion means no motion;
-a cued letter never moves more than half an em sideways from its place, so
+the layout within 2.5 s of the last event, in every style; reduced motion
+means no motion; no letter ever moves more than half an em sideways from its place, so
 a word's effect never reaches its neighbours (effects that gather or
 scatter, like `:fuse`, move in depth and height instead); every frame has
 a valid camera, a pure function of the draft, the time and the options,
@@ -83,6 +83,64 @@ part of each letter's resting pose, so it holds when settled, every motion
 still ends exactly on it, and it slides along with the camera's 450 ms ease
 when a new line starts.
 
+## Styles
+
+A style is a named set of physics parameters (`halfahead.lab.style`) that
+every birth and every cue is performed in. It is applied around the plain
+motion: real time is mapped onto the plain shape's time, and the plain
+displacements are scaled, so the effects themselves stay one closed set.
+
+| Style | Feel | Tempo | Overshoot | Amplitude | Sway | Steps |
+|---|---|---|---|---|---|---|
+| Plain | the lab's motion as it was | 1.0 | 1.0 | 1.0 | none | smooth |
+| Elegant | a glide: slower, no overshoot, everything eased | 1.5 | 0 | 0.8 | none | smooth |
+| Caffeinated | quick, springy, a small fast tremor that dies away | 0.6 | 1.8 | 1.15 | 0.03 em every 45 ms | smooth |
+| Drunken | slow, loose, a lazy sway that dies away | 1.4 | 1.6 | 1.1 | 0.12 em every 900 ms | smooth |
+| Coarse | fast and blunt: three hard steps, no easing | 0.5 | 1.0 | 1.25 | none | 3 |
+
+- **Tempo** multiplies every duration, staggers included. The slowest
+  (elegant) cue still lands within 1.5 × (100 + 1400) = 2250 ms, which is
+  why the settle bound is 2.5 s in every style.
+- **Overshoot** is how much of the birth spring's overshoot is kept (0 is a
+  smoothstep). Below 1, a cue's progress is eased too.
+- **Amplitude** multiplies displacement (position, rotation, scale), not
+  opacity, glow or wobble.
+- **Sway** is a drift around the letter's place while it moves, fading as
+  (1 - p)² so it is gone before the motion ends.
+- **Steps** holds the motion in that many still poses.
+
+Every invariant above holds in every style. In particular, the half-em
+clamp is applied after the style, so sway and amplitude can never push a
+letter into its neighbour's room. Each birth is performed in the style in
+force when the letter was born, and each cue in the style in force when it
+fired, so a change of style never jerks a letter already moving. Embers
+and the camera's line ease are not styled.
+
+**Auto** (the default) infers the style from how you type. It looks at the
+last 12 letters born in the last 6 s (letters pasted together count as one
+keystroke) and takes the median gap between them and how much the gaps vary
+(standard deviation over mean, with 0.5 as the line between steady and
+erratic):
+
+| Median gap | Steady | Erratic |
+|---|---|---|
+| under 110 ms | Caffeinated | Coarse |
+| 110 to 320 ms | Plain | Plain |
+| over 320 ms | Elegant | Drunken |
+
+With fewer than 4 gaps it is Plain. A letter's own style is read only from
+the letters born before it, so typing on never restyles what you already
+wrote. This is local and private: the rhythm is read from the birth times
+already in the in-memory draft, and nothing is recorded, stored or sent.
+
+A quiet picker in the bottom-right corner ("Motion style": Auto, Plain,
+Elegant, Caffeinated, Drunken, Coarse) chooses. Ctrl+1 to Ctrl+6 choose in
+the same order. Either way the textarea keeps (or gets back) the focus. On
+some systems the browser keeps Ctrl+digit for switching tabs; the picker
+always works.
+
+Every frame names the style in force at its time (`:style`).
+
 ## Accessibility
 
 The input is a real `<textarea>`, focused, with transparent text: IME,
@@ -96,7 +154,7 @@ bottom-left corner shows, on every frame:
 
 ```
 frame 1234 · t 12.345 s · 60 fps · mean 16.6 ms · worst 18.0 ms
-WebGPU · 36 glyphs
+WebGPU · 36 glyphs · style caffeinated (auto)
 shipped -> launch 1.0 (glossary)
 we -> pop 0.3 (default)
 camera target x 9.00 · y -5.40 · z 0.00
@@ -110,6 +168,8 @@ camera target x 9.00 · y -5.40 · z 0.00
   worst.
 - **backend and glyphs**: what the renderer is using and how many glyph
   instances it drew in that frame.
+- **style**: the motion style in force, with `(auto)` when the rhythm
+  chose it.
 - **cues**: up to six cues fired in the last eight seconds, newest first,
   each as word -> effect, intensity, and the source that chose it.
 - **camera target**: where this frame's camera looks, in em.
@@ -148,15 +208,21 @@ of a " on a fresh page while sampling where the line's start lands every
 another with the page's clock held (Playwright's clock API) and steps
 through the `:fuse` in 50 ms slices, checking at each that no letter of
 "merge" lands left of the "a" before it, opens `?debug` and checks
-the overlay (frame number, fps, backend, and a `shipped -> launch` line;
-a camera target line, and no line cut off; without the flag it must not
-show), and repeats with reduced motion (on every frame the camera target
+the overlay (frame number, fps, backend, the style in force, and a
+`shipped -> launch` line; a camera target line, and no line cut off;
+without the flag it must not show). It then types fast (40 ms a key) and
+then slowly (450 ms a key) on a fresh page with the clock held, checking
+that Auto reads caffeinated and then elegant. On one more page it picks
+each explicit style, with the picker or with Ctrl+4 and Ctrl+6, checks
+that the textarea keeps the focus, and types "we shipped it " to check
+that the frames are performed in that style. Finally it repeats with reduced motion (on every frame the camera target
 is on the current line and drawn at the canvas centre), asserting on
 `window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `crawl.png`, `steady.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
-so it always shows the fuse in flight) and `debug.png` in `out/lab/` and stops the
-server it started. It is not part of
+so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
+each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
+`out/lab/`, and stops the server it started. It is not part of
 `bb test`.
 
 The status line names the backend. `halfahead.lab.render` asks three.js's

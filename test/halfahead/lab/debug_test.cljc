@@ -135,19 +135,31 @@
                (debug/overlay-text
                 {:summary {:frame 1234 :fps 59.8 :mean-ms 16.62 :worst-ms 18}
                  :t-ms 12345 :backend "WebGPU" :glyphs 36
+                 :style :caffeinated :style-choice :auto
                  :log [(entry "shipped" 12000)
                        {:word "shipped" :effect :launch :intensity 1.0
                         :source :glossary :at-ms 12000}
                        {:word "deploy" :effect :launch :intensity 0.9
                         :source :glossary :at-ms 11000}]}))]
     (is (= "frame 1234 · t 12.345 s · 60 fps · mean 16.6 ms · worst 18.0 ms" (first lines)))
-    (is (= "WebGPU · 36 glyphs" (second lines)))
+    (is (= "WebGPU · 36 glyphs · style caffeinated (auto)" (second lines)))
     (is (= ["shipped -> pop 0.5 (default)"
             "shipped -> launch 1.0 (glossary)"
             "deploy -> launch 0.9 (glossary)"]
            (drop 2 lines)))))
 
 (deftest the-overlay-renders-before-any-timing
-  (is (= "frame 0 · t 0.005 s · 0 fps · mean 0.0 ms · worst 0.0 ms\nWebGL2 · 0 glyphs"
+  (is (= "frame 0 · t 0.005 s · 0 fps · mean 0.0 ms · worst 0.0 ms\nWebGL2 · 0 glyphs · style plain"
          (debug/overlay-text {:summary (debug/summary nil) :t-ms 5
-                              :backend "WebGL2" :glyphs 0 :log []}))))
+                              :backend "WebGL2" :glyphs 0
+                              :style :plain :style-choice :plain :log []}))))
+
+(deftest overlay-names-the-style
+  (let [backend-line #(second (str/split-lines
+                               (debug/overlay-text {:summary (debug/summary nil) :t-ms 0
+                                                    :backend "WebGL2" :glyphs 3
+                                                    :style %1 :style-choice %2 :log []})))]
+    (testing "a style the writer picked"
+      (is (= "WebGL2 · 3 glyphs · style elegant" (backend-line :elegant :elegant))))
+    (testing "a style inferred from the rhythm says so"
+      (is (= "WebGL2 · 3 glyphs · style drunken (auto)" (backend-line :drunken :auto))))))
