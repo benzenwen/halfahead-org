@@ -219,26 +219,24 @@
   [w]
   (max 16 (/ (* 0.7 w) line-em)))
 
-(defn- block-extent
-  "[x0 x1 y0 y1] in em around the live poses' laid-out glyphs (each from its
-  pen x to x plus its advance, baseline to about cap height) and the caret."
-  [r {:keys [poses caret]}]
-  (let [live (remove :ghost? poses)
-        {cx :x cy :y} caret
-        xs (concat [cx (+ cx 0.1)] (mapcat (fn [{:keys [x char]}] [x (+ x (:advance (glyph r char)))]) live))
-        ys (concat [cy (+ cy 0.7)] (mapcat (fn [{:keys [y]}] [y (+ y 0.7)]) live))]
-    [(apply min xs) (apply max xs) (apply min ys) (apply max ys)]))
+(defn- column-extent
+  "[x0 x1 y0 y1] in em of the page the text is laid out on: the column's
+  full width, and from the caret's baseline (always on the last line) up
+  to the first line's cap height. Taken from the layout alone, so neither
+  a letter's motion nor a new letter on the same line can move it."
+  [column-em {caret-y :y}]
+  [0 column-em caret-y 0.7])
 
 (def ^:private follow-ms
   "Time constant with which the stage eases toward a changed block."
   200)
 
 (defn- follow!
-  "Eases the stage's extent toward this frame's block and returns the eased
+  "Eases the stage's extent toward this frame's column and returns the eased
   extent. It snaps on the first frame, and on every frame when still?
   (reduced motion), so the camera never glides on its own."
-  [{:keys [stage] :as r} {:keys [t-ms poses] :as frame} still?]
-  (let [target (block-extent r frame)
+  [{:keys [stage]} {:keys [t-ms poses caret]} still? column-em]
+  (let [target (column-extent column-em caret)
         {:keys [eased at]} @stage
         k (if (and eased (not still?))
             (- 1 (js/Math.exp (- (/ (max 0 (- t-ms at)) follow-ms))))
@@ -249,7 +247,7 @@
     eased'))
 
 (defn- view!
-  "Aims the camera's axis at the centre of the eased block from in front
+  "Aims the camera's axis at the centre of the eased column from in front
   and slightly above, at the distance where 1 em spans em-px CSS pixels;
   rests the floor under the block and sets the fog around the text plane,
   so letters coming forward brighten and the floor fades into the dark."
@@ -293,9 +291,8 @@
   "Where the last frame's text block lands on the canvas, in CSS pixels with
   y down, as #js {:x :y :aimX :aimY :width :height}. x and y are the centre
   of the bounding box of the live glyphs' quads as drawn, independent of
-  where the camera aims; aimX and aimY are where the centre of the block's
-  layout extent lands, which is the camera's aim point once it has caught
-  up with the block."
+  where the camera aims; aimX and aimY are where the centre of the column
+  lands, which is the camera's aim point once it has caught up with it."
   [r]
   (let [{:keys [target live]} @(:stage r)
         [x0 x1 y0 y1] target
@@ -311,6 +308,13 @@
     #js {:x (if (seq pts) (mid (map first pts)) ax)
          :y (if (seq pts) (mid (map second pts)) ay)
          :aimX ax :aimY ay :width w :height h}))
+
+(defn screen-point
+  "Where world point (x, y, z) in em landed in the last frame, in CSS
+  pixels of the canvas with y down, as #js {:x :y}."
+  [r x y z]
+  (let [[px py] (project r (three/Vector3. x y z))]
+    #js {:x px :y py}))
 
 (defn backend
   "\"WebGPU\" or \"WebGL2\", whichever this renderer is using."
@@ -330,11 +334,13 @@
 (def ^:private scratch (three/Object3D.))
 
 (defn draw!
-  "Draws one :ha/glyph-frame. still? (reduced motion) keeps the camera from
-  easing after the block: it moves straight to it instead."
+  "Draws one :ha/glyph-frame laid out column-em wide, staged on that column
+  rather than on the text, so the line stays put while it grows. still?
+  (reduced motion) keeps the camera from easing after the column as lines
+  are added: it moves straight there instead."
   [{:keys [^js renderer ^js scene ^js camera ^js canvas atlas ^js atlas-size ^js caret] :as r}
    {:keys [poses] :as frame}
-   still?]
+   {:keys [still? column-em]}]
   (let [n (count poses)
         ^js mesh (ensure-capacity! r n)
         ^js geometry (.-geometry mesh)
@@ -343,7 +349,7 @@
         wobble (attr "glyphWobble"), ghost (attr "glyphGhost")
         ^js o scratch]
     (fit-viewport! r canvas)
-    (view! r canvas (follow! r frame still?))
+    (view! r canvas (follow! r frame still? column-em))
     (dotimes [i n]
       (let [p (nth poses i)
             {:keys [rect size centre]} (glyph r (:char p))
@@ -419,7 +425,7 @@
   (-> (init canvas false)
       (.then (fn [r]
                (try
-                 (draw! r {:t-ms 0 :poses [] :caret {:x 0.0 :y 0.0}} true)
+                 (draw! r {:t-ms 0 :poses [] :caret {:x 0.0 :y 0.0}} {:still? true :column-em line-em})
                  r
                  (catch :default e
                    (js/console.warn "WebGPU could not draw; falling back to WebGL2:" (.-message ^js e))

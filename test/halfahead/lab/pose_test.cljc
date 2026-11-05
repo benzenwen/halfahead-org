@@ -114,6 +114,13 @@
       (and (= (rest-poses draft opts) (live f))
            (empty? (ghosts f))))))
 
+(defspec cued-glyphs-stay-within-half-an-em 300
+  (prop/for-all [[draft opts t] gen-case]
+    (let [cued (set (mapcat :glyph-ids (:cues draft)))
+          rest-x (into {} (map (juxt :id :x)) (rest-poses draft opts))]
+      (every? (fn [{:keys [id x]}] (<= (abs (- x (rest-x id))) (+ 0.5 1e-9)))
+              (filter (comp cued :id) (live (pose/frame draft t opts)))))))
+
 (defspec frames-are-deterministic 100
   (prop/for-all [[draft opts t] gen-case]
     (= (pose/frame draft t opts) (pose/frame draft t opts))))
@@ -175,6 +182,34 @@
         (is (some true? (for [dt [50 150 300 500 800]]
                           (not= base (live (pose/frame draft (+ 5000 dt) {}))))))
         (is (= base (live (pose/frame draft 6500 {}))))))))
+
+(deftest stacked-cues-stay-within-half-an-em
+  (let [cue {:glyph-ids [0]
+             :cue {:word "boom" :effect :quake :intensity 1 :source :glossary}
+             :at-ms 1000}
+        draft (draft-of "b" 0 (vec (repeat 6 cue)))
+        dxs (for [t (range 1000 2500 5)]
+              (abs (- (:x (first (live (pose/frame draft t {})))) 0.0)))]
+    (is (every? #(<= % (+ 0.5 1e-9)) dxs))
+    (is (some #(> % 0.3) dxs) "six quakes would reach past 0.3 em unclamped")))
+
+(deftest fuse-converges-in-depth-not-sideways
+  (let [t 10000
+        cue {:glyph-ids [0 1 2 3 4]
+             :cue {:word "merge" :effect :fuse :intensity 0.8 :source :glossary}
+             :at-ms t}
+        draft (draft-of "merge " 0 [cue])
+        base (rest-poses draft {:advance pose/default-advance :width-em 40})
+        samples (for [dt (range 0 1000 10)] (live (pose/frame draft (+ t dt) {})))]
+    (testing "no letter leaves its place sideways"
+      (is (every? (fn [ps] (= (map :x base) (map :x ps))) samples)))
+    (testing "the letters come in from in front of the line"
+      (is (some (fn [ps] (some #(pos? (:z %)) ps)) samples)))
+    (testing "neighbours come from opposite sides of the line"
+      (is (some (fn [[a b]] (neg? (* (:y a) (:y b))))
+                (map #(take 2 %) samples))))
+    (testing "and all of them land on it"
+      (is (= base (live (pose/frame draft (+ t 1500) {})))))))
 
 (deftest births-spring-in
   (let [draft (draft-of "a" 1000 [])
