@@ -165,12 +165,22 @@
                            (no-pair-split? (:glyphs d))))
               (run-steps steps cue-fn)))))
 
-(def ^:private word-glyph?
-  ;; Every glyph char a word token contributes; nothing else in the
-  ;; generated texts (spaces, punctuation, emoji, ZWJ, lone surrogates)
-  ;; is a word char.
-  (into #{} (mapcat (fn [w] (map str (re-seq #"[\uD800-\uDBFF][\uDC00-\uDFFF]|." w))))
-        word-tokens))
+(defn- glyph-strs
+  "s split into whole surrogate pairs and single UTF-16 units."
+  [s]
+  (map str (re-seq #"[\uD800-\uDBFF][\uDC00-\uDFFF]|." s)))
+
+#?(:cljs (def ^:private letter-or-digit (js/RegExp. "^[\\p{L}\\p{Nd}]$" "u")))
+
+(defn- word-glyph?
+  ;; Classified by code point rather than drawn from word-tokens: the edit
+  ;; ops cut through surrogate pairs and can join halves of two different
+  ;; characters into a new one, which may well be a letter. A lone surrogate
+  ;; is never a letter or digit.
+  [c]
+  (or (= c "'") (= c "’") (= c "-")
+      #?(:clj  (Character/isLetterOrDigit (.codePointAt ^String c 0))
+         :cljs (.test letter-or-digit c))))
 
 (defn- expected-finished-runs [glyphs]
   (->> (partition-by (comp boolean word-glyph? :char) glyphs)
@@ -181,20 +191,32 @@
 
 (defspec every-finished-word-is-cued 300
   (prop/for-all [steps (gen-steps gen-token)]
-    (let [{:keys [cue-fn calls]} (recorder)]
-      (every? (fn [d]
-                (let [live (set (ids d))
-                      cue-sets (map (comp set :glyph-ids) (:cues d))]
-                  (and (every? #(every? live (:glyph-ids %)) (:cues d))
-                       (every? (fn [run] (some #(every? % run) cue-sets))
-                               (expected-finished-runs (:glyphs d))))))
-              (run-steps steps cue-fn))
-      (every? (fn [[word following]]
-                (and (every? word-glyph? (map str (re-seq #"[\uD800-\uDBFF][\uDC00-\uDFFF]|." word)))
-                     (not (word-glyph? following))))
-              @calls))))
+    (let [{:keys [cue-fn calls]} (recorder)
+          drafts (doall (run-steps steps cue-fn))]
+      (and (every? (fn [d]
+                     (let [live (set (ids d))
+                           cue-sets (map (comp set :glyph-ids) (:cues d))]
+                       (and (every? #(every? live (:glyph-ids %)) (:cues d))
+                            (every? (fn [run] (some #(every? % run) cue-sets))
+                                    (expected-finished-runs (:glyphs d))))))
+                   drafts)
+           (every? (fn [[word following]]
+                     (and (every? word-glyph? (glyph-strs word))
+                          (not (word-glyph? following))))
+                   @calls)))))
 
 ;; --- examples ---------------------------------------------------------------
+
+(deftest cutting-pairs-makes-a-new-letter
+  (testing "D835 from 𝒜 and DE00 from 😀 join into 𝘀 (U+1D600), a letter"
+    (let [{:keys [cue-fn calls]} (recorder)
+          d (reduce (fn [d text] (draft/edit d text 0 cue-fn))
+                    (draft/empty-draft)
+                    ["word" "𝒜bc😀word" "𝘀word" "𝘀word "])]
+      (is (= [["𝒜bc" "😀"] ["𝘀word" " "]] @calls))
+      (is (= ["𝘀" "w" "o" "r" "d" " "] (map :char (:glyphs d))))
+      (is (= [[8 0 1 2 3]] (map :glyph-ids (:cues d))))
+      (is (valid? d)))))
 
 (deftest typing-hi
   (let [{:keys [cue-fn calls]} (recorder)
