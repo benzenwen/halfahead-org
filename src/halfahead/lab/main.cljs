@@ -1,7 +1,8 @@
 (ns halfahead.lab.main
   "The lab page's shell: the textarea's value goes into the draft, every
   animation frame asks the pure core for a frame and hands it to the
-  renderer. All deciding happens in lab.draft, lab.cues and lab.pose."
+  renderer. All deciding happens in lab.draft, lab.cues and lab.pose,
+  the camera included; the shell only reports the viewport's shape."
   (:require [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.draft :as draft]
@@ -25,30 +26,34 @@
   (let [w js/window.innerWidth]
     (max 4 (/ (* 0.7 w) (render/em-px w)))))
 
-(defn- frame [r t width reduced-motion?]
+(defn- aspect [] (/ (max 1 js/window.innerWidth) (max 1 js/window.innerHeight)))
+
+(defn- frame [r t reduced-motion?]
   (pose/frame (draft/prune (:draft @state) t) t
               {:advance #(render/advance r %)
-               :width-em width
+               :width-em (width-em)
+               :aspect (aspect)
                :reduced-motion? reduced-motion?}))
 
-(defn- show-debug! [r t]
+(defn- camera-line [{:keys [tx ty tz]}]
+  (str "camera target x " (.toFixed tx 2) " · y " (.toFixed ty 2) " · z " (.toFixed tz 2)))
+
+(defn- show-debug! [r t f]
   (let [{:keys [stats cue-log]} (swap! state #(-> %
                                                   (update :stats debug/record t)
                                                   (update :cue-log debug/cue-log [] t)))]
     (set! (.-textContent (by-id "debug"))
-          (debug/overlay-text {:summary (debug/summary stats) :t-ms t
-                               :backend (render/backend r) :glyphs (render/drawn r)
-                               :log cue-log}))))
+          (str (debug/overlay-text {:summary (debug/summary stats) :t-ms t
+                                    :backend (render/backend r) :glyphs (render/drawn r)
+                                    :log cue-log})
+               "\n" (camera-line (:camera f))))))
 
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
-        still? (.-matches motion-query)
-        ;; one width for the layout and the column it is staged on
-        width (width-em)
-        f (frame r t width still?)]
+        f (frame r t (.-matches motion-query))]
     (swap! state assoc :last-frame f)
-    (render/draw! r f {:still? still? :column-em width})
-    (when debug? (show-debug! r t))
+    (render/draw! r f)
+    (when debug? (show-debug! r t f))
     (js/requestAnimationFrame #(loop! r motion-query))))
 
 (defn- expose! [r]
@@ -80,7 +85,8 @@
     (when debug? (.removeAttribute (by-id "debug") "hidden"))
     (.focus input)
     (.addEventListener input "input" on-input)
-    (-> (render/start! (by-id "stage"))
+    (-> (render/start! (by-id "stage")
+                       (pose/frame (draft/empty-draft) 0 {:width-em (width-em) :aspect (aspect)}))
         (.then (fn [r]
                  (edit! (.-value input))
                  (loop! r motion-query)

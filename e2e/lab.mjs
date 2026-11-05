@@ -9,6 +9,8 @@ const text = 'we finally shipped it! then a crash ';
 const more = 'and we fixed it before anyone noticed, so lunch was quiet ';
 // Ends a word with "merge" (a fuse) right after "a", its near neighbour.
 const sentence = 'This is a merge of a ';
+// A draft taller than the screen: older lines must recede, not fall off.
+const credits = Array.from({ length: 14 }, (_, i) => `line ${i + 1} of the crawl`).join('\n');
 mkdirSync(out, { recursive: true });
 
 const consoleErrors = new Map();
@@ -27,8 +29,9 @@ const begin = (name, page) => { step = name; current = page; };
 const done = (msg) => console.log(`ok   ${step}: ${msg}`);
 
 // Where the block sits: its drawn centre within 12% of the width of the
-// horizontal centre, and a little above the vertical centre (the lens shift
-// lifts it 8% of the height). Returns a summary for done().
+// horizontal centre, and a little above the vertical centre (the camera
+// looks at the current line's baseline, and the letters stand above it).
+// Returns a summary for done().
 const assertCentred = (c) => {
   const off = c.x - c.width / 2;
   if (!(Math.abs(off) < 0.12 * c.width))
@@ -136,6 +139,38 @@ try {
   if (wrapped.lines < 2) throw new Error(`the block did not wrap: ${wrapped.lines} line(s)`);
   done(`${wrapped.lines} lines; ${assertCentred(wrapped.centre)}`);
 
+  begin('crawl', null);
+  const crawl = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = crawl;
+  await open(crawl);
+  await crawl.keyboard.type(credits, { delay: 10 });
+  await crawl.waitForTimeout(2000);
+  await crawl.screenshot({ path: `${out}/crawl.png` });
+  const seen = await crawl.evaluate(() => {
+    const lab = window.__lab;
+    const { width, height } = lab.blockCentre();
+    const live = lab.lastFrame().poses.filter((p) => !p['ghost?']);
+    const placed = live.map((p) => ({ ...lab.project(p.x, p.y, p.z), opacity: p.opacity, char: p.char }));
+    return { width, height, text: lab.liveText(), placed,
+             lines: new Set(live.map((p) => p.y)).size,
+             dimmest: Math.min(...live.map((p) => p.opacity)) };
+  });
+  if (seen.text !== credits) throw new Error(`live text "${seen.text}"`);
+  if (seen.lines < 14) throw new Error(`only ${seen.lines} lines`);
+  if (!(seen.dimmest < 1)) throw new Error('no line receded: every live glyph at full opacity');
+  const inside = (q) => q.x >= 0 && q.x <= seen.width && q.y >= 0 && q.y <= seen.height;
+  const lost = seen.placed.filter((q) => !inside(q) && q.opacity > 0.3);
+  if (lost.length)
+    throw new Error(`${lost.length} glyph(s) off screen at opacity > 0.3, e.g. "${lost[0].char}" at `
+      + `(${lost[0].x.toFixed(0)}, ${lost[0].y.toFixed(0)}) opacity ${lost[0].opacity.toFixed(2)}`);
+  const last = seen.placed[seen.placed.length - 1];
+  if (!(last.y > 0.2 * seen.height && last.y < 0.8 * seen.height))
+    throw new Error(`the current line is at y ${last.y.toFixed(0)} of ${seen.height} px, outside the middle 60%`);
+  const offscreen = seen.placed.filter((q) => !inside(q)).length;
+  done(`${seen.lines} lines; ${offscreen} glyph(s) off screen, all at opacity <= 0.3; dimmest ${seen.dimmest.toFixed(2)}; `
+    + `current line at ${(100 * last.y / seen.height).toFixed(0)}% of the height`);
+  await crawl.close();
+
   begin('steady line', null);
   const steady = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
   current = steady;
@@ -224,6 +259,9 @@ try {
   if (!shown.includes(debugBackend)) throw new Error(`overlay does not name ${debugBackend}: "${shown}"`);
   if (!shown.split('\n').some((l) => l.includes('shipped -> launch')))
     throw new Error(`no "shipped -> launch" line in the overlay: "${shown}"`);
+  if (!/camera target x -?\d/.test(shown)) throw new Error(`no camera target in the overlay: "${shown}"`);
+  const clipped = await overlay.evaluate((el) => el.scrollWidth > el.clientWidth);
+  if (clipped) throw new Error('the overlay is cut off on the right');
   done(`overlay reads "${shown.split('\n').join(' / ')}"`);
   // Its console errors are already collected; a second software-rendered
   // page left running would starve the next one.
@@ -234,14 +272,21 @@ try {
   const still = track(await context.newPage());
   current = still;
   await open(still);
-  // On every frame while typing, how far the camera's aim trails the
-  // block's centre (lifted by the lens shift); the worst is kept.
+  // On every frame while typing: how far the frame's camera target is from
+  // the current line (it must not ease), and how far the drawn aim point is
+  // from the middle of the canvas (the renderer must follow it); the worst
+  // of each is kept.
   await still.evaluate(() => {
     window.__worstLag = 0;
+    window.__worstAim = 0;
     const sample = () => {
-      const c = window.__lab.blockCentre();
-      const lag = Math.hypot(c.aimX - c.width / 2, c.aimY - c.height * (0.5 - 0.08));
-      window.__worstLag = Math.max(window.__worstLag, lag);
+      const f = window.__lab.lastFrame();
+      const live = f.poses.filter((p) => !p['ghost?']);
+      if (live.length) {
+        window.__worstLag = Math.max(window.__worstLag, Math.abs(f.camera.ty - live[live.length - 1].y));
+        const c = window.__lab.blockCentre();
+        window.__worstAim = Math.max(window.__worstAim, Math.hypot(c.aimX - c.width / 2, c.aimY - c.height / 2));
+      }
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
@@ -251,17 +296,19 @@ try {
   if (calm.live !== text) throw new Error(`live text "${calm.live}"`);
   if (calm.unscaled !== 0) throw new Error(`${calm.unscaled} live poses not at scale 1`);
   if (calm.ghosts !== 0) throw new Error(`${calm.ghosts} ghosts with reduced motion`);
-  // The camera does not glide after the block: on every frame drawn while
-  // typing, its aim is already on the block, with no settle wait.
-  const lag = await still.evaluate(() => window.__worstLag);
-  if (!(lag < 1.5)) throw new Error(`the camera trailed the block by up to ${lag.toFixed(1)} px with reduced motion`);
-  done(`every live pose at scale 1 right after typing; camera never more than ${lag.toFixed(2)} px off the block`);
+  // The camera does not glide after the line: on every frame drawn while
+  // typing, its target is already on the current line, with no settle wait.
+  const { lag, aim } = await still.evaluate(() => ({ lag: window.__worstLag, aim: window.__worstAim }));
+  if (!(lag < 1e-9)) throw new Error(`the camera target trailed the current line by up to ${lag} em with reduced motion`);
+  if (!(aim < 1.5)) throw new Error(`the drawn aim point strayed ${aim.toFixed(1)} px from the canvas centre`);
+  done(`every live pose at scale 1 right after typing; camera target on the current line on every frame `
+    + `(worst ${lag} em); aim within ${aim.toFixed(2)} px of the centre`);
 
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
-  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'steady', 'fuse', 'debug'].map((n) => `${out}/${n}.png`).join(', ')}`);
+  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'crawl', 'steady', 'fuse', 'debug'].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);

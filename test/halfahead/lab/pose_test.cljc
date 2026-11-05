@@ -13,7 +13,8 @@
   [:pop :launch :shimmer :skitter :quake :melt :rewind :fuse :jitter :glow :wobble])
 
 (def gen-char
-  (gen/elements ["a" "b" "W" "é" "日" "😀" " " " " "\n" "\t" "-" "'" "."]))
+  ;; newlines are frequent so drafts run past four lines and recede
+  (gen/elements ["a" "b" "W" "é" "日" "😀" " " " " "\n" "\n" "\n" "\t" "-" "'" "."]))
 
 (def gen-ms (gen/choose 0 3000))
 
@@ -56,6 +57,7 @@
 
 (def gen-opts
   (gen/hash-map :width-em (gen/choose 3 40)
+                :aspect (gen/double* {:min 0.4 :max 3 :NaN? false :infinite? false})
                 :advance (gen/elements [pose/default-advance
                                         (fn [c] (if (#{"W" "日" "😀"} c) 1.0 0.5))])))
 
@@ -74,12 +76,30 @@
 
 ;; --- helpers ----------------------------------------------------------------
 
-(defn- rest-poses [draft {:keys [advance width-em]}]
-  (mapv (fn [{:keys [id char]} {:keys [x y]}]
-          {:id id :char char :ghost? false :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
-           :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0})
-        (:glyphs draft)
-        (pose/layout (map :char (:glyphs draft)) advance width-em)))
+(defn- line-number [y] (long (Math/round (/ (- (double y)) 1.35))))
+
+(defn- rest-poses
+  "Where every glyph rests: on the layout, and for lines more than 3 above
+  the last glyph's, receded by 0.9 em, 0.18 opacity (floor 0.12) and
+  -0.1 rad (floor -0.5) per line beyond."
+  [draft {:keys [advance width-em]}]
+  (let [ps (pose/layout (map :char (:glyphs draft)) advance width-em)
+        cur (if (seq ps) (line-number (:y (peek ps))) 0)]
+    (mapv (fn [{:keys [id char]} {:keys [x y]}]
+            (let [k (- cur (line-number y) 3)]
+              (merge {:id id :char char :ghost? false :x x :y y :z 0.0 :rx 0.0 :ry 0.0 :rz 0.0
+                      :scale 1.0 :opacity 1.0 :glow 0.0 :wobble 0.0}
+                     (when (pos? k)
+                       {:z (* -0.9 k)
+                        :opacity (max 0.12 (- 1.0 (* 0.18 k)))
+                        :rx (max -0.5 (* -0.1 k))}))))
+          (:glyphs draft)
+          ps)))
+
+(defn- current-line-y [draft opts]
+  (let [ps (pose/layout (map :char (:glyphs draft))
+                        (:advance opts pose/default-advance) (:width-em opts 40))]
+    (if (seq ps) (:y (peek ps)) 0.0)))
 
 (defn- live [frame] (filterv (complement :ghost?) (:poses frame)))
 (defn- ghosts [frame] (filterv :ghost? (:poses frame)))
@@ -112,7 +132,25 @@
   (prop/for-all [[draft opts t] gen-case]
     (let [f (pose/frame draft t (assoc opts :reduced-motion? true))]
       (and (= (rest-poses draft opts) (live f))
-           (empty? (ghosts f))))))
+           (empty? (ghosts f))
+           (= (current-line-y draft opts) (:ty (:camera f)))))))
+
+(defspec frame-has-a-camera 300
+  (prop/for-all [[draft opts t] gen-case]
+    (let [c (:camera (pose/frame draft t opts))]
+      (and (schema/valid? :ha/camera c)
+           (= c (:camera (pose/frame draft t opts)))))))
+
+(defspec camera-frames-the-column 300
+  (prop/for-all [[draft opts t] gen-case]
+    (let [{:keys [x y z tx ty tz fov]} (:camera (pose/frame draft t opts))
+          width (double (:width-em opts))
+          dist (Math/sqrt (+ (* (- x tx) (- x tx)) (* (- y ty) (- y ty)) (* (- z tz) (- z tz))))
+          pitch-deg (* (/ 180 Math/PI) (Math/atan2 (- y ty) (- z tz)))
+          half (Math/tan (* 0.5 fov (/ Math/PI 180)))]
+      (and (close? tx (/ width 2)) (= 0.0 tz) (close? x tx)
+           (<= 0 pitch-deg 8)
+           (< (abs (- 0.75 (/ width (* 2 dist (:aspect opts) half)))) 1e-9)))))
 
 (defspec cued-glyphs-stay-within-half-an-em 300
   (prop/for-all [[draft opts t] gen-case]
@@ -236,6 +274,49 @@
       (is (= (:x (:caret f)) (:x g2))))
     (testing "at 600 ms the ember is gone"
       (is (empty? (ghosts (pose/frame draft 1600 {})))))))
+
+(deftest camera-eases-to-a-new-line
+  (let [draft {:text "ab\ncd"
+               :glyphs [{:id 0 :char "a" :born-ms 0} {:id 1 :char "b" :born-ms 0}
+                        {:id 2 :char "\n" :born-ms 0}
+                        {:id 3 :char "c" :born-ms 1000} {:id 4 :char "d" :born-ms 1000}]
+               :ghosts [] :cues [] :next-id 5}
+        ty #(:ty (:camera (pose/frame draft % {})))]
+    (testing "on the new line's y from the first glyph's birth + 450 ms"
+      (is (= -1.35 (ty 1450)))
+      (is (= -1.35 (ty 5000))))
+    (testing "between the two lines halfway through"
+      (is (< -1.35 (ty 1225) 0.0)))
+    (testing "on the old line before the new line's first glyph is born"
+      (is (= 0.0 (ty 900))))
+    (testing "the target stays on the column's centre and the text plane"
+      (let [c (:camera (pose/frame draft 1225 {:width-em 18}))]
+        (is (= 9.0 (:tx c)))
+        (is (= 0.0 (:tz c)))))
+    (testing "with reduced motion it is on the new line at once"
+      (is (= -1.35 (:ty (:camera (pose/frame draft 1100 {:reduced-motion? true}))))))))
+
+(deftest old-lines-recede
+  (let [text (str/join "\n" (map #(str "line " %) (range 14)))
+        draft (draft-of text 0 [])
+        ps (live (pose/frame draft 10000 {}))
+        line (fn [n] (filter #(close? (* -1.35 n) (:y %)) ps))]
+    (testing "the current line and the three above it are untouched"
+      (doseq [n (range 10 14), p (line n)]
+        (is (= [0.0 1.0 0.0] [(:z p) (:opacity p) (:rx p)]))))
+    (testing "the fourth line above is one step back"
+      (doseq [p (line 9)]
+        (is (close? -0.9 (:z p)))
+        (is (close? 0.82 (:opacity p)))
+        (is (close? -0.1 (:rx p)))))
+    (testing "each further line a step more, down to the floors"
+      (is (close? -1.8 (:z (first (line 8)))))
+      (doseq [p (line 0)]
+        (is (close? -9.0 (:z p)))
+        (is (= 0.12 (:opacity p)))
+        (is (= -0.5 (:rx p)))))
+    (testing "and it holds in reduced motion"
+      (is (= ps (live (pose/frame draft 10000 {:reduced-motion? true})))))))
 
 (deftest caret
   (is (= {:x 0.0 :y 0.0} (:caret (pose/frame (draft-of "" 0 []) 0 {}))))

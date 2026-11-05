@@ -37,10 +37,11 @@
     .bar a { color: var(--text); }
     .bar a:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
     /* ?debug only: numbers for screen recordings, in the corner below the
-       text block, never in the way of the pointer. */
+       text block, never in the way of the pointer. As wide as it needs up to
+       the viewport, then wrapping, so no line is ever cut off. */
     #debug {
       position: fixed; left: 0.5rem; bottom: 0.5rem; margin: 0; padding: 0.35rem 0.5rem;
-      max-width: min(26rem, 45vw); overflow: hidden; white-space: pre;
+      max-width: calc(100vw - 1rem); box-sizing: border-box; white-space: pre-wrap;
       font: 11px/1.35 ui-monospace, Menlo, Consolas, monospace;
       color: var(--text); background: rgba(0, 0, 0, 0.7); pointer-events: none;
     }
