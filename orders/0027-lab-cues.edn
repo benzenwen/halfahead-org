@@ -1,0 +1,49 @@
+{:id "0027-lab-cues"
+ :title "Lab: a finished word becomes a cue, from Half Ahead's own glossary first"
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "When a word is finished, decide what it does, instantly and on the
+        device: Half Ahead's glossary first (product voice, in
+        halfahead.lab.glossary), then punctuation and the word's shape, then
+        a quiet default. No model and no network; a later order may add a
+        local model as a fallback behind the same function."
+ :scope ["src/halfahead/lab/cues.cljc" "test/halfahead/lab/cues_test.cljc"]
+ :design "New namespace halfahead.lab.cues (.cljc, pure):
+            (word-cue word following) -> a valid :ha/word-cue
+          word is as typed; following is the one-character string after it.
+          Rules, in order:
+          1. Glossary: look up (lower-case word) in
+             halfahead.lab.glossary/entries, then the same without one
+             trailing \"s\". A hit gives its effect and intensity, :source
+             :glossary. If following is \"!\", add 0.2 to the intensity
+             (at most 1.0).
+          2. Punctuation, when there is no glossary hit: following \"!\" ->
+             :quake 0.7; following \"?\" -> :wobble 0.5. :source :punctuation.
+          3. Shape: a word of two or more letters written ALL IN CAPITALS ->
+             :launch 0.8; a word of 12 or more characters -> :shimmer 0.5;
+             a word made only of digits -> :pop 0.4. :source :shape.
+          4. Otherwise :pop 0.3, :source :default.
+          :word in the cue is the word as typed, truncated to 64 characters.
+          Never throws for any non-blank word."
+ :acceptance
+ ["(word-cue \"deploy\" \" \") is :launch 0.9 :glossary; (word-cue \"Deploys\"
+   \".\") also hits the glossary (lower-cased, trailing s removed);
+   (word-cue \"ship\" \"!\") has intensity 1.0 (0.9 + 0.2, capped)"
+  "(word-cue \"really\" \"!\") is :quake 0.7 :punctuation; (word-cue \"why\"
+   \"?\") is :wobble 0.5 :punctuation"
+  "(word-cue \"NOPE\" \" \") is :launch :shape; (word-cue
+   \"internationalisation\" \" \") is :shimmer :shape; (word-cue \"2026\" \" \")
+   is :pop 0.4 :shape"
+  "(word-cue \"table\" \" \") is :pop 0.3 :default"
+  "Property: for any non-blank word up to 200 characters and any
+   following character, the result is a valid :ha/word-cue"
+  "Every glossary entry's effect is a valid :ha/word-effect and its
+   intensity in [0,1] (a test over the whole map, so editing the glossary
+   cannot break the lab silently)"
+  "`bb test` stays green on both hosts"]
+ :non-goals
+ ["Do not edit the glossary entries (that is product voice) or the schema"
+  "No lexicons, models, or network"]
+ :context ["src/halfahead/lab/glossary.cljc" "src/halfahead/schema.cljc"
+           "docs/SCHEMA.md" "DESIGN.md"]
+ :budget-usd 6.0}

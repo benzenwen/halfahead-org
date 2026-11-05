@@ -1,0 +1,78 @@
+{:id "0026-lab-draft"
+ :title "Lab: edits become glyphs with stable identities, and finished words get cues"
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "The typing lab knows, for every character of the draft, when it was
+        typed and that it is the same character it was a moment ago, however
+        the text changed (typing, backspace, paste, editing in the middle).
+        Deleted characters linger briefly as ghosts. When a word is finished,
+        a cue is placed on exactly its glyphs. All pure: text in, data out."
+ :scope ["src/halfahead/lab/draft.cljc" "test/halfahead/lab/draft_test.cljc"]
+ :design "New namespace halfahead.lab.draft (.cljc, pure). Shapes are in
+          halfahead.schema (:ha/draft, :ha/glyph, :ha/ghost, :ha/placed-cue,
+          :ha/word-cue); read docs/SCHEMA.md and that file first.
+
+          (empty-draft) -> a valid :ha/draft with empty text.
+
+          (edit draft new-text now-ms cue-fn) -> draft'
+            Diff the old and new text by common prefix and common suffix
+            (the suffix may not overlap the prefix). Never split a UTF-16
+            surrogate pair: move the prefix boundary back, and the suffix
+            boundary forward, when either would land inside one. A glyph's
+            :char is one UTF-16 unit or one whole surrogate pair.
+            - Glyphs in the common prefix and suffix keep their :id and
+              :born-ms.
+            - Removed glyphs become ghosts {:id :char :died-ms now-ms
+              :index <their index in the old text>}.
+            - Inserted characters become glyphs with fresh ids from
+              :next-id (never reused) and :born-ms now-ms.
+            - Ghosts older than 1500 ms at now-ms are dropped.
+            - Placed cues keep only glyph ids still present; a cue left with
+              none is dropped.
+            - Word endings: a word is a maximal run of letters, digits,
+              apostrophes (' and ’) and hyphens. A word is finished when the
+              character right after it is not a word character. For every
+              finished word in the new text whose glyph ids are not all
+              already inside one placed cue, call (cue-fn word following)
+              where following is the character after the word (a string),
+              and place the returned cue at now-ms on that word's glyph ids.
+              Words are passed as typed (case preserved). A paste that
+              finishes several words cues all of them.
+            new-text equal to the old text returns the draft unchanged
+            except for ghost pruning.
+
+          (prune draft now-ms) -> draft with ghosts older than 1500 ms
+            removed (for frames between edits).
+
+          The result is always a valid :ha/draft (assert in tests)."
+ :examples
+ ["typing \"hi\" one character at a time from empty: two glyphs, ids 0 and
+   1, born at the two times; no cue yet; then \"hi \" cues \"hi\" with
+   following \" \" on ids [0 1]"
+  "\"hello world\" -> \"hello, world\" (comma inserted at 5): all eleven old
+   glyphs keep their ids; one new glyph; the word \"hello\" is now followed
+   by \",\" and is cued if it was not already"
+  "backspace on \"cat\" -> \"ca\": glyph of \"t\" becomes a ghost with index
+   2; the cue on \"cat\" (if any) keeps ids of c and a"]
+ :acceptance
+ ["Property (test.check, 300+ cases): for any sequence of texts (generated
+   from typing, deleting, pasting and replacing, including emoji
+   surrogate pairs and newlines), after each edit the glyph chars joined
+   equal the text exactly, ids are unique, :next-id exceeds every id ever
+   used, and the draft is a valid :ha/draft"
+  "Property: glyphs in an unchanged common prefix keep their ids and
+   born-ms across an edit"
+  "Every example above holds as a test, with a recording cue-fn that
+   captures its calls"
+  "A paste of \"one two three \" into an empty draft makes three cue-fn
+   calls, in order, with following \" \""
+  "No surrogate pair is ever split into two glyphs (property over
+   emoji-heavy texts)"
+  "`bb test` stays green on both hosts"]
+ :non-goals
+ ["No layout, motion, rendering, DOM, or clock reads (time arrives as
+   now-ms); no lookup logic (cue-fn is an argument)"
+  "Do not edit halfahead.schema or any other namespace"]
+ :context ["src/halfahead/schema.cljc" "docs/SCHEMA.md" "DESIGN.md"
+           "src/halfahead/perform.cljc"]
+ :budget-usd 10.0}

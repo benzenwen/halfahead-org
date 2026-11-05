@@ -157,3 +157,25 @@ step, about three times the usual size) shipped first pass for $0.93 in
 about ten minutes, and the foreman's browser check found it working. One
 data point, not a conclusion: next, a larger order on purpose, then
 another, and watch where first-pass shipping breaks.
+
+## 2026-11-05 — the typing lab
+
+### H19 ★ The text box becomes a lab first, behind a data seam — Ben (go), foreman (shape)
+Ben asked for more motion and a game-like text box ("2D letterforms in 3D
+space"), with a quick lookup or a local model at each word's end, not on
+every keystroke (a word takes about a second, so this fits). Shape:
+- Everything that decides is pure `.cljc` (edits to glyphs, words to cues,
+  glyphs and time to poses); a renderer only draws `:ha/glyph-frame`s.
+  That frame is the seam where Jon, or anyone, can write a renderer.
+- Word cues come from Half Ahead's own glossary first (product voice,
+  Ben-owned), then punctuation and word shape. All on the device, so
+  drafts never leave it. A local model comes later, behind the same
+  function. Lexicons: AFINN is usable (ODbL, keep derived data open); the
+  NRC lexicons forbid redistribution, so they cannot ship to browsers.
+- The reference renderer is three.js (WebGPU, falling back to WebGL2) with
+  an SDF glyph atlas, in `public/lab/`, apart from the app until it earns
+  its way in.
+- The textarea stays the real input (IME, paste, undo, screen readers);
+  the canvas is decoration.
+- Inspiration from Jon's demos and mrdoob's Codevember 2026 is taken as
+  ideas only; no code is copied without a licence (this repo is public).

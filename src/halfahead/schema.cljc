@@ -125,7 +125,83 @@
      [:text :ha/message-text]
      [:delivery :ha/delivery]
      [:emphasis [:vector {:max 8} (text 1 200)]]
-     [:cost-usd optional [:and number? [:>= 0]]]]}))
+     [:cost-usd optional [:and number? [:>= 0]]]]
+
+    ;; --- the typing lab (derived, never persisted) -------------------------
+    ;; The lab renders the draft being typed as letters in 3D space. The
+    ;; pure core turns edits into glyphs with stable identities, words into
+    ;; cues, and (glyphs, cues, t) into a frame of poses; a renderer only
+    ;; draws frames. Invariant beyond these shapes, checked by tests: the
+    ;; live (non-ghost) poses of a frame, in order, spell exactly the draft.
+
+    :ha/finite      [:and number?
+                     [:fn {:error/message "must be finite"}
+                      #(and (== % %) (not (#{##Inf ##-Inf} %)))]]
+    :ha/unit        [:and :ha/finite [:>= 0] [:<= 1]]
+
+    ;; One character of the draft: a UTF-16 unit, or a surrogate pair kept
+    ;; whole. :id is stable across edits and never reused.
+    :ha/glyph
+    [:map {:closed true}
+     [:id [:int {:min 0}]]
+     [:char [:string {:min 1 :max 2}]]
+     [:born-ms :int]]
+
+    ;; A deleted glyph on its way out, remembered where it last stood.
+    :ha/ghost
+    [:map {:closed true}
+     [:id [:int {:min 0}]]
+     [:char [:string {:min 1 :max 2}]]
+     [:died-ms :int]
+     [:index [:int {:min 0}]]]
+
+    ;; What a finished word does. Closed, like deliveries: lookups choose,
+    ;; renderers draw, nobody invents motion in between.
+    :ha/word-effect [:enum :pop :launch :shimmer :skitter :quake :melt
+                     :rewind :fuse :jitter :glow :wobble]
+
+    :ha/word-cue
+    [:map {:closed true}
+     [:word (text 1 64)]
+     [:effect :ha/word-effect]
+     [:intensity :ha/unit]
+     [:source [:enum :glossary :punctuation :shape :default]]]
+
+    ;; A cue placed on the draft: which glyphs it moves, and when it fired.
+    :ha/placed-cue
+    [:map {:closed true}
+     [:glyph-ids [:vector {:min 1} [:int {:min 0}]]]
+     [:cue :ha/word-cue]
+     [:at-ms :int]]
+
+    :ha/draft
+    [:map {:closed true}
+     [:text :string]
+     [:glyphs [:vector :ha/glyph]]
+     [:ghosts [:vector :ha/ghost]]
+     [:cues [:vector :ha/placed-cue]]
+     [:next-id [:int {:min 0}]]]
+
+    ;; One glyph as the renderer should draw it at a moment. Units: em
+    ;; (1 = the font size); angles in radians. :wobble is the amplitude of a
+    ;; jelly deformation the renderer applies to the glyph's own quad.
+    :ha/glyph-pose
+    [:map {:closed true}
+     [:id [:int {:min 0}]]
+     [:char [:string {:min 1 :max 2}]]
+     [:ghost? :boolean]
+     [:x :ha/finite] [:y :ha/finite] [:z :ha/finite]
+     [:rx :ha/finite] [:ry :ha/finite] [:rz :ha/finite]
+     [:scale [:and :ha/finite [:>= 0]]]
+     [:opacity :ha/unit]
+     [:glow :ha/unit]
+     [:wobble :ha/unit]]
+
+    :ha/glyph-frame
+    [:map {:closed true}
+     [:t-ms :int]
+     [:poses [:vector :ha/glyph-pose]]
+     [:caret [:map {:closed true} [:x :ha/finite] [:y :ha/finite]]]]}))
 
 (def ^:private compiled
   (memoize (fn [k] (m/schema k {:registry registry}))))
