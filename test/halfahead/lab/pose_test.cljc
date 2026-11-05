@@ -550,8 +550,8 @@
       (is (close? 0.7 (/ (- right left) (/ 18 0.75))))
       (is (close? 9.0 (/ (+ left right) 2)))
       (is (every? #(= 1.0 (:opacity %)) card)))
-    (testing "the rest dims to 0.25"
-      (is (every? #(close? 0.25 (:opacity %)) (remove (comp in :id) held))))
+    (testing "the rest steps back"
+      (is (every? #(<= (:opacity %) 0.08) (remove (comp in :id) held))))
     (testing "a word a beat: word k is still in the line before k x 220 ms"
       (doseq [[k start] [[2 6] [3 11] [4 15]]]
         (is (= (subvec base start (+ start 2))
@@ -559,6 +559,31 @@
     (testing "at rest by 4500 ms"
       (is (= base (at 2700)))
       (is (= base (at 4500))))))
+
+(deftest the-rest-of-the-line-steps-back-for-a-card
+  (let [draft (assoc (draft-of "hello there WHAT A DAY! " 0 [])
+                     :directions [{:glyph-ids [12 13 14 15 17 19 20 21 22]
+                                   :shot :card :energy 0.5 :at-ms 10000 :source :rules}])
+        undirected (dissoc draft :directions)
+        opts {:width-em 18}
+        in (set (:glyph-ids (first (:directions draft))))
+        ;; 3 words: reveal 660, hold to 1860, folded by 2260
+        at (fn [u & [o]] (live (pose/frame draft (+ 10000 u) (merge opts o))))
+        without (fn [u & [o]] (live (pose/frame undirected (+ 10000 u) (merge opts o))))
+        mid 1260]
+    (testing "held, every glyph off the card is faint and at least 1.9 em further back"
+      (let [held (at mid)
+            unshot (into {} (map (juxt :id identity)) (without mid))
+            rest (remove (comp in :id) held)]
+        (is (and (seq rest)
+                 (every? #(<= (:opacity %) 0.08) rest)
+                 (every? #(<= (:z %) (- (:z (unshot (:id %))) 1.9)) rest)
+                 (every? #(= 1.0 (:opacity %)) (filter (comp in :id) held))))))
+    (testing "the line returns exactly once the card has folded"
+      (is (and (= (without 2260) (at 2260))
+               (= (without 5000) (at 5000)))))
+    (testing "reduced motion performs no card"
+      (is (= (without mid {:reduced-motion? true}) (at mid {:reduced-motion? true}))))))
 
 (deftest a-push-moves-the-camera-in-and-back
   (let [draft (directed "well is it? " :push 10000)
