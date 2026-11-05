@@ -1,0 +1,55 @@
+{:id "0031-lab-debug"
+ :title "Lab ?debug overlay: frame rate, frame time, frame number and the cues as they fire"
+ :lupa/deps #{"0030-lab-stage"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "Ben is recording screen videos of the lab on his M5 (WebGPU) for
+        the foreman, who reads them as still frames. With /lab/?debug, every
+        video frame should carry its own numbers: which frame it is, the
+        time, the frame rate and frame times, the backend, how many glyphs
+        are drawn, and which cues just fired (word, effect, intensity,
+        source), so what Ben felt can be tied to what the code did."
+ :scope ["src/halfahead/lab/debug.cljc" "test/halfahead/lab/debug_test.cljc"
+         "src/halfahead/lab/main.cljs" "public/lab/index.html" "e2e/lab.mjs"
+         "docs/LAB.md"]
+ :design "halfahead.lab.debug (.cljc, pure):
+            (record stats now-ms) -> stats with this frame added: keep the
+              timestamps of the last 1000 ms of frames and a running frame
+              count.
+            (summary stats) -> {:frame n :fps f :mean-ms m :worst-ms w}
+              over the window (fps from the frames in the last second; mean
+              and worst of the gaps between consecutive frames; zeros when
+              there are fewer than two frames).
+            (new-cues old-draft new-draft) -> the placed cues in new-draft
+              that are not in old-draft, as
+              [{:word :effect :intensity :source :at-ms} ...] in order.
+            (cue-log log cues now-ms) -> the last 6 entries, newest first,
+              dropping entries older than 8000 ms.
+          main.cljs: when the page URL has a debug query parameter
+          (?debug or ?debug=1), keep stats and the cue log in the atom (via
+          the pure fns above) and, every frame, write a small overlay:
+            frame 1234 · t 12.345 s · 60 fps · mean 16.6 ms · worst 18.0 ms
+            WebGPU · 36 glyphs
+            then one line per recent cue: deploy -> launch 0.9 (glossary)
+          Without ?debug nothing changes and no stats are kept.
+          index.html: the overlay element, bottom-left, monospace, small,
+          high contrast on the dark stage, aria-hidden, pointer-events none,
+          hidden unless debug is on. It must not cover the text block.
+          e2e/lab.mjs: a step that opens /lab/?debug, types \"we shipped it \",
+          and asserts the overlay shows a frame number greater than 10, an
+          fps value, the backend, and a line containing \"shipped -> launch\";
+          then that /lab/ without debug has no visible overlay."
+ :acceptance
+ ["debug tests: summary over a synthetic 60 Hz sequence gives fps 60 (+-1)
+   and mean ~16.7 ms; a single 50 ms gap shows as worst 50; fewer than two
+   frames gives zeros; new-cues returns exactly the cues added by an edit;
+   cue-log keeps at most 6, newest first, and drops entries over 8 s old"
+  "`bb lab:e2e` passes with the new debug step; `bb test` stays green"]
+ :non-goals
+ ["No change to motion, cues, the renderer's drawing, or the schema"
+  "No logging to the network or storage; the overlay is display only"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/main.cljs" "src/halfahead/lab/draft.cljc"
+           "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md"
+           "src/halfahead/schema.cljc"]
+ :budget-usd 8.0}
