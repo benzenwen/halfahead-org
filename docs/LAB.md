@@ -64,6 +64,35 @@ The input is a real `<textarea>`, focused, with transparent text: IME,
 paste, undo, spellcheck and screen readers keep working. The canvas is
 `aria-hidden`. Reduced motion shows letters at rest.
 
+## Debug overlay
+
+Open the lab as `/lab/?debug` (or `?debug=1`) and a small panel in the
+bottom-left corner shows, on every frame:
+
+```
+frame 1234 · t 12.345 s · 60 fps · mean 16.6 ms · worst 18.0 ms
+WebGPU · 36 glyphs
+shipped -> launch 1.0 (glossary)
+we -> pop 0.3 (default)
+```
+
+- **frame**: frames drawn since the page loaded.
+- **t**: the page clock (`performance.now()`), the same time the frame
+  was computed for.
+- **fps, mean, worst**: over the last second, the frame rate and the mean
+  and longest gap between consecutive frames. A hitch shows as a high
+  worst.
+- **backend and glyphs**: what the renderer is using and how many glyph
+  instances it drew in that frame.
+- **cues**: up to six cues fired in the last eight seconds, newest first,
+  each as word -> effect, intensity, and the source that chose it.
+
+It exists so that a screen recording, read as still frames, carries its own
+numbers: what was felt can be tied to what the code did. It is display
+only. Nothing is logged, sent or stored, and without the flag no stats are
+kept at all. The panel is `aria-hidden` and ignores the pointer. The pure
+part (`halfahead.lab.debug`) is tested on both hosts.
+
 ## Product voice
 
 `src/halfahead/lab/glossary.cljc` is the list of words that do something
@@ -80,11 +109,13 @@ bb lab:e2e    # the same page in headless Chromium (e2e/lab.mjs)
 `/lab/index.html` (the local server maps only `/` to an index); Ctrl-C
 stops it. `bb lab:e2e` types a sentence, backspaces, waits for everything
 to settle (then asserts every letter is upright and the block centred),
-types on until the block wraps (still centred), and repeats with reduced
-motion (the camera already on the block on the next frame), asserting on
+types on until the block wraps (still centred), opens `?debug` and checks
+the overlay (frame number, fps, backend, and a `shipped -> launch` line;
+without the flag it must not show), and repeats with reduced motion (the
+camera already on the block on the next frame), asserting on
 `window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
-`settled.png` and `wrapped.png` in `out/lab/` and stops the server it
-started. It is not part of
+`settled.png`, `wrapped.png` and `debug.png` in `out/lab/` and stops the
+server it started. It is not part of
 `bb test`.
 
 The status line names the backend. `halfahead.lab.render` asks three.js's
