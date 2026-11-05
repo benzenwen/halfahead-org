@@ -5,9 +5,12 @@
   simulated, so a renderer may ask for any moment in any order, and every
   motion ends exactly on the layout within 2500 ms of its cause, in every
   style (plain births take 400 ms, cues 1500 ms, ghosts 600 ms; a style
-  stretches or squeezes the first two by its tempo, see lab.style). No
-  letter ever strays more than half an em sideways from its place, so a
-  word's motion stays out of its neighbours' room: effects that gather or scatter use depth and height.
+  stretches or squeezes the first two by its tempo, see lab.style), and
+  within 5000 ms of a direction (see lab.director) for its shot. Apart from
+  a :card, which takes a phrase out of the line on purpose, no letter ever
+  strays more than half an em sideways from its place, so a word's motion
+  stays out of its neighbours' room: effects that gather or scatter use
+  depth and height.
   The camera is part of every frame: it looks at the line being written,
   easing to a new line over 450 ms, and lines more than three above it
   recede up and back into the dark like an end-credits crawl, so a long
@@ -397,6 +400,163 @@
     {:x tx :y (+ ty (* dist (sin pitch))) :z (* dist (cos pitch))
      :tx tx :ty ty :tz 0.0 :fov fov-deg}))
 
+;; --- shots -------------------------------------------------------------------
+;; A direction's shot is performed on top of everything else, as a blend
+;; from the frame without it towards the shot's pose, so at weight 0 the
+;; frame is exactly what it would have been. At most one shot plays at a
+;; time: the latest one begun.
+
+(def ^:private card-hold-ms 1200)
+(def ^:private card-fold-ms 400)
+(def ^:private card-beat-ms 220)
+
+(def ^:private card-reveal-ms
+  "The most time a card's words take to arrive, so a card of any length
+  ends within 4400 ms: the beat shortens for long phrases."
+  (- 4400 card-hold-ms card-fold-ms))
+
+(def ^:private card-span
+  "The share of the view's width a card's phrase spans."
+  0.7)
+
+(def ^:private card-z
+  "How far in front of the line a card stands, so the dimmed line behind
+  never shows through it."
+  0.3)
+
+(def ^:private camera-moves
+  "Rise, hold and fall in ms, and how far the camera's distance changes."
+  {:push {:rise 500 :hold 700 :fall 500 :by -0.35}
+   :pull {:rise 600 :hold 900 :fall 600 :by 0.4}})
+
+(defn- envelope
+  "0 before start, a smoothstep up over rise ms to 1, held until hold-end,
+  a smoothstep down to 0 over fall ms; exactly 0 from then on."
+  [u start rise hold-end fall]
+  (cond
+    (or (< u start) (>= u (+ hold-end fall))) 0.0
+    (< u (+ start rise)) (smoothstep (/ (- u start) (double rise)))
+    (< u hold-end) 1.0
+    :else (smoothstep (- 1.0 (/ (- u hold-end) (double fall))))))
+
+(defn- card-words
+  "The present glyphs of a card, in draft order, as [[index glyph] ...]
+  per word: glyphs next to each other in the draft share a word."
+  [glyphs ids]
+  (let [in (set ids)]
+    (->> (keep-indexed (fn [i g] (when (in (:id g)) [i g])) glyphs)
+         (reduce (fn [words [i :as ig]]
+                   (if (= (dec i) (first (peek (peek words))))
+                     (conj (pop words) (conj (peek words) ig))
+                     (conj words [ig])))
+                 []))))
+
+(defn- card-beat [n-words] (min card-beat-ms (/ card-reveal-ms (double n-words))))
+
+(defn- card-ms [n-words] (+ (* n-words (card-beat n-words)) card-hold-ms card-fold-ms))
+
+(defn- shot-ms
+  "How long direction d's shot plays, given its present glyphs; nil for a
+  shot that does nothing."
+  [{:keys [shot glyph-ids]} glyphs]
+  (case shot
+    :card (let [n (count (card-words glyphs glyph-ids))]
+            (when (pos? n) (card-ms n)))
+    (:push :pull) (let [{:keys [rise hold fall]} (camera-moves shot)] (+ rise hold fall))
+    :line nil))
+
+(defn- active-shot
+  "The direction whose shot plays at t, if any: the latest begun, with a
+  glyph still present, while it lasts."
+  [directions glyphs t]
+  (let [live (into #{} (map :id) glyphs)
+        d (->> directions
+               (filter #(and (not= :line (:shot %)) (<= (:at-ms %) t) (some live (:glyph-ids %))))
+               (reduce (fn [a b] (if (and a (> (:at-ms a) (:at-ms b))) a b)) nil))
+        dur (when d (shot-ms d glyphs))]
+    (when (and dur (< (- t (:at-ms d)) dur))
+      d)))
+
+(defn- lerp [a b w] (+ a (* w (- b a))))
+
+(defn- blend
+  "pose moved weight w of the way to the values in target."
+  [pose target w]
+  (if (zero? w)
+    pose
+    (reduce-kv (fn [p k v] (assoc p k (lerp (get p k) v w))) pose target)))
+
+(defn- card
+  "Live poses with the card of direction d performed u ms after it began:
+  each word, a beat after the one before, leaves the line for the centre
+  of the view (the camera's target), set large enough that the phrase
+  spans 70% of the view's width; held 1200 ms, folded back over 400 ms,
+  while every other glyph dims to 0.25. Positions assume a glyph scales
+  about the middle of its advance and 0.35 em above its baseline."
+  [poses glyphs d u {:keys [tx ty tz]} {:keys [advance width-em]}]
+  (let [words (card-words glyphs (:glyph-ids d))
+        n (count words)
+        beat (card-beat n)
+        hold-end (+ (* n beat) card-hold-ms)
+        adv #(double (advance (:char %)))
+        space (double (advance " "))
+        ;; [index offset advance word], offsets in em at scale 1
+        laid (first (reduce (fn [[out x] [k word]]
+                              (let [x (if (pos? k) (+ x space) x)]
+                                (reduce (fn [[out x] [i g]]
+                                          [(conj out [i x (adv g) k]) (+ x (adv g))])
+                                        [out x] word)))
+                            [[] 0.0]
+                            (map-indexed vector words)))
+        width (let [[_ x a] (peek laid)] (+ x a))
+        view (/ (double width-em) fill)
+        s (if (pos? width) (clamp 0.05 8.0 (/ (* card-span view) width)) 1.0)
+        left (- tx (* 0.5 s width))
+        in-card (into {} (map (fn [[i x a k]] [i [x a k]])) laid)
+        dim (envelope u 0 card-beat-ms hold-end card-fold-ms)]
+    (vec (map-indexed
+          (fn [i p]
+            (if-let [[x a k] (in-card i)]
+              (blend p
+                     {:x (+ left (* s x) (* 0.5 (- s 1.0) a)) :y (- ty 0.35) :z (+ tz card-z)
+                      :rx 0.0 :ry 0.0 :rz 0.0 :scale s :opacity 1.0}
+                     (envelope u (* k beat) beat hold-end card-fold-ms))
+              (blend p {:opacity (min (:opacity p) 0.25)} dim)))
+          poses))))
+
+(defn- moved-camera
+  "cam during a push (35% nearer, looking at the phrase's centre) or a
+  pull (40% further back) u ms after it began."
+  [{:keys [x y z tx ty tz] :as cam} shot u centre]
+  (let [{:keys [rise hold fall by]} (camera-moves shot)
+        w (envelope u 0 rise (+ rise hold) fall)]
+    (if (zero? w)
+      cam
+      (let [[cx cy cz] (if (= :push shot) centre [tx ty tz])
+            tx' (lerp tx cx w), ty' (lerp ty cy w), tz' (lerp tz cz w)
+            k (+ 1.0 (* by w))]
+        (assoc cam
+               :tx tx' :ty ty' :tz tz'
+               :x (+ tx' (* k (- x tx))) :y (+ ty' (* k (- y ty))) :z (+ tz' (* k (- z tz))))))))
+
+(defn- phrase-centre
+  "The mean of the resting places of d's present glyphs, on the text plane."
+  [glyphs positions d]
+  (let [in (set (:glyph-ids d))
+        ps (keep (fn [[g p]] (when (in (:id g)) p)) (map vector glyphs positions))
+        n (double (count ps))]
+    [(/ (reduce + (map :x ps)) n) (/ (reduce + (map :y ps)) n) 0.0]))
+
+(defn- perform-shot
+  "[live-poses camera] with the shot playing at t performed, if any."
+  [live cam {:keys [directions glyphs]} positions t opts]
+  (if-let [d (active-shot directions glyphs t)]
+    (let [u (- t (double (:at-ms d)))]
+      (case (:shot d)
+        :card [(card live glyphs d u cam opts) cam]
+        (:push :pull) [live (moved-camera cam (:shot d) u (phrase-centre glyphs positions d))]))
+    [live cam]))
+
 ;; --- frame -------------------------------------------------------------------
 
 (defn- style-of
@@ -430,9 +590,11 @@
   viewport's width over its height and c a :ha/style-choice (default
   :plain). Each birth and each cue is performed in the style in force when
   it happened, so a change of style never jerks a letter already moving.
-  With reduced motion every live pose is its (possibly receded) resting
-  place, there are no embers, and the camera is on the current line
-  without easing."
+  The draft's :directions are performed as shots (a :card takes the
+  phrase centre stage, a :push or :pull moves the camera), each over by
+  4500 ms after its :at-ms. With reduced motion every live pose is its
+  (possibly receded) resting place, there are no embers or shots, and the
+  camera is on the current line without easing."
   [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice]
                :or {advance default-advance width-em 40 aspect 1.6
                     style-choice :plain}}]
@@ -453,9 +615,13 @@
                                                     (birth (- t (double born-ms)) ps id)))))
                        glyphs bases)))
         embers (when-not reduced-motion?
-                 (keep #(ember % t positions end) ghosts))]
+                 (keep #(ember % t positions end) ghosts))
+        cam (camera width-em aspect current)
+        [live cam] (if reduced-motion?
+                     [live cam]
+                     (perform-shot live cam draft positions t {:advance advance :width-em width-em}))]
     {:t-ms t-ms
      :poses (into live embers)
      :caret end
-     :camera (camera width-em aspect current)
+     :camera cam
      :style ((style-of style-choice glyphs) t)}))

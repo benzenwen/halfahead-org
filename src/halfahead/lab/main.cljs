@@ -1,11 +1,12 @@
 (ns halfahead.lab.main
   "The lab page's shell: the textarea's value goes into the draft, every
   animation frame asks the pure core for a frame and hands it to the
-  renderer. All deciding happens in lab.draft, lab.cues, lab.style and
-  lab.pose, the camera included; the shell only reports the viewport's
-  shape and which motion style the writer picked."
+  renderer. All deciding happens in lab.draft, lab.cues, lab.director,
+  lab.style and lab.pose, the camera included; the shell only reports the
+  viewport's shape and which motion style the writer picked."
   (:require [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
+            [halfahead.lab.director :as director]
             [halfahead.lab.draft :as draft]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.render :as render]))
@@ -46,18 +47,29 @@
   (str "camera target x " (.toFixed tx 2) " · y " (.toFixed ty 2) " · z " (.toFixed tz 2)))
 
 (defn- show-debug! [r t f]
-  (let [{:keys [stats cue-log style-choice]} (swap! state #(-> %
-                                                  (update :stats debug/record t)
-                                                  (update :cue-log debug/cue-log [] t)))]
+  (let [{:keys [stats cue-log direction-log style-choice]}
+        (swap! state #(-> %
+                          (update :stats debug/record t)
+                          (update :cue-log debug/cue-log [] t)
+                          (update :direction-log debug/cue-log [] t)))]
     (set! (.-textContent (by-id "debug"))
           (str (debug/overlay-text {:summary (debug/summary stats) :t-ms t
                                     :backend (render/backend r) :glyphs (render/drawn r)
                                     :style (:style f) :style-choice style-choice
-                                    :log cue-log})
+                                    :log cue-log :directions direction-log})
                "\n" (camera-line (:camera f))))))
+
+(defn- directed
+  "state with the director run over its draft at t: on every edit, and on
+  every frame for phrases that a pause ended."
+  [{old :draft :as s} t]
+  (let [new (director/direct old t)]
+    (cond-> (assoc s :draft new)
+      debug? (update :direction-log debug/cue-log (debug/new-directions old new) t))))
 
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
+        _ (swap! state directed t)
         f (frame r t (.-matches motion-query))]
     (swap! state assoc :last-frame f)
     (render/draw! r f)
@@ -69,6 +81,7 @@
         #js {:backend (render/backend r)
              :liveText #(apply str (map :char (remove :ghost? (:poses (:last-frame @state)))))
              :lastFrame #(clj->js (:last-frame @state))
+             :directions #(clj->js (:directions (:draft @state)))
              :drawn #(render/drawn r)
              :lean #(render/lean r %)
              :blockCentre #(render/block-centre r)
@@ -78,9 +91,12 @@
 (defn- edit! [text]
   (let [t (now-ms)]
     (swap! state (fn [{old :draft :as s}]
-                   (let [new (draft/edit old text t cues/word-cue)]
+                   ;; draft/edit builds a new draft without :directions
+                   (let [new (-> (draft/edit old text t cues/word-cue)
+                                 (assoc :directions (:directions old [])))]
                      (cond-> (assoc s :draft new)
-                       debug? (update :cue-log debug/cue-log (debug/new-cues old new) t)))))))
+                       debug? (update :cue-log debug/cue-log (debug/new-cues old new) t)
+                       true (directed t)))))))
 
 (defn- on-input [^js e]
   (edit! (.. e -target -value)))

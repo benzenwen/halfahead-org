@@ -4,6 +4,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [halfahead.lab.director :as director]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.style :as style]
             [halfahead.schema :as schema]))
@@ -435,3 +436,118 @@
       (is (= (pose-at slow t) (pose-at (into slow burst) t))))
     (testing "but the burst itself is styled from the rhythm"
       (is (= :coarse (:style (pose/frame (draft (into slow burst)) (+ b 280) {:style-choice :auto})))))))
+
+;; --- shots ------------------------------------------------------------------
+
+(def ^:private gen-directed-case
+  "A draft, opts and a time, as gen-case, with directions: those the
+  director places on it at some time, and arbitrary ones (absent ids,
+  overlaps, any shot, any time)."
+  (gen/bind
+   (gen/tuple gen-draft gen-opts gen-ms)
+   (fn [[draft opts at]]
+     (let [n (:next-id draft)]
+       (gen/fmap
+        (fn [[arbitrary t]]
+          (let [placed (:directions (director/direct draft at))
+                draft (assoc draft :directions (into placed arbitrary))]
+            [draft opts t]))
+        (gen/tuple (gen/vector (gen/hash-map :glyph-ids (gen/vector (gen/choose 0 (+ n 3)) 1 8)
+                                             :shot (gen/elements [:line :card :push :pull])
+                                             :energy (gen/elements [0.2 0.5 0.6 0.9])
+                                             :at-ms gen-ms
+                                             :source (gen/elements [:rules :model]))
+                               0 3)
+                   (gen/one-of [(gen/fmap #(+ at %) (gen/choose -100 5000))
+                                (gen/choose -500 9000)])))))))
+
+(defn- latest-direction [draft] (reduce max 0 (map :at-ms (:directions draft))))
+
+(defspec directed-drafts-are-valid 100
+  (prop/for-all [[d _ _] gen-directed-case] (schema/valid? :ha/draft d)))
+
+(defspec frame-is-valid-with-directions 300
+  (prop/for-all [[draft opts t] gen-directed-case]
+    (schema/valid? :ha/glyph-frame (pose/frame draft t opts))))
+
+(defspec live-poses-spell-the-draft-with-directions 300
+  (prop/for-all [[draft opts t] gen-directed-case]
+    (let [ls (live (pose/frame draft t opts))]
+      (and (= (:text draft) (str/join (map :char ls)))
+           (= (map :id (:glyphs draft)) (map :id ls))))))
+
+(defspec everything-settles-after-directions 300
+  (prop/for-all [[draft opts _] gen-directed-case
+                 k (gen/choose 0 3000)]
+    (let [t (+ (max (+ (latest draft) 2500) (+ (latest-direction draft) 5000)) k)
+          f (pose/frame draft t opts)]
+      (and (= (rest-poses draft opts) (live f))
+           (empty? (ghosts f))
+           (= (:camera (pose/frame (dissoc draft :directions) t opts)) (:camera f))))))
+
+(defspec reduced-motion-performs-no-shots 300
+  (prop/for-all [[draft opts t] gen-directed-case]
+    (let [opts (assoc opts :reduced-motion? true)]
+      (= (pose/frame (dissoc draft :directions) t opts) (pose/frame draft t opts)))))
+
+(defn- directed [text shot at]
+  (let [d (draft-of text 0 [])]
+    (assoc d :directions [{:glyph-ids (into [] (comp (remove (comp str/blank? :char)) (map :id))
+                                            (:glyphs d))
+                           :shot shot :energy 0.5 :at-ms at :source :rules}])))
+
+(defn- distance [{:keys [x y z tx ty tz]}]
+  (Math/sqrt (+ (* (- x tx) (- x tx)) (* (- y ty) (- y ty)) (* (- z tz) (- z tz)))))
+
+(deftest a-card-takes-the-stage
+  (let [text "so it goes and goes! "             ; 5 words: reveal 1100, hold to 2300
+        draft (directed text :card 10000)
+        opts {:width-em 18}
+        in (set (:glyph-ids (first (:directions draft))))
+        base (rest-poses draft {:advance pose/default-advance :width-em 18})
+        at #(live (pose/frame draft (+ 10000 %) opts))
+        held (at 1700)
+        card (filter (comp in :id) held)
+        s (:scale (first card))
+        left (+ (:x (first card)) (* 0.3 (- 1 s)))
+        right (+ (:x (last card)) (* 0.3 (+ 1 s)))]
+    (testing "held, the phrase spans 70% of the view's width, centred on the target"
+      (is (< 1 s))
+      (is (every? #(close? s (:scale %)) card))
+      (is (close? 0.7 (/ (- right left) (/ 18 0.75))))
+      (is (close? 9.0 (/ (+ left right) 2)))
+      (is (every? #(= 1.0 (:opacity %)) card)))
+    (testing "the rest dims to 0.25"
+      (is (every? #(close? 0.25 (:opacity %)) (remove (comp in :id) held))))
+    (testing "a word a beat: word k is still in the line before k x 220 ms"
+      (doseq [[k start] [[2 6] [3 11] [4 15]]]
+        (is (= (subvec base start (+ start 2))
+               (subvec (vec (at (dec (* k 220)))) start (+ start 2))))))
+    (testing "at rest by 4500 ms"
+      (is (= base (at 2700)))
+      (is (= base (at 4500))))))
+
+(deftest a-push-moves-the-camera-in-and-back
+  (let [draft (directed "well is it? " :push 10000)
+        rest (:camera (pose/frame (dissoc draft :directions) 10800 {}))
+        at #(:camera (pose/frame draft (+ 10000 %) {}))
+        held (at 800)]
+    (is (close? (* 0.65 (distance rest)) (distance held)))
+    (testing "looking at the phrase's centre"
+      (is (close? (/ (* 0.6 (+ 0 1 2 3 5 6 8 9 10)) 9) (:tx held))))
+    (is (= rest (at 1700)))))
+
+(deftest a-pull-moves-the-camera-back-and-in
+  (let [draft (directed "one two three four five six seven eight nine ten eleven twelve. "
+                        :pull 10000)
+        rest (:camera (pose/frame (dissoc draft :directions) 11000 {}))
+        at #(:camera (pose/frame draft (+ 10000 %) {}))]
+    (is (close? (* 1.4 (distance rest)) (distance (at 1000))))
+    (is (= [(:tx rest) (:ty rest)] [(:tx (at 1000)) (:ty (at 1000))]))
+    (is (= rest (at 2100)))))
+
+(deftest a-line-does-nothing-extra
+  (let [draft (directed "so it goes. " :line 10000)]
+    (doseq [dt [0 100 500 1000]]
+      (is (= (pose/frame (dissoc draft :directions) (+ 10000 dt) {})
+             (pose/frame draft (+ 10000 dt) {}))))))

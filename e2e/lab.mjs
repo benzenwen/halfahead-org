@@ -335,6 +335,80 @@ try {
   }
   await styled.close();
 
+  begin('director', null);
+  const directed = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+  current = directed;
+  // Held clock, as in "style auto", so the shots are read at exact times.
+  await directed.clock.install();
+  await open(directed);
+  await directed.bringToFront();
+  await directed.clock.pauseAt(await directed.evaluate(() => Date.now() + 1000));
+  const lead2 = await directed.evaluate(() => window.__lab.lastFrame()['t-ms'] - performance.now());
+  await directed.clock.runFor(Math.max(0, Math.ceil(lead2)) + 100);
+  const typeKeys = async (chars, ms = 70) => {
+    for (const ch of chars) {
+      await directed.keyboard.type(ch);
+      await directed.clock.fastForward(ms);
+    }
+  };
+  // The frame drawn now, and every direction with the text of its glyphs.
+  const look = () => directed.evaluate(() => {
+    const lab = window.__lab;
+    const f = lab.lastFrame();
+    const chars = new Map(f.poses.filter((p) => !p['ghost?']).map((p) => [p.id, p.char]));
+    return {
+      t: f['t-ms'],
+      frame: f,
+      directions: lab.directions().map((d) => ({ ...d, text: d['glyph-ids'].map((id) => chars.get(id)).join('') })),
+    };
+  });
+  const directionOf = (onStage, text) => onStage.directions.find((d) => d.text === text);
+  const distance = (c) => Math.hypot(c.x - c.tx, c.y - c.ty, c.z - c.tz);
+  // A pause ends "hello there" in the line, so the card is only its phrase.
+  await typeKeys('hello there ');
+  await directed.clock.fastForward(1500);
+  await typeKeys('WHAT A DAY! ');
+  let onStage = await look();
+  const card = directionOf(onStage, 'WHATADAY!');
+  if (card?.shot !== 'card') throw new Error(`"WHAT A DAY!" was directed ${JSON.stringify(card)}`);
+  await directed.clock.fastForward(card['at-ms'] + 900 - onStage.t);
+  onStage = await look();
+  const onCard = new Set(card['glyph-ids']);
+  const live = onStage.frame.poses.filter((p) => !p['ghost?']);
+  const biggest = Math.max(...live.filter((p) => onCard.has(p.id)).map((p) => p.scale));
+  const others = live.filter((p) => !onCard.has(p.id));
+  await directed.screenshot({ path: `${out}/card.png` });
+  if (!(biggest > 2)) throw new Error(`900 ms into the card its largest glyph is at scale ${biggest}`);
+  const undimmed = others.filter((p) => Math.abs(p.opacity - 0.25) > 0.03);
+  if (undimmed.length)
+    throw new Error(`${undimmed.length} glyph(s) off the card not dimmed to 0.25, e.g. "${undimmed[0].char}" at ${undimmed[0].opacity}`);
+  await directed.clock.fastForward(5000);
+  onStage = await look();
+  const unsettled = onStage.frame.poses.filter((p) => !p['ghost?'] && p.scale !== 1);
+  if (unsettled.length) throw new Error(`${unsettled.length} glyph(s) not back at scale 1 5 s after the card`);
+  // Within 10 s of the card the budget is spent: a question stays in the line.
+  await typeKeys('why not? ');
+  onStage = await look();
+  const spent = directionOf(onStage, 'whynot?');
+  if (!(onStage.t - card['at-ms'] < 10000)) throw new Error(`"why not?" typed ${onStage.t - card['at-ms']} ms after the card`);
+  if (spent?.shot !== 'line') throw new Error(`"why not?" within 10 s of the card was directed ${JSON.stringify(spent)}`);
+  await directed.clock.fastForward(card['at-ms'] + 11000 - onStage.t);
+  onStage = await look();
+  const restDistance = distance(onStage.frame.camera);
+  await typeKeys('is it? ');
+  onStage = await look();
+  const push = directionOf(onStage, 'isit?');
+  if (push?.shot !== 'push') throw new Error(`"is it?" 11 s after the card was directed ${JSON.stringify(push)}`);
+  await directed.clock.fastForward(push['at-ms'] + 800 - onStage.t);
+  onStage = await look();
+  const pushed = distance(onStage.frame.camera);
+  await directed.screenshot({ path: `${out}/push.png` });
+  if (!(pushed <= 0.75 * restDistance))
+    throw new Error(`800 ms into the push the camera is ${pushed.toFixed(2)} em from its target, at rest ${restDistance.toFixed(2)}`);
+  done(`card: a glyph at scale ${biggest.toFixed(2)}, ${others.length} others at opacity 0.25, all back at scale 1 5 s later; `
+    + `"why not?" ${spent.shot} within 10 s; "is it?" ${push.shot}: camera ${restDistance.toFixed(2)} -> ${pushed.toFixed(2)} em`);
+  await directed.close();
+
   begin('reduced motion', null);
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const still = track(await context.newPage());
@@ -376,7 +450,7 @@ try {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
-  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'crawl', 'steady', 'fuse', 'debug',
+  console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'crawl', 'steady', 'fuse', 'debug', 'card', 'push',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;

@@ -1,8 +1,8 @@
 (ns halfahead.lab.debug
   "The numbers behind the lab's ?debug overlay: frame timing over the last
-  second, the cues an edit just placed, and a short log of recent cues, so
-  a screen recording read frame by frame ties what was felt to what the
-  code did. Pure: the shell passes the clock in as now-ms. Display only;
+  second, the cues and directions an edit just placed, and short logs of
+  recent ones, so a screen recording read frame by frame ties what was
+  felt to what the code did. Pure: the shell passes the clock in as now-ms. Display only;
   nothing here is logged or stored anywhere."
   (:require [clojure.string :as str]))
 
@@ -58,9 +58,46 @@
                               :at-ms at-ms))))
           (:cues new-draft))))
 
+(def ^:private phrase-shown
+  "How many characters of a directed phrase the overlay shows."
+  16)
+
+(defn- phrase-text
+  "The text of draft from the first to the last present glyph of
+  direction, cut to 16 characters and an ellipsis."
+  [draft {:keys [glyph-ids]}]
+  (let [in (set glyph-ids)
+        idx (keep-indexed (fn [i g] (when (in (:id g)) i)) (:glyphs draft))
+        text (if (seq idx)
+               (apply str (map :char (subvec (:glyphs draft) (first idx) (inc (last idx)))))
+               "")]
+    (if (> (count text) phrase-shown)
+      (str (subs text 0 phrase-shown) "…")
+      text)))
+
+(defn- same-direction?
+  "Whether new-d is old-d, perhaps shrunk since by deletions."
+  [old-d new-d]
+  (and (= (:at-ms old-d) (:at-ms new-d))
+       (= (:shot old-d) (:shot new-d))
+       (every? (set (:glyph-ids old-d)) (:glyph-ids new-d))))
+
+(defn new-directions
+  "The directions placed in new-draft that were not in old-draft, in draft
+  order, as [{:phrase :shot :energy :at-ms} ...]."
+  [old-draft new-draft]
+  (let [olds (:directions old-draft)]
+    (into []
+          (comp (remove (fn [d] (some #(same-direction? % d) olds)))
+                (map (fn [d]
+                       (assoc (select-keys d [:shot :energy :at-ms])
+                              :phrase (phrase-text new-draft d)))))
+          (:directions new-draft))))
+
 (defn cue-log
-  "log with cues (as from new-cues) added: newest first, at most six
-  entries, none older than eight seconds at now-ms."
+  "log with entries (cues as from new-cues, or directions as from
+  new-directions) added: newest first, at most six entries, none older
+  than eight seconds at now-ms."
   [log cues now-ms]
   (into []
         (comp (remove #(> (- now-ms (:at-ms %)) log-age-ms))
@@ -85,17 +122,22 @@
 
 (defn overlay-text
   "The overlay: a timing line, a backend line naming the motion style in
-  force, then one line per log entry, newest first."
-  [{:keys [summary t-ms backend glyphs style style-choice log]}]
+  force, then one line per cue log entry and one per direction log entry,
+  each newest first."
+  [{:keys [summary t-ms backend glyphs style style-choice log directions]}]
   (let [{:keys [frame fps mean-ms worst-ms]} summary]
     (str/join "\n"
-              (into [(str "frame " frame
-                          " · t " (fixed (/ t-ms 1000.0) 3) " s"
-                          " · " (fixed fps 0) " fps"
-                          " · mean " (fixed mean-ms 1) " ms"
-                          " · worst " (fixed worst-ms 1) " ms")
-                     (str backend " · " glyphs " glyphs · " (style-text style style-choice))]
-                    (map (fn [{:keys [word effect intensity source]}]
-                           (str word " -> " (name effect) " " (fixed intensity 1)
-                                " (" (name source) ")")))
-                    log))))
+              (concat
+               (into [(str "frame " frame
+                           " · t " (fixed (/ t-ms 1000.0) 3) " s"
+                           " · " (fixed fps 0) " fps"
+                           " · mean " (fixed mean-ms 1) " ms"
+                           " · worst " (fixed worst-ms 1) " ms")
+                      (str backend " · " glyphs " glyphs · " (style-text style style-choice))]
+                     (map (fn [{:keys [word effect intensity source]}]
+                            (str word " -> " (name effect) " " (fixed intensity 1)
+                                 " (" (name source) ")")))
+                     log)
+               (map (fn [{:keys [phrase shot energy]}]
+                      (str phrase " -> " (name shot) " " (fixed energy 1)))
+                    directions)))))
