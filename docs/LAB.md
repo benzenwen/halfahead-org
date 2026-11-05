@@ -116,8 +116,8 @@ degree field of view), at the distance where the column fills
 75% of the view's width for the viewport's aspect (`:aspect`, which the
 shell passes in), so letters stand upright at rest, within 2 degrees of
 vertical anywhere in the block. Type is sized so a line (18 em, about
-36-40 characters) fills about that width. A faint grid floor recedes
-under the current line and fog dims what is further from the eye, so z
+36-40 characters) fills about that width. A faint grid floor (the grid
+stage; see Writing a stage) recedes under the current line and fog dims what is further from the eye, so z
 motion reads as depth. (In this scene +z points toward the camera, so
 births and launches come forward and brighten.)
 
@@ -131,6 +131,78 @@ back 0.1 rad (never past 0.5 rad), one step more per line. The recession is
 part of each letter's resting pose, so it holds when settled, every motion
 still ends exactly on it, and it slides along with the camera's 450 ms ease
 when a new line starts.
+
+## Writing a stage
+
+The scene behind the letters is a *stage*, a module you can swap: the grid
+floor is the first (`halfahead.lab.stage.grid`), and a storm, a city or a
+field of stars can be another. `/lab/?stage=name` picks one; an unknown or
+missing name is the grid. The renderer (`halfahead.lab.render`) owns the
+three.js scene, the camera, fog and house lights, and draws the letters;
+it calls the stage on every frame.
+
+A stage is a map of four functions over a state of its own (a map):
+
+```clojure
+{:init    (fn [three-scene opts] state)  ; add your objects to the scene
+ :update  (fn [state frame t] state)     ; every frame, before it is drawn
+ :moment  (fn [state moment] state)      ; each moment, before :update
+ :dispose (fn [state] nil)}              ; remove and free your objects
+```
+
+- **`opts`** is `{:ink node}`: a TSL colour uniform holding the ink's
+  colour, which follows the house lights (dark ink on paper, light ink on
+  the dark stage). Use it if your scene should be drawn "in ink".
+- **`frame`** is the `:ha/glyph-frame` being drawn, read only: `:t-ms`,
+  `:poses` (every letter's place), `:caret`, `:camera` (`:x :y :z`, target
+  `:tx :ty :tz`, `:fov`, in em; +z toward the viewer), `:style` and
+  `:reveal` (`:level` 0-3 and `:lights`, 0 up to 1 down). `t` is its
+  `:t-ms`, the page clock in ms. The grid, for one, rests under the camera
+  target and shows only from level 2, as far as the lights are down.
+- **A moment** is something that just happened, from
+  `halfahead.lab.moments`, as plain data:
+
+  ```clojure
+  {:kind :cue   :effect :quake :intensity 1.0 :word "crash" :at-ms 12345}
+  {:kind :shot  :shot :card :energy 0.9 :at-ms 12345}
+  {:kind :level :level 2 :at-ms 12345}
+  ```
+
+  A cue fired on a finished word (effects as in `:ha/word-cue`), a
+  direction placed on a finished phrase (`:line :card :push :pull`), a
+  reveal level reached. Each arrives exactly once, in time order, a cue
+  before a shot before a level at the same ms; a word that only lost
+  letters is not a new moment, and a word typed again is. Ignore what you
+  do not care about.
+
+Keep your timing derived from `t` and the `:at-ms` you kept (for example
+`brightness = intensity · decay(t - flash-at)`), not counted per frame, so
+a slow frame never makes an effect last longer. The grid's whole reaction
+is this: a `:quake` cue brightens its lines for 900 ms in proportion to
+the intensity (a hint of lightning), and a `:card` shot pulses its far
+lines once.
+
+To add one, write `src/halfahead/lab/stage/yours.cljs` exporting
+`(def stage {...})` and add it to `registry` in `halfahead.lab.stage`:
+
+```clojure
+(def registry {:grid grid/stage :yours yours/stage})
+```
+
+The rules:
+
+- **A stage decides nothing about the letters.** Not where they are, not
+  the camera, not timing, not the text. It only draws behind them, and it
+  must keep them readable.
+- **At rest it is at rest.** With no moments it looks the same from frame
+  to frame (or close to it); with reduced motion the shell sends it no
+  moments at all, so it never flashes or pulses then.
+- **Clean up.** `:dispose` removes and frees everything `:init` added; the
+  renderer calls it when it falls back from WebGPU to WebGL2, then calls
+  `:init` again on the new scene.
+- **Show your state.** Keep numbers, keywords and strings in the state map
+  for what you animate; `window.__lab.stageState()` returns those (the JS
+  objects are left out), which is how the e2e checks the grid's flash.
 
 ## Styles
 
@@ -313,6 +385,7 @@ we -> pop 0.3 (default)
 WHAT A DAY! -> card 0.9
 camera target x 9.00 · y -5.40 · z 0.00
 reveal level 3 · lights 1.00
+stage grid · moment cue quake 1.0 at 12.345 s
 sound off
 ```
 
@@ -332,6 +405,8 @@ sound off
   as the phrase (its first 16 characters) -> shot and energy.
 - **camera target**: where this frame's camera looks, in em.
 - **reveal**: the frame's reveal level and house lights (0 up, 1 down).
+- **stage**: the stage behind the letters and the newest moment it was
+  given (`moment none` before the first); see Writing a stage.
 - **sound**: whether Sound is on.
 
 The panel grows as wide as its longest line, up to the viewport, and wraps

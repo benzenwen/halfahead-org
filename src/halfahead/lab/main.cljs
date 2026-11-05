@@ -7,16 +7,21 @@
   it also plays each new cue's and direction's sound from lab.sound. It
   keeps the reveal's inputs (lab.reveal): the start level from ?reveal=N,
   the times of the writer's wands (Ctrl+. or a mouse flick over the
-  stage), and the levels reached so far, so they never go down."
+  stage), and the levels reached so far, so they never go down. Once a
+  frame it asks lab.moments what happened since the last one and hands
+  those moments, with the frame, to the stage behind the letters, chosen
+  with ?stage=name (lab.stage; the grid floor by default)."
   (:require [halfahead.lab.audio :as audio]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.director :as director]
             [halfahead.lab.draft :as draft]
+            [halfahead.lab.moments :as moments]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.render :as render]
             [halfahead.lab.reveal :as reveal]
-            [halfahead.lab.sound :as sound]))
+            [halfahead.lab.sound :as sound]
+            [halfahead.lab.stage :as stage]))
 
 (defn- start-level
   "?reveal=N, 0 to 3: the reveal level the lab starts at; 0 when absent."
@@ -27,11 +32,18 @@
 (defonce ^:private state
   ;; :sound-log, the last sounds played, for tests and the console;
   ;; :sound-queue, those not yet handed to the speaker;
-  ;; :reveal, lab.reveal's opts; :pointer, the last moments of mouse motion
+  ;; :reveal, lab.reveal's opts; :pointer, the last moments of mouse motion;
+  ;; :moment-ctx, the last tick's {:draft :frame} that moments are counted
+  ;; from; :last-moment, the newest of them, for the overlay
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
          :sound? false :sound-log [] :sound-queue []
          :reveal {:start-level (start-level) :wands [] :reached nil}
-         :pointer []}))
+         :pointer []
+         :moment-ctx nil :last-moment nil}))
+
+(def ^:private chosen-stage
+  "[name stage] from ?stage=name; the grid when absent or unknown."
+  (stage/named (.get (js/URLSearchParams. js/location.search) "stage")))
 
 ;; Only this viewer's choice of Sound, on this device; never sent anywhere.
 (def ^:private sound-key "halfahead.lab.sound")
@@ -92,8 +104,19 @@
 (defn- camera-line [{:keys [tx ty tz]}]
   (str "camera target x " (.toFixed tx 2) " · y " (.toFixed ty 2) " · z " (.toFixed tz 2)))
 
+(defn- moment-line [{:keys [kind effect intensity shot energy level at-ms] :as m}]
+  (str "stage " (name (first chosen-stage)) " · moment "
+       (if m
+         (str (name kind) " "
+              (case kind
+                :cue (str (name effect) " " (.toFixed intensity 1))
+                :shot (str (name shot) " " (.toFixed energy 1))
+                :level level)
+              " at " (.toFixed (/ at-ms 1000) 3) " s")
+         "none")))
+
 (defn- show-debug! [r t f]
-  (let [{:keys [stats cue-log direction-log style-choice sound?]}
+  (let [{:keys [stats cue-log direction-log style-choice sound? last-moment]}
         (swap! state #(-> %
                           (update :stats debug/record t)
                           (update :cue-log debug/cue-log [] t)
@@ -106,6 +129,7 @@
                "\n" (camera-line (:camera f))
                "\n" (let [{:keys [level lights]} (:reveal f)]
                       (str "reveal level " level " · lights " (.toFixed lights 2)))
+               "\n" (moment-line last-moment)
                "\n" (if sound? "sound on" "sound off")))))
 
 (defn- directed
@@ -135,10 +159,16 @@
   (let [t (now-ms)
         _ (swap! state directed t)
         _ (play-queued!)
-        f (frame r t (.-matches motion-query))]
-    (swap! state assoc :last-frame f)
+        reduced-motion? (.-matches motion-query)
+        f (frame r t reduced-motion?)
+        ;; counted only here, once a tick, so each moment is handed on once
+        ctx {:draft (:draft @state) :frame f}
+        ms (moments/moments (:moment-ctx @state) ctx)]
+    (swap! state #(cond-> (assoc % :last-frame f :moment-ctx ctx)
+                    (seq ms) (assoc :last-moment (peek ms))))
     (show-lights! (:reveal f))
-    (render/draw! r f)
+    ;; with reduced motion the stage stays at rest: no flashes or pulses
+    (render/draw! r f (if reduced-motion? [] ms))
     (when debug? (show-debug! r t f))
     (js/requestAnimationFrame #(loop! r motion-query))))
 
@@ -154,6 +184,8 @@
              :project #(render/screen-point r %1 %2 %3)
              :advance #(render/advance r %)
              :soundLog #(clj->js (:sound-log @state))
+             :stage (name (first chosen-stage))
+             :stageState #(clj->js (render/stage-state r))
              :bounds #(clj->js sound/bounds)}))
 
 (defn- edit! [text]
@@ -265,7 +297,8 @@
     (.addEventListener js/window "keydown" on-gesture)
     (.addEventListener js/window "pointerdown" on-gesture)
     (-> (render/start! (by-id "stage")
-                       (pose/frame (draft/empty-draft) 0 {:width-em (width-em) :aspect (aspect)}))
+                       (pose/frame (draft/empty-draft) 0 {:width-em (width-em) :aspect (aspect)})
+                       (second chosen-stage))
         (.then (fn [r]
                  (edit! (.-value input))
                  (loop! r motion-query)
