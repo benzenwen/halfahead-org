@@ -1,0 +1,59 @@
+{:id "0041-lab-stage-flash-test"
+ :title "Fix the lab's stage step: check the flash against its curve, not a peak that depends on frame rate"
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring: 0039
+ ;; shipped an e2e assertion (peak brightness > 0.3) that fails when headless
+ ;; Chromium renders slowly; found by the foreman's integration run after
+ ;; tick 29 (peak 0.212 at about 4 fps).
+ :lupa/fixes #{"0039-lab-stage-seam"}
+ :lupa/deps #{"0039-lab-stage-seam"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "After tick 29 the foreman's `bb lab:e2e` failed at the stage step:
+        'the grid's brightness peaked at 0.212 on a quake of 1.0'. The
+        grid is right: its flash is a function of time, intensity x
+        (1 - u)^2 over 900 ms from the cue's :at-ms, and in that run
+        software WebGL drew a frame every 245-333 ms, so the first frame
+        after the quake came about 490 ms in (u 0.54, (1 - 0.54)^2 = 0.21).
+        The step's 'peak > 0.3' passes or fails with the frame phase. Make
+        the check independent of frame rate, and prove the curve itself in
+        a unit test."
+ :scope ["src/halfahead/lab/stage/light.cljc"
+         "test/halfahead/lab/stage/light_test.cljc"
+         "src/halfahead/lab/stage/grid.cljs" "e2e/lab.mjs"]
+ :design "New halfahead.lab.stage.light (.cljc, pure, no three.js): the
+          grid's two light curves, moved out of grid.cljs unchanged:
+            (flash at-ms intensity t) -> intensity x (1 - u)^2 for u =
+              (t - at-ms) / 900 in [0, 1]; 0 when at-ms is nil, before it,
+              or after the span.
+            (pulse at-ms t) -> sin(pi u) over 700 ms; 0 outside.
+          grid.cljs calls these instead of its own since/brightness code
+          (its look and behaviour unchanged) and adds :flash-at,
+          :flash-intensity and :t (the t of the last update) to the state
+          stageState() returns.
+          light_test.cljc: flash at at-ms is the intensity; at 450 ms a
+          quarter of it; 0 at and after 900 ms, before at-ms, and for nil;
+          never above the intensity or below 0 (a property over generated
+          times and intensities in [0, 1]); pulse 0 at both ends, 1 at
+          350 ms.
+          e2e/lab.mjs, the stage step only: sample stageState() on every
+          animation frame (as now) into a list of {t brightness flashAt
+          flashIntensity}; after the quake assert (a) the overlay showed
+          the quake moment (as now), (b) at least one sample inside the
+          flash's 900 ms has brightness > 0, (c) every sample inside it
+          equals flashIntensity x (1 - u)^2 within 1e-6, with flashIntensity
+          1.0 for 'crash', (d) brightness returns to 0 (as now). Report the
+          number of frames seen inside the flash and the frame interval.
+          Keep the stage-grid.png screenshot."
+ :acceptance
+ ["light tests as above pass on both hosts"
+  "`bb lab:e2e` passes with every step, including the steps after the
+   stage step that did not run after tick 29 (style auto, the five styles,
+   sound, director, reduced motion); `bb test` stays green"
+  "The final message states the frame interval the e2e stage step saw"]
+ :non-goals
+ ["No change to how the grid looks or when it flashes; no change to
+   moments, the stage interface, render.cljs or main.cljs"
+  "Do not edit the schema; do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/stage/grid.cljs" "src/halfahead/lab/stage.cljs"
+           "e2e/lab.mjs" "test/halfahead/lab/moments_test.cljc"]
+ :budget-usd 6.0}

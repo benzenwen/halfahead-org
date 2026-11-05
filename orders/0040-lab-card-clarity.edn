@@ -1,6 +1,6 @@
 {:id "0040-lab-card-clarity"
  :title "Lab card clarity: the rest of the line steps back while a card holds the stage"
- :lupa/deps #{"0039-lab-stage-seam"}
+ :lupa/deps #{"0041-lab-stage-flash-test"}
  :lupa/area :lab
  :lupa/risk :low
  :goal "A card (the director's trailer shot) sets its phrase large on the
