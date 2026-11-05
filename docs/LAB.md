@@ -199,11 +199,62 @@ Shots are blended on top of births and cues, so everything is exactly at
 rest 5 s after the latest direction. With reduced motion no shot is
 performed.
 
+## Sound
+
+Experiment 3 of the product outline: sound to calm, to excite, to
+intrigue. Every new word cue and every new direction can sound, voiced by
+the motion style in force (the one picked, or the one Auto reads from the
+last frame). Sound is data (`halfahead.lab.sound`, pure and tested on both
+hosts): a few voices, each `{:wave :hz :at-ms :ms :gain :detune :pan}`,
+with `:wave` one of `:sine`, `:triangle`, `:square` or `:noise` (for noise,
+`:hz` is a lowpass cutoff). `halfahead.lab.audio` is the only Web Audio
+code; it synthesizes every voice with an oscillator or a shared buffer of
+white noise, with a short attack and release.
+
+Each effect has a little figure, a contour of notes. `:pop` (and so the
+default cue, `:pop` at 0.3) is a single note and the quietest; `:quake`,
+`:launch` and `:shimmer` have the most notes and the widest contours.
+Intensity raises the level and draws the figure out a little. The style
+voices the figure:
+
+| Style | Sound | Feel |
+|---|---|---|
+| Plain | the figure's first note only, one soft sine blip | neutral |
+| Elegant | sines, long and swelling in, the contour snapped to unisons, fourths, fifths and octaves | calms |
+| Caffeinated | short bright triangle ticks (60 ms at most), quicker, left and right in turn | excites |
+| Drunken | each note a pair of sines detuned 18 cents apart, beating in a slow wobble, 40 ms late, spread left and right | intrigues |
+| Coarse | a noise burst over a low square thud | thumps |
+
+Shots: `:line` is silent; `:card` is a trailer hit, a noise swell rising
+in level and brightness, then a 55 Hz thump (square in Coarse, triangle in
+Caffeinated, a sine otherwise), over within 800 ms; `:push` is a tone
+rising in three steps, `:pull` one falling. Energy raises the level;
+Drunken detunes them.
+
+The bounds, enforced on every sound and tested as properties over
+generated cues and directions: at most 900 ms long, each voice's gain at
+most 0.12 and their sum at most 0.25, 40 to 4000 Hz, pan within -1..1.
+
+A **Sound** checkbox beside the motion style picker turns it on. It is off
+by default and never autoplays: the AudioContext is made by the click that
+turns it on, and if it was left on in an earlier visit, nothing sounds
+until the first key or click on the page. The choice is remembered for
+this viewer on this device only (localStorage `halfahead.lab.sound`; the
+page works the same when storage is blocked, with Sound off). Nothing is
+fetched, recorded or sent. Every sound is redundant with what is seen: it
+only accompanies a cue or shot that is drawn anyway.
+
+`window.__lab.soundLog()` returns the last 20 sounds played, as data
+(`{kind: "cue"|"shot", style, sound, ...}` with the cue's word, effect and
+intensity, or the shot and energy); it is empty while Sound is off.
+`window.__lab.bounds()` returns the bounds.
+
 ## Accessibility
 
 The input is a real `<textarea>`, focused, with transparent text: IME,
 paste, undo, spellcheck and screen readers keep working. The canvas is
-`aria-hidden`. Reduced motion shows letters at rest.
+`aria-hidden`. Reduced motion shows letters at rest. Sound is opt-in, a
+labelled checkbox, and every sound has a visible counterpart.
 
 ## Debug overlay
 
@@ -217,6 +268,7 @@ shipped -> launch 1.0 (glossary)
 we -> pop 0.3 (default)
 WHAT A DAY! -> card 0.9
 camera target x 9.00 · y -5.40 · z 0.00
+sound off
 ```
 
 - **frame**: frames drawn since the page loaded.
@@ -234,6 +286,7 @@ camera target x 9.00 · y -5.40 · z 0.00
 - **directions**: likewise up to six recent directions, newest first, each
   as the phrase (its first 16 characters) -> shot and energy.
 - **camera target**: where this frame's camera looks, in em.
+- **sound**: whether Sound is on.
 
 The panel grows as wide as its longest line, up to the viewport, and wraps
 beyond that, so no line is cut off.
@@ -276,7 +329,13 @@ then slowly (450 ms a key) on a fresh page with the clock held, checking
 that Auto reads caffeinated and then elegant. On one more page it picks
 each explicit style, with the picker or with Ctrl+4 and Ctrl+6, checks
 that the textarea keeps the focus, and types "we shipped it " to check
-that the frames are performed in that style. With the clock held on
+that the frames are performed in that style. On a `?debug` page it checks
+that Sound starts off (overlay `sound off`) and that typing "crash " then
+logs nothing; clicks Sound on (the textarea keeps the focus), types
+"crash " and checks that exactly one sound, a `quake` cue, was logged with
+every voice within `__lab.bounds()`; types "WHAT A DAY! " and checks for a
+card hit with a noise swell and a low thump; reloads to see Sound still
+on, then turns it off and reloads to see it off. With the clock held on
 another page it directs: after "hello there " and a pause, it types
 "WHAT A DAY! " and checks that 900 ms later a letter of the card is at
 scale > 2 and every other letter at opacity 0.25 (`card.png`), and that
@@ -301,12 +360,14 @@ and starts over on WebGL2 if that fails. One TSL material serves both
 backends.
 
 The page is offline: no network, no downloaded fonts (the glyph atlas is
-rasterised with tiny-sdf from the system's sans faces), no sound.
+rasterised with tiny-sdf from the system's sans faces), no audio files:
+sound, when turned on, is synthesized.
 `window.__lab` exposes `backend`, `liveText()`, `lastFrame()`,
 `directions()` (the draft's directions), `drawn()`, `lean(i)` (degrees between drawn glyph i's projected left edge
 and the screen vertical) and `blockCentre()` (the block's drawn centre,
 where the frame's camera target lands, and the viewport size, in CSS
 pixels),
 `project(x, y, z)` (where a point in em landed on the canvas, in CSS
-pixels) and `advance(c)` (a character's advance in em) for tests and for anyone poking at
+pixels), `advance(c)` (a character's advance in em), `soundLog()` and
+`bounds()` (see Sound) for tests and for anyone poking at
 it from the console.

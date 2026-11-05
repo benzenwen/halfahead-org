@@ -3,16 +3,25 @@
   animation frame asks the pure core for a frame and hands it to the
   renderer. All deciding happens in lab.draft, lab.cues, lab.director,
   lab.style and lab.pose, the camera included; the shell only reports the
-  viewport's shape and which motion style the writer picked."
-  (:require [halfahead.lab.cues :as cues]
+  viewport's shape and which motion style the writer picked. With Sound on
+  it also plays each new cue's and direction's sound from lab.sound."
+  (:require [halfahead.lab.audio :as audio]
+            [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.director :as director]
             [halfahead.lab.draft :as draft]
             [halfahead.lab.pose :as pose]
-            [halfahead.lab.render :as render]))
+            [halfahead.lab.render :as render]
+            [halfahead.lab.sound :as sound]))
 
 (defonce ^:private state
-  (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto}))
+  ;; :sound-log, the last sounds played, for tests and the console;
+  ;; :sound-queue, those not yet handed to the speaker
+  (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
+         :sound? false :sound-log [] :sound-queue []}))
+
+;; Only this viewer's choice of Sound, on this device; never sent anywhere.
+(def ^:private sound-key "halfahead.lab.sound")
 
 (def ^:private style-keys
   "Ctrl+1..6, in the picker's order."
@@ -43,11 +52,27 @@
                :reduced-motion? reduced-motion?
                :style-choice (:style-choice @state)}))
 
+(defn- voiced
+  "s with the sounds of newly placed entries of a kind logged and queued."
+  [s kind entries]
+  (let [played (sound/sounds {:sound? (:sound? s)
+                              :style (sound/style-in-force (:style-choice s) (:last-frame s))}
+                             kind entries)]
+    (-> s
+        (update :sound-log sound/log played)
+        (update :sound-queue into played))))
+
+(defn- play-queued!
+  "Hand every queued sound to the speaker, outside any swap!."
+  []
+  (let [[old _] (swap-vals! state assoc :sound-queue [])]
+    (run! #(audio/play! (:sound %)) (:sound-queue old))))
+
 (defn- camera-line [{:keys [tx ty tz]}]
   (str "camera target x " (.toFixed tx 2) " · y " (.toFixed ty 2) " · z " (.toFixed tz 2)))
 
 (defn- show-debug! [r t f]
-  (let [{:keys [stats cue-log direction-log style-choice]}
+  (let [{:keys [stats cue-log direction-log style-choice sound?]}
         (swap! state #(-> %
                           (update :stats debug/record t)
                           (update :cue-log debug/cue-log [] t)
@@ -57,19 +82,23 @@
                                     :backend (render/backend r) :glyphs (render/drawn r)
                                     :style (:style f) :style-choice style-choice
                                     :log cue-log :directions direction-log})
-               "\n" (camera-line (:camera f))))))
+               "\n" (camera-line (:camera f))
+               "\n" (if sound? "sound on" "sound off")))))
 
 (defn- directed
   "state with the director run over its draft at t: on every edit, and on
   every frame for phrases that a pause ended."
   [{old :draft :as s} t]
-  (let [new (director/direct old t)]
+  (let [new (director/direct old t)
+        placed (when (or debug? (:sound? s)) (debug/new-directions old new))]
     (cond-> (assoc s :draft new)
-      debug? (update :direction-log debug/cue-log (debug/new-directions old new) t))))
+      debug? (update :direction-log debug/cue-log placed t)
+      true (voiced :shot placed))))
 
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
         _ (swap! state directed t)
+        _ (play-queued!)
         f (frame r t (.-matches motion-query))]
     (swap! state assoc :last-frame f)
     (render/draw! r f)
@@ -86,17 +115,22 @@
              :lean #(render/lean r %)
              :blockCentre #(render/block-centre r)
              :project #(render/screen-point r %1 %2 %3)
-             :advance #(render/advance r %)}))
+             :advance #(render/advance r %)
+             :soundLog #(clj->js (:sound-log @state))
+             :bounds #(clj->js sound/bounds)}))
 
 (defn- edit! [text]
   (let [t (now-ms)]
     (swap! state (fn [{old :draft :as s}]
                    ;; draft/edit builds a new draft without :directions
                    (let [new (-> (draft/edit old text t cues/word-cue)
-                                 (assoc :directions (:directions old [])))]
+                                 (assoc :directions (:directions old [])))
+                         placed (when (or debug? (:sound? s)) (debug/new-cues old new))]
                      (cond-> (assoc s :draft new)
-                       debug? (update :cue-log debug/cue-log (debug/new-cues old new) t)
-                       true (directed t)))))))
+                       debug? (update :cue-log debug/cue-log placed t)
+                       true (voiced :cue placed)
+                       true (directed t)))))
+    (play-queued!)))
 
 (defn- on-input [^js e]
   (edit! (.. e -target -value)))
@@ -109,6 +143,33 @@
   (set! (.-value picker) (name choice))
   (.focus input))
 
+(defn- remembered-sound?
+  "Whether this viewer turned Sound on here before; off when storage is
+  empty, blocked or throws."
+  []
+  (try (= "on" (.getItem js/localStorage sound-key))
+       (catch :default _ false)))
+
+(defn- remember-sound! [on?]
+  (try (.setItem js/localStorage sound-key (if on? "on" "off"))
+       (catch :default _ nil)))
+
+(defn- choose-sound!
+  "Sound on or off from now on, remembered on this device. Turning it on
+  is a click, a user gesture, so the audio is unlocked here."
+  [on? ^js input]
+  (swap! state #(cond-> (assoc % :sound? on?)
+                  (not on?) (assoc :sound-log [] :sound-queue [])))
+  (remember-sound! on?)
+  (when on? (audio/unlock!))
+  (.focus input))
+
+(defn- on-gesture
+  "Sound remembered on from an earlier visit stays silent until the
+  viewer's first key or click here, a user gesture that may unlock it."
+  [_]
+  (when (:sound? @state) (audio/unlock!)))
+
 (defn- on-style-key [picker input ^js e]
   (when-let [choice (and (.-ctrlKey e) (not (.-altKey e)) (not (.-metaKey e))
                          (style-keys (.-key e)))]
@@ -119,6 +180,7 @@
   (let [^js input (by-id "type")
         ^js status (by-id "status")
         ^js picker (by-id "style")
+        ^js sound-box (by-id "sound")
         ;; read on every frame, so a change of the setting applies at once
         motion-query (js/window.matchMedia "(prefers-reduced-motion: reduce)")]
     (when debug? (.removeAttribute (by-id "debug") "hidden"))
@@ -128,6 +190,11 @@
     (.addEventListener picker "change"
                        #(choose-style! (keyword (.-value picker)) picker input))
     (.addEventListener js/window "keydown" #(on-style-key picker input %))
+    (swap! state assoc :sound? (remembered-sound?))
+    (set! (.-checked sound-box) (:sound? @state))
+    (.addEventListener sound-box "change" #(choose-sound! (.-checked sound-box) input))
+    (.addEventListener js/window "keydown" on-gesture)
+    (.addEventListener js/window "pointerdown" on-gesture)
     (-> (render/start! (by-id "stage")
                        (pose/frame (draft/empty-draft) 0 {:width-em (width-em) :aspect (aspect)}))
         (.then (fn [r]
