@@ -1,0 +1,105 @@
+{:id "0046-lab-score-pace"
+ :title "Lab score and pace: a score made safe, and laid out in time by a reading head that keeps the reader's beat"
+ :lupa/deps #{"0042-lab-synth" "0044-lab-marks"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'The clock', and hypothesis H6 in
+        docs/product/lab-notebook.md. A lyric is paced by the music; a
+        message is paced by the eye. Two pure pieces: lab.score takes any
+        data offered as a score (from an agent, or from the lab's own
+        rules) and returns one that is safe to perform; lab.pace lays a
+        score out in time for one reader, in beats of that reader's pace,
+        with a reading head, holds that stretch it, and the 5 s cap."
+ :scope ["src/halfahead/lab/score.cljc" "test/halfahead/lab/score_test.cljc"
+         "src/halfahead/lab/pace.cljc" "test/halfahead/lab/pace_test.cljc"]
+ :design "Schema (the foreman's; do not edit): :ha/score :ha/mark
+          :ha/dress :ha/pace :ha/reading :ha/style-point.
+          halfahead.lab.score (.cljc, pure):
+          (normalize x) -> {:score s :dropped [{:what kw :why kw ...}]}, s
+            a valid :ha/score or nil. Never throws, for any data at all.
+            x must be a map whose :text is a valid :ha/message-text, else s
+            is nil (dropped [{:what :score :why :no-text}]). Keys other
+            than :text :marks :dress :style :shot are dropped. Each mark
+            and each dress is kept only if it is valid by the schema, its
+            span lies within the text (in UTF-16 units), covers at least
+            one non-blank character and splits no surrogate pair; a mark's
+            :patch with any lab.synth/problems is removed and the mark
+            kept; of two marks of one kind that overlap the stronger
+            stays; at most 16 marks and 8 dress, the strongest marks kept;
+            marks and dress ordered by span start, then longer first. An
+            invalid :style or :shot is removed. Everything dropped is
+            listed with a :why (:invalid :outside-text :blank
+            :splits-surrogate :patch-problems :overlap :too-many
+            :unknown-key).
+          (from-text text point) -> the score the lab's own rules give a
+            message: (marks/read text), (marks/dress-for point text marks)
+            and the point as :style; through normalize, so always valid;
+            nil for text that is not a :ha/message-text.
+          halfahead.lab.pace (.cljc, pure):
+          (words text) -> the spans of the text's words (runs of
+            non-whitespace), in order.
+          (beat-ms pace) -> 60000 / wpm.
+          (reading score pace opts) -> a valid :ha/reading. opts:
+            {:ms-of (fn [mark] natural-ms)}, how long each mark's gesture
+            lasts when unhurried (default (constantly 1500)).
+            The head's stay on each word, in beats: 1; 1.3 for a word
+            longer than 8 characters; plus 0.5 when the word ends a
+            sentence (. ! ? …) and 0.25 when it ends with , ; or :; and
+            multiplied by (1 + amount) for the strongest :hold mark whose
+            span touches the word (a fermata). Each stop is {:span :at-ms
+            :ms}, contiguous in time, rounded to whole ms so that each
+            stop starts where the last ended.
+            When the stays sum to at most 4000 ms the reading is PACED:
+            :stops holds every word, :duration-ms is the sum, and every
+            mark is offered an entry at the :at-ms of the first word its
+            span touches, with :ms the smaller of its natural length and
+            (5000 - at-ms); a mark granted less than 0.4 of its natural
+            length is left out.
+            Otherwise it is HIGHLIGHTS: the message is too long to hold a
+            reader, so :stops is empty, and the four strongest marks (the
+            earlier one on a tie) get entries in reading order, 400 ms
+            apart from 0, each with :ms the smaller of its natural length
+            and (5000 - at-ms); :duration-ms is the latest at-ms + ms, or
+            0 with no marks.
+            :beat-ms is the pace's beat. Entries are ordered by :at-ms,
+            then by mark index. For a paced reading with entries,
+            :duration-ms is the larger of the stops' sum and the latest
+            entry's at-ms + ms.
+          (head reading t-ms) -> where the reading head is at t: a
+            fractional index into the text in UTF-16 units, moving
+            linearly through each word during its stop (from the word's
+            start to its end) and resting at the next word's start
+            between; the text's length once the stops are over; nil for a
+            reading with no stops.
+          Tests: normalize on a valid score (unchanged), on each kind of
+          bad mark (one example per :why), on junk (nil, a string, deep
+          nonsense); from-text on the sentence in order 0044's
+          acceptance; words on text with emoji and runs of spaces;
+          reading for a short sentence at 250 wpm with exact numbers; a
+          :hold stretching its word; a 60-word message giving highlights;
+          head at several times. Properties (H6), over generated
+          normalized scores (write the generator by hand: text of 1 to 80
+          words, marks on word-aligned spans) and wpm from 100 to 800:
+          the reading is valid; :duration-ms <= 5000; every entry's at-ms
+          + ms <= 5000; paced stops cover exactly (words text), in order,
+          contiguous from 0; entries are in order; a faster pace never
+          gives a later stop for any word; raising a :hold's amount never
+          shortens its word's stay; normalize never throws on gen/any and
+          is idempotent on its own output."
+ :acceptance
+ ["score and pace tests as in the design, on both hosts"
+  "The final message reports, for the foreman's lab notebook: for the
+   sentence \"I loooove this (honestly). But maybe not. Ship it!\" the
+   reading's :duration-ms and each stop at 150, 250 and 400 wpm, and the
+   longest message (in words of five letters, no punctuation, no marks)
+   that still gets a paced reading at each of those paces"
+  "`bb test` stays green"]
+ :non-goals
+ ["No UI, no wiring into the lab page; no model calls"
+  "Do not change lab.marks, lab.synth or the schema"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["docs/product/score.md" "docs/product/lab-notebook.md"
+           "src/halfahead/schema.cljc" "src/halfahead/lab/marks.cljc"
+           "src/halfahead/lab/synth.cljc" "src/halfahead/perform.cljc"
+           "DESIGN.md"]
+ :budget-usd 10.0}

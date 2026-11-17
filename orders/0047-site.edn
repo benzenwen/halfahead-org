@@ -1,0 +1,74 @@
+{:id "0047-site"
+ :title "Site: `bb site` assembles what would go to halfahead.org (a landing page and the lab's release build), and proves the release build works"
+ :lupa/deps #{"0041-lab-stage-flash-test"}
+ :lupa/area :ops
+ :lupa/risk :medium
+ :goal "docs/PROD.md: the first thing that can go to production is the
+        typing lab, which is static and runs in the visitor's browser. Make
+        the site a build product that can be checked before anything is
+        deployed: a one-screen landing page at / and the lab at /lab/,
+        compiled as an optimized release build (the lab has only ever run
+        as a development build), and nothing of the app, which cannot work
+        without a backend. This order deploys nothing and adds no
+        workflow."
+ :scope ["bb.edn" "shadow-cljs.edn" "src/halfahead/dev/site.clj"
+         "test/halfahead/dev/site_test.clj" "resources/site/index.html"
+         "README.md"]
+ :design "halfahead.dev.site (.clj):
+          (plan root) -> pure given a listing: the files of the site as
+            [{:from path :to path}], :to relative to the site's root:
+            resources/site/index.html -> index.html; public/lab/index.html
+            -> lab/index.html; every file under public/lab/js that the
+            release build wrote -> lab/js/...; and an empty .nojekyll.
+            Never anything else from public/ (not public/index.html,
+            public/js or public/css: that is the app).
+          (assemble! plan out-dir) -> copies the plan into out-dir (out/site),
+            which is emptied first.
+          bb site: `npx shadow-cljs release lab`, then plan and assemble,
+            then print the path and the number of files and bytes. A
+            release build is optimized: if advanced optimization breaks
+            the lab's interop with three.js or tiny-sdf, fix it in
+            shadow-cljs.edn for the :lab build only (externs inference, or
+            :simple optimizations as the last resort) and say which and
+            why in the final message. The development build (`bb lab`,
+            `bb lab:e2e`) must be unchanged. Leave public/lab/js as a
+            development build when the task ends, or say plainly in its
+            output that `bb lab` will recompile it.
+          bb site:e2e: bb site, then serve out/site with
+            halfahead.dev.serve on a free port and run `node e2e/lab.mjs
+            <url>/lab/`, the lab's existing browser check, against the
+            release build; exit with its code. (e2e/lab.mjs is not in
+            scope and must not need changing.)
+          resources/site/index.html: one screen, no JavaScript, no
+            external requests, the app's paper-and-ink look in light and
+            dark (prefers-color-scheme), readable at phone width. Its
+            words, exactly: the heading 'Half Ahead'; the paragraph 'A
+            community for AI agentic engineers. Part tradecraft, part
+            support group.'; a link 'Try the typing lab' to lab/ (a
+            relative link, so it works under a project path as well as a
+            domain root); and the line 'The lab runs in your browser.
+            What you type never leaves it.' A <title> of 'Half Ahead' and
+            a meta description with the paragraph's text.
+          Tests (site_test.clj): plan over a fake listing includes the
+          landing page, the lab page, the lab's js and .nojekyll, and
+          excludes the app; the landing page file exists, has the four
+          texts, has no <script> and no http(s) URL; assemble! into a
+          temporary directory reproduces the plan and removes what was
+          there before.
+          README.md: two lines under the local-run section for bb site and
+          bb site:e2e."
+ :acceptance
+ ["site tests pass; `bb test` stays green"
+  "`bb site:e2e` passes: every step of the lab's browser check against
+   the release build (say in the final message how many steps ran, and
+   what, if anything, had to change in shadow-cljs.edn)"
+  "After the order, `bb lab:e2e` still passes on the development build"]
+ :non-goals
+ ["No deploy, no .github workflow, no CNAME file, no analytics"
+  "No change to the lab's source, e2e/lab.mjs, or the app"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/PROD.md" "bb.edn" "shadow-cljs.edn"
+           "src/halfahead/dev/lab.clj" "src/halfahead/dev/serve.clj"
+           "public/lab/index.html" "public/index.html" "public/css/halfahead.css"
+           "README.md" "DESIGN.md"]
+ :budget-usd 8.0}

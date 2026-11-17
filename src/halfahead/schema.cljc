@@ -168,14 +168,17 @@
      [:word (text 1 64)]
      [:effect :ha/word-effect]
      [:intensity :ha/unit]
-     [:source [:enum :glossary :punctuation :shape :elongation :board :default]]]
+     [:source [:enum :glossary :punctuation :shape :elongation :board :score :default]]]
 
     ;; A cue placed on the draft: which glyphs it moves, and when it fired.
     :ha/placed-cue
     [:map {:closed true}
      [:glyph-ids [:vector {:min 1} [:int {:min 0}]]]
      [:cue :ha/word-cue]
-     [:at-ms :int]]
+     [:at-ms :int]
+     ;; how much of its usual time the cue takes (a reading hurries a
+     ;; gesture to fit the 5 s cap); absent means 1
+     [:tempo optional [:and :ha/finite [:> 0] [:<= 1]]]]
 
     ;; How the whole draft moves: a named set of physics parameters
     ;; (tempo, springiness, amplitude, drift) that every effect is tuned by.
@@ -286,7 +289,9 @@
     ;;   :fade 1 - p       :fade2 (1 - p)^2          :arch sin(pi p)
     ;;   :arc 4p(1 - p)    :rise-sine sin(pi p / 2)
     ;;   :spring           a damped spring's step response, 0 -> 1 with
-    ;;                     overshoot (the one births use)
+    ;;                     overshoot (the one births use), its residual
+    ;;                     faded out over the last fifth of the window so
+    ;;                     it lands exactly on 1
     ;;   :spring-fall      1 - :spring
     :ha/curve [:enum :one :rise :fall :fade :fade2 :arch :arc :rise-sine
                :spring :spring-fall]
@@ -396,7 +401,8 @@
      [:shot optional :ha/shot]]
 
     ;; A score laid out in time for one reader: when the reading head
-    ;; reaches each word, and when each mark that performs begins. Marks
+    ;; reaches each word, and when each mark that performs begins and how
+    ;; long it is given. Marks
     ;; that do not perform (a long message shows only its strongest) are
     ;; absent from :entries.
     :ha/reading
@@ -409,7 +415,11 @@
                        [:ms [:int {:min 0}]]]]]
      [:entries [:vector [:map {:closed true}
                          [:mark [:int {:min 0}]]
-                         [:at-ms [:int {:min 0}]]]]]]}))
+                         [:at-ms [:int {:min 0}]]
+                         ;; the time the mark's gesture is given; it is
+                         ;; played faster to fit when that is less than
+                         ;; its natural length
+                         [:ms [:int {:min 0}]]]]]]}))
 
 (def ^:private compiled
   (memoize (fn [k] (m/schema k {:registry registry}))))

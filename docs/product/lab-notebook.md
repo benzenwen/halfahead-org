@@ -33,6 +33,56 @@ slow. In typed text the held syllable is elongation: "loooove".
 | H2 | The held-syllable swell reads as subtle and reserved in typed text when tied to elongation | Build `:swell` from the measurements; property tests on its bounds; Ben's eyes | pending |
 | H3 | Weight, focus, ink, stretch, slant and fill cost nothing extra to draw | Add them as per-instance attributes of the one instanced mesh; compare frame times before and after | pending |
 | H4 | An agent can write valid, varied scores from one page of reference | N prompts through the `claude` CLI; rate of schema-valid scores on the first try; spread of marks across moods | pending |
-| H5 | A style can be learned from about a dozen flicks | Simulate readers with hidden style points and noisy choices; error against number of flicks | pending |
+| H5 | A style can be learned from about a dozen flicks | Simulate readers with hidden style points and noisy choices; error against number of flicks | **Holds for a careful chooser, fails for a noisy one** (below) |
 | H6 | Pacing by the reader's beat keeps every performance inside reading time and the 5 s cap | Properties over generated scores and paces from 120 to 600 words a minute | pending |
 | H7 | Dress (versal, rubric, gilt) stays readable on paper and on the dark stage | Contrast of each ink against both backgrounds ≥ 4.5:1, computed; screenshots | pending |
+
+## Results
+
+### H5: learning a style from flicks (order 0043, 2026-11-17)
+
+`(learn/experiment {:readers 1000 :flicks 32 :noise u :seed 1})`: 1000
+simulated readers with hidden style points drawn uniformly, each choosing
+the nearer of two options and choosing wrongly with probability `noise`.
+The number is the distance from the learner's point to the hidden one
+(root mean square over the four axes; 0.292 is where everyone starts).
+The builder measured it and the reviewer re-ran it independently; the
+tables agree to the last digit.
+
+| wrong choices | | 0 | 4 | 8 | 12 | 16 | 24 | 32 flicks |
+|---|---|---|---|---|---|---|---|---|
+| none | median | 0.292 | 0.213 | 0.086 | 0.067 | 0.060 | 0.033 | 0.023 |
+| none | 80th pct | 0.342 | 0.274 | 0.121 | 0.081 | 0.074 | 0.039 | 0.031 |
+| 1 in 10 | median | 0.292 | 0.238 | 0.138 | 0.111 | 0.101 | 0.063 | 0.047 |
+| 1 in 10 | 80th pct | 0.342 | 0.311 | 0.245 | 0.199 | 0.164 | 0.112 | 0.086 |
+| 1 in 4 | median | 0.292 | 0.271 | 0.250 | 0.224 | 0.190 | 0.165 | 0.144 |
+| 1 in 4 | 80th pct | 0.342 | 0.354 | 0.372 | 0.320 | 0.287 | 0.266 | 0.232 |
+
+What it says:
+
+- A careful chooser is within 0.07 of their taste after a dozen flicks
+  and 0.03 after two dozen. (Whether 0.07 feels like "mine" is a
+  question for real people; not tested.)
+- At one wrong choice in ten it takes two dozen flicks to get as close.
+- At one in four the staircase barely learns: the median is still 0.144
+  after 32 flicks, and the 80th percentile of error is higher after eight
+  flicks (0.372) than at the start (0.342). My reading of why, not yet
+  tested: the step halves after two refusals and never grows back, so a
+  wrong refusal shrinks it for good.
+
+What to do about it (not yet built):
+
+- **Make the two options obviously different.** How often people choose
+  "wrongly" between two motions is the unknown that decides everything
+  here, and it falls as the difference grows. Big first steps (0.25) help;
+  the flick should never offer a difference too small to see.
+- **Ask about fewer axes.** Two axes should learn about twice as fast as
+  four, since each is asked about twice as often (expected, not
+  measured). Energy and flourish first (the board's XY pad); softness and
+  warmth later.
+- **A learner that forgives.** Never shrink the step on one refusal
+  pattern alone; or keep a belief over points and update it (a Bayesian
+  staircase). Worth an order once real flicks exist to tune it against.
+- Percentiles are nearest rank; each reader's seed comes from the
+  experiment's own generator (a Lehmer generator, so both hosts agree).
+

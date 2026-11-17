@@ -3,6 +3,14 @@
  :lupa/deps #{"0041-lab-stage-flash-test"}
  :lupa/area :lab
  :lupa/risk :medium
+ ;; Respecced 2026-11-17 after two reviews said REWORK, both for flaws in
+ ;; the foreman's design: (1) the bounds check sampled two positions and
+ ;; three ids, which is not sound (a slow :index wave on :blur passes and
+ ;; then goes negative for half the letters); (2) :spring was pinned to 1
+ ;; at the end but is 0.9917 just before it, so a spring that runs to the
+ ;; end of a patch snaps on the last frame while the check said 'at rest'.
+ ;; The design below fixes both; the reviewer's required changes are
+ ;; acceptance criteria.
  :goal "docs/product/score.md: every gesture is a patch, data that moves a
         letter's channels along curves, optionally multiplied by an
         oscillator, staggered across the letters of a cue. Build the pure
@@ -18,12 +26,15 @@
             :one 1; :rise smoothstep p^2(3-2p); :fall 1 - smoothstep;
             :fade 1-p; :fade2 (1-p)^2; :arch sin(pi p); :arc 4p(1-p);
             :rise-sine sin(pi p / 2);
-            :spring a damped spring's step response with zeta 0.517 and
-              decay 4.6 over the window: 1 - e^(-4.6 p) (cos(wd p) +
-              (zeta / sqrt(1 - zeta^2)) sin(wd p)), wd = (4.6 / zeta)
-              sqrt(1 - zeta^2), and exactly 1 at p >= 1 (the same spring
-              lab.pose uses for births; do not import it, restate it);
-            :spring-fall 1 - :spring.
+            :spring 1 - r(p), a damped spring's step response whose
+              residual is faded out so that it lands exactly: r(p) =
+              e^(-4.6 p) (cos(wd p) + (zeta / sqrt(1 - zeta^2)) sin(wd
+              p)) with zeta 0.517 and wd = (4.6 / zeta) sqrt(1 - zeta^2)
+              (the spring lab.pose uses for births; restate it), times
+              (1 - smoothstep((p - 0.8) / 0.2)) for p > 0.8. So the curve
+              is continuous on [0 1], overshoots as before, and its limit
+              from below at 1 is exactly 1: nothing snaps;
+            :spring-fall r(p) with the same fade: 1 at 0, exactly 0 at 1.
           (phase id salt) -> the fixed angle lab.pose's private phase
             gives: h = ((id mod 65521) * 7919 + salt * 104729) mod 65521,
             2 pi h / 65521. Restated here, with a test that pins three
@@ -34,7 +45,9 @@
             letter would start after :max-ms (default 900; n <= 1 gives 0);
             rank is pos for :forward (the default), n - 1 - pos for
             :reverse, and the distance from the middle for :centre-out
-            (the middle letter or pair starts first). No :stagger: 0.
+            (the middle letter or pair starts first; there the step is
+            compressed to max-ms / the largest rank, so the last letter
+            to start does so within :max-ms). No :stagger: 0.
           (total-ms patch n) -> :ms plus the latest start.
           (delta patch u pos n id k) -> {channel delta} for that letter u
             ms after ITS OWN start, at intensity k: {} when u < 0 or u >=
@@ -60,28 +73,57 @@
             of {:problem keyword ...} maps, in a stable order:
             :invalid (not a :ha/patch, with the humanized explanation, and
             nothing else is checked); :not-at-rest for each channel whose
-            summed delta as u approaches :ms is not within 1e-6 of 0
-            (evaluate each mod whose window ends at 1 at q = 1 with its
-            oscillator at that time, at intensity 1, for positions 0 and 1
-            and ids 0, 1 and 7); :out-of-bounds for each channel that
-            leaves bounds anywhere on a 5 ms grid over [0 ms) for those
-            positions and ids, with the worst value. Never throws, for any
-            input at all.
+            delta as u approaches :ms from below is not within 1e-6 of 0;
+            :out-of-bounds for each channel that can leave bounds at any
+            whole ms in [0 ms), with the worst :value. The check must be
+            SOUND FOR EVERY LETTER, not a sample: positions 0 to 3 cover
+            every quarter turn of :index, both parities and :alternate?;
+            a mod whose oscillator has :phase :id or :wave :noise cannot
+            be sampled, so it is bounded by its envelope (the oscillator
+            taken as the interval [-1 1], or [0 1] with :abs?), and
+            channels are summed as intervals. The rest check uses the
+            limit from below (never a value pinned at the end). So a
+            patch may be refused although no real letter would leave
+            bounds (two :id-phase mods that would cancel): that is the
+            price of soundness, and :value is then a bound, not a value
+            some letter takes; say so in the docstring. Never throws,
+            for any input at all.
           Tests: each curve's values at 0, 0.5 and 1 and its range on a
-          grid; start-ms for the three orders, compression and n of 0, 1
-          and 2; delta for a hand-made patch of each feature (windows,
-          :each, :alternate?, each wave, each phase rule), including that a
+          grid, and that :spring and :spring-fall are continuous up to 1
+          (the value at 1 - 1e-9 is within 1e-6 of the value at 1);
+          start-ms for the three orders, compression and n of 0, 1 and 2;
+          delta for a hand-made patch of each feature (windows, :each,
+          :alternate?, each wave, each phase rule), including that a
           window's oscillator time starts at the window; problems for a
           patch that is fine, one invalid, one left displaced (:one on :y),
-          one too far sideways (:x 0.8 :arch). Properties over generated
-          valid patches (write the generator by hand, small and bounded):
-          delta is finite everywhere and {} outside [0 ms); deterministic;
-          whenever (problems p) is [] the patch is within bounds on a 1 ms
-          grid for five random ids and positions (within 1e-3, the grids
-          differ) and within 1e-6 of rest at ms - 1e-9; problems never
-          throws on arbitrary data (gen/any)."
+          one too far sideways (:x 0.8 :arch), a :spring that runs to the
+          end (:not-at-rest, it ends on 1), and a :spring-fall that runs
+          to the end (fine). Properties over generated valid patches. The
+          generator must be honest: amounts that straddle the bounds,
+          signed oscillators and :alternate? on one-sided channels, every
+          curve in every window, positions up to 30, so that problems is
+          what separates safe from unsafe; a test asserts the generator
+          reaches both classes. delta is finite everywhere and {} outside
+          [0 ms); deterministic; whenever (problems p) is [] the patch is
+          within bounds (tolerance 1e-3 for what lies between whole ms)
+          for random ids, positions 0 to 30 and times including
+          fractions of a ms, and within 1e-6 of rest at ms - 1e-9;
+          problems never throws on arbitrary data (gen/any)."
  :acceptance
  ["synth tests as in the design, on both hosts"
+  "Regression tests, each asserting an :out-of-bounds problem: {:ms 400
+   :mods [{:channel :blur :amount 0.8 :curve :arch :osc {:wave :sine
+   :period-ms 1600 :phase :index}}]}; {:ms 50 :mods [{:channel :x :amount
+   0.6 :curve :arch :osc {:wave :sine :period-ms 5000 :phase :id}}]};
+   {:ms 400 :mods [{:channel :y :amount 2.6 :curve :arch :osc {:wave
+   :noise :period-ms 400}}]}"
+  "This patch (the foreman's :slam) has no problems: {:ms 900 :stagger
+   {:ms-per-glyph 15 :max-ms 60} :mods [{:channel :scale :amount 1.4
+   :curve :spring-fall} {:channel :z :amount 2.0 :curve :spring-fall}
+   {:channel :weight :amount 0.8 :curve :fade2} {:channel :glow :amount
+   0.7 :curve :fade2}]}"
+  "The noise function's docstring says what is actually reduced before
+   multiplying"
   "The patch in docs/product/score.md (:swell) has no problems, and its :y
    delta for position 0 at intensity 1 peaks at 0.2 at 900 ms"
   "`bb test` stays green"]

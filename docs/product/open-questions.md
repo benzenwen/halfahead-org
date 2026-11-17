@@ -28,6 +28,12 @@ with; the cheap ones can flip in one order.*
 | Q16 | When does the flick ask? | Only when you ask for it (a key), never unprompted, tonight | An unprompted A/B is an interruption; earn it first | Low |
 | Q17 | What counts as a held syllable? | Three or more of the same letter in a row | "loooove", "sooo", "nooo"; two is ordinary spelling | Low |
 | Q18 | Swell's numbers | Lift 0.2 em at full intensity (0.16 em as usually played), 120 ms a letter, 0.9 s rise, 1.5 s settle, from your recording | Measured from 250 frames; my reading of the `l` was unreliable, the other three letters agree | Low |
+| Q19 | How does a spring land? | Its residual fades out over the last fifth of its window, so it ends exactly at rest | The reviewer caught that my first definition snapped on the last frame while the safety check said "at rest" | Low |
+| Q20 | How strict is the safety check on patches? | Sound for every letter: per-letter oscillators are bounded by their envelope, not sampled | The reviewer showed sampled checks pass patches that leave bounds; the cost is that a few harmless patches are refused | Low |
+| Q21 | How do agents point at text? | By quoting the phrase, never by character offsets | Language models miscount characters; a phrase not found is ignored | Low |
+| Q22 | `:draw` (ink wiping in) | Every letter wipes at once, no stagger | A staggered wipe needs letters to wait unlit before their turn, which a patch cannot say yet; the reading head does the real left-to-right wipe | Low: a "before my turn" state for patches |
+| Q23 | Calm styles and intensity | Unchanged for now: intensity scales with the style's energy, so Elegant plays marks at about half strength (a swell lifts about 0.06 em) | It may be too faint; I want to see it before changing a number | One line in `lab.marks` |
+| Q24 | Squash or merge? | See Q12; also reported to Lupa as a finding | — | — |
 
 ## Still yours from before
 
