@@ -1,4 +1,5 @@
-# The offline gate on every pull request and on main: the Babashka suite,
+# The offline gate on every pull request, on main and on the foreman's
+# integration branches: the Babashka suite,
 # the .cljc tests again under node, the release build, and the Firestore
 # rules under the emulator. Deploys nothing.
 name: gate
@@ -6,7 +7,7 @@ name: gate
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
 
 permissions:
   contents: read
