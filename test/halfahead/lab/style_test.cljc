@@ -94,7 +94,7 @@
        (nil? (:steps ps))))
 
 (deftest point-for-every-style
-  (is (= {:plain       {:energy 0.5  :flourish 0.0  :softness 0.5 :warmth 0.5}
+  (is (= {:plain       {:energy 0.5  :flourish 0.35 :softness 0.5 :warmth 0.5}
           :elegant     {:energy 0.2  :flourish 0.45 :softness 0.9 :warmth 0.7}
           :caffeinated {:energy 0.95 :flourish 0.75 :softness 0.2 :warmth 0.5}
           :drunken     {:energy 0.4  :flourish 0.65 :softness 0.8 :warmth 0.6}
@@ -113,8 +113,10 @@
     (is (= (style/point s) (style/as-point s)) (str s))))
 
 (deftest from-point-at-named-points
-  (is (= (style/params :plain) (style/from-point (style/point :plain)))
-      "the middle of the space is the lab's unstyled motion exactly")
+  (is (= {:tempo 1.0 :overshoot 1.0 :amplitude 1.0 :sway nil :steps nil}
+         (style/params :plain)
+         (style/from-point (style/point :plain)))
+      "the middle of the space is the lab's unstyled motion exactly, whatever Plain's flourish")
   (doseq [[s expected] {:plain       [1.0 1.0 1.0]
                         :elegant     [1.36 0.2 0.85]
                         :caffeinated [0.55 1.6 1.225]

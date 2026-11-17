@@ -4,6 +4,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [halfahead.lab.dress :as dress]
+            [halfahead.lab.marks :as marks]
+            [halfahead.lab.style :as style]
             [halfahead.schema :as schema]))
 
 ;; --- helpers ----------------------------------------------------------------
@@ -49,6 +51,18 @@
       (is (= [{:as as :glyph-ids (mapv id-at (range 6 10))}]
              (dress/placed [{:span [7 11] :as as}] glyphs))
           "'gold' is units 7 to 11 and glyphs 6 to 9: the rocket before it is two units"))))
+
+(deftest plain-wears-gilt-and-a-whisper
+  (let [text "This is *the one thing* that matters (trust me)."
+        worn (dress/placed (marks/dress-for (style/point :plain) text (marks/read text))
+                           (glyphs-of text))]
+    (is (= [{:as :gilt :glyph-ids (mapv id-at (range 9 22))}
+            {:as :whisper :glyph-ids (mapv id-at (range 38 46))}]
+           worn))
+    (is (= ["the one thing" "trust me"]
+           (mapv #(subs text (/ (- (first (:glyph-ids %)) 100) 3)
+                        (inc (/ (- (peek (:glyph-ids %)) 100) 3)))
+                 worn)))))
 
 (deftest placed-keeps-order-and-drops-what-holds-no-glyph
   (is (= [{:as :versal :glyph-ids [(id-at 2)]}

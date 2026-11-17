@@ -37,7 +37,7 @@
 ;; --- the style space -------------------------------------------------------
 
 (def ^:private points
-  {:plain       {:energy 0.5  :flourish 0.0  :softness 0.5 :warmth 0.5}
+  {:plain       {:energy 0.5  :flourish 0.35 :softness 0.5 :warmth 0.5}
    :elegant     {:energy 0.2  :flourish 0.45 :softness 0.9 :warmth 0.7}
    :caffeinated {:energy 0.95 :flourish 0.75 :softness 0.2 :warmth 0.5}
    :drunken     {:energy 0.4  :flourish 0.65 :softness 0.8 :warmth 0.6}
