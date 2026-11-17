@@ -26,20 +26,24 @@ textarea value --edit--> :ha/draft --frame(t)--> :ha/glyph-frame --> renderer
   finished words, and directions placed on finished phrases.
 - **`:ha/direction`**: how a finished phrase is staged, one shot from a
   closed set (`:line :card :push :pull`) with an energy; see Directing.
-- **`:ha/word-cue`**: what a finished word does, chosen from a closed set
-  (`:pop :launch :shimmer :skitter :quake :melt :rewind :fuse :jitter
-  :glow :wobble`). Lookup order: Half Ahead's glossary, punctuation, the
-  word's shape, a quiet default. All on the device, instantly; a local
-  model can join later behind the same function.
+- **`:ha/word-cue`**: what a finished word does, one of the nineteen
+  gestures (see Gestures and patches). Lookup order: Half Ahead's
+  glossary; elongation (a letter held three times or more, whatever its
+  case, as in "loooove", swells: `:swell` at 0.6 for three, 0.1 more per
+  further letter, up to 1); punctuation; the word's shape; a quiet
+  default. All on the device, instantly; a local model can join later
+  behind the same function.
 - **`:ha/glyph-frame`**: for every letter at time *t*, its position and
   rotation (em units, radians), scale, opacity, glow, and a *wobble*
   amplitude the renderer applies as a jelly deformation of the glyph's
-  own quad. Plus the caret, and the `:ha/camera` (position, target and
-  field of view, in em), so where the frame is seen from is data too.
+  own quad. A pose also carries `:sx :sy :skew :weight :blur :fill` while
+  a gesture has one away from rest (see Gestures and patches). Plus the
+  caret, and the `:ha/camera` (position, target and field of view, in
+  em), so where the frame is seen from is data too.
 
 Invariants, tested: the live letters of every frame spell exactly what is
 in the textarea; every number is finite; everything settles exactly onto
-the layout within 2.5 s of the last event, in every style, and within
+the layout within 5 s of the last event, in every style, and within
 5 s of the latest direction, and within 900 ms of a reveal level being
 reached; reduced motion means no motion and no shots;
 apart from a card, which takes a phrase out of the line on purpose, no
@@ -219,13 +223,14 @@ displacements are scaled, so the effects themselves stay one closed set.
 | Drunken | slow, loose, a lazy sway that dies away | 1.4 | 1.6 | 1.1 | 0.12 em every 900 ms | smooth |
 | Coarse | fast and blunt: three hard steps, no easing | 0.5 | 1.0 | 1.25 | none | 3 |
 
-- **Tempo** multiplies every duration, staggers included. The slowest
-  (elegant) cue still lands within 1.5 × (100 + 1400) = 2250 ms, which is
-  why the settle bound is 2.5 s in every style.
+- **Tempo** multiplies every duration, staggers included. The longest
+  gesture a patch may be is 2400 ms plus a 900 ms stagger, so the slowest
+  (elegant) cue still lands within 1.5 × (2400 + 900) = 4950 ms, which is
+  why the settle bound is 5 s in every style.
 - **Overshoot** is how much of the birth spring's overshoot is kept (0 is a
   smoothstep). Below 1, a cue's progress is eased too.
-- **Amplitude** multiplies displacement (position, rotation, scale), not
-  opacity, glow or wobble.
+- **Amplitude** multiplies displacement (position, rotation, scale,
+  stretch and slant), not opacity, glow, wobble, weight, blur or fill.
 - **Sway** is a drift around the letter's place while it moves, fading as
   (1 - p)² so it is gone before the motion ends.
 - **Steps** holds the motion in that many still poses.
@@ -261,6 +266,95 @@ some systems the browser keeps Ctrl+digit for switching tabs; the picker
 always works.
 
 Every frame names the style in force at its time (`:style`).
+
+## Gestures and patches
+
+What a cue does is a **gesture**, and every gesture is a **patch**: plain
+data (`:ha/patch`) in `halfahead.lab.gestures`, played by the one small
+synthesizer in `halfahead.lab.synth`. `lab.pose` has no motion of its own
+for cues; it asks the synthesizer what a patch does to each letter at
+each instant, then applies the style. The design is in
+`docs/product/score.md`.
+
+A patch is:
+
+- **`:ms`**, how long it moves one letter (50 to 2400);
+- **`:stagger`** (optional): each letter starts `:ms-per-glyph` after the
+  one before, in `:order` (`:forward`, `:reverse` or `:centre-out`),
+  compressed so the last starts within `:max-ms` (900 at most);
+- **`:mods`**, one to twelve modulations. Each moves one **channel** by an
+  `:amount` (at intensity 1; the cue's intensity multiplies it) along a
+  **curve** (`:one :rise :fall :fade :fade2 :arch :arc :rise-sine :spring
+  :spring-fall`), inside a window `:from` to `:to` of the patch's time
+  (the whole of it by default), optionally multiplied by an **oscillator**
+  (`:osc`: a sine, cosine, triangle or noise with a period, phased the
+  same for every letter, by position, or by letter identity for
+  deterministic jitter). `:each :even` or `:odd` limits it to those
+  positions in the word and `:alternate?` flips its sign on odd ones.
+  Modulations on one channel add.
+
+```clojure
+;; :swell: each letter lifts a quarter of an em (at intensity 1), 120 ms
+;; after its neighbour, rising for 0.9 s and settling for 1.5 s
+{:ms 2400
+ :stagger {:ms-per-glyph 120 :max-ms 900}
+ :mods [{:channel :y    :amount 0.25 :curve :rise-sine :from 0     :to 0.375}
+        {:channel :y    :amount 0.25 :curve :fade2     :from 0.375 :to 1}
+        {:channel :glow :amount 0.45 :curve :arch}]}
+```
+
+The nineteen gestures (amounts at intensity 1; "ripple" is the first
+eleven's stagger, 25 ms a letter and at most 100 ms):
+
+| Gesture | ms | Stagger (ms a letter, at most) | Channels | What you see |
+|---|---|---|---|---|
+| `:pop` | 400 | ripple | scale | a quick swell and back |
+| `:launch` | 1400 | ripple | y, z, then wobble | up and forward in an arc, landing with a jelly wobble |
+| `:shimmer` | 1400 | ripple | glow, y | pulses of light and a slight bob, dying away |
+| `:skitter` | 900 | ripple | x | a fast sideways scurry, each letter on its own phase |
+| `:quake` | 1000 | ripple | x, y, glow | each letter circles its place and flashes |
+| `:melt` | 1400 | ripple | y, rx | droops and tips, then swings back |
+| `:rewind` | 700 | ripple, last letter first | rz | a full turn backwards |
+| `:fuse` | 900 | ripple | z, y | arrives from in front, alternately above and below the line |
+| `:jitter` | 1400 | ripple | x, y | a fine nervous tremble |
+| `:glow` | 1000 | ripple | glow | light rises and falls |
+| `:wobble` | 1400 | ripple | wobble | jelly |
+| `:swell` | 2400 | 120, 900 | y, glow | a travelling lift and glow through the letters: a held note |
+| `:bloom` | 1600 | 40, 200 | weight, glow, scale | weight and light rise softly and return |
+| `:slam` | 900 | 15, 60 | scale, z, weight, glow | arrives large from in front, heavy, and bounces |
+| `:hush` | 1400 | 20, 100 | scale, weight, blur, opacity | a touch smaller, lighter, softer, then clears |
+| `:lean` | 1300 | 30, 150 | skew | slants like italics, eases back |
+| `:nod` | 700 | 20, 100 | y, rx | a small dip and return |
+| `:shiver` | 1100 | none | x, blur | a fine fast tremble with a little blur |
+| `:draw` | 500 | none | fill, glow | ink wipes in left to right |
+
+The first eleven are the lab's original hand-written effects, transcribed;
+`gestures_test` keeps the old functions as a reference and checks that
+each patch gives the same deltas to within 1e-9 (hypothesis H1 of
+`docs/product/lab-notebook.md`). The glossary has every gesture perform
+its own name.
+
+**The gate is `synth/problems`.** A patch is accepted only when
+`(synth/problems patch)` is `[]`: it is a valid `:ha/patch`, every
+channel is back at rest as it ends, and no channel can leave its bounds
+(half an em sideways, never fully transparent, and so on) for any letter
+at any instant. The tests hold every patch in `lab.gestures` to that, and
+to the time cap: `(synth/total-ms patch 40)` × 1.5, the slowest style's
+tempo, is at most 5000 ms.
+
+**To add a gesture:** an order adds its name to `:ha/word-effect` in the
+schema; write its patch in `halfahead.lab.gestures`; give it its own name
+in the glossary; add a row above. Nothing in `lab.pose` changes, and the
+tests refuse a patch with problems or without a name.
+
+**The new channels are data for now.** `:sx` and `:sy` (stretch, resting
+at 1, never below 0), `:skew` (slant, 0), `:weight` (0, within -1 to 1),
+`:blur` (0, within 0 to 1) and `:fill` (how much is inked, 1, within 0 to
+1) reach the frame, each present in a pose only while it is away from
+rest, so a frame without them is the frame it always was. The reference
+renderer does not draw them yet (a later order), so `:bloom`, `:hush`,
+`:lean` and `:draw` show only their glow, scale and opacity for now. A
+`:tint` is dropped: nothing gives a letter an ink yet.
 
 ## Directing
 
@@ -465,7 +559,13 @@ then slowly (450 ms a key) on a fresh page with the clock held, checking
 that Auto reads caffeinated and then elegant. On one more page it picks
 each explicit style, with the picker or with Ctrl+4 and Ctrl+6, checks
 that the textarea keeps the focus, and types "we shipped it " to check
-that the frames are performed in that style. On a `?debug` page it checks
+that the frames are performed in that style. On a `?debug` page in the
+Plain style it types "I loooove it ", checks the overlay for `loooove ->
+swell 0.7 (elongation)`, and reads the frame on every animation frame for
+6 s: some letter of "loooove" lifts; none lifts more than 0.25 × 0.7 em;
+each letter's highest sampled lift comes no earlier than that of the
+letter before; and from 5.5 s on every letter is at rest (`swell.png`,
+about a second in). On a `?debug` page it checks
 that Sound starts off (overlay `sound off`) and that typing "crash " then
 logs nothing; clicks Sound on (the textarea keeps the focus), types
 "crash " and checks that exactly one sound, a `quake` cue, was logged with
@@ -482,7 +582,7 @@ types "is it? " and checks that a `:push` brought the camera at least 25%
 nearer its target (`push.png`). Finally it repeats with reduced motion (on every frame the camera target
 is on the current line and drawn at the canvas centre), asserting on
 `window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
-`settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `card.png`, `push.png`, `fuse.png` (taken at the
+`settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in

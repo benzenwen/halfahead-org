@@ -25,13 +25,36 @@
     (is (= {:effect :launch :intensity 0.9 :source :glossary}
            (cue "deploy" "?")))))
 
-(deftest punctuation-second
+(deftest elongation-second
+  (is (= {:word "loooove" :effect :swell :intensity 0.7 :source :elongation}
+         (cues/word-cue "loooove" " ")))
+  (testing "the longer the letter is held, the stronger, up to 1"
+    (is (= [0.6 0.7 0.8 0.9 1.0 1.0 1.0]
+           (map #(:intensity (cues/word-cue (str "s" (apply str (repeat % "o"))) " "))
+                (range 3 10)))))
+  (testing "a letter twice is spelling, not holding"
+    (is (= :default (:source (cues/word-cue "look" " "))))
+    (is (= :default (:source (cues/word-cue "bookkeeper" " ")))))
+  (testing "case does not break a run"
+    (is (= {:effect :swell :intensity 0.6 :source :elongation} (cue "OoO" " "))))
+  (testing "only letters are held"
+    (is (= {:effect :pop :intensity 0.4 :source :shape} (cue "1000" " ")))
+    (is (= :default (:source (cues/word-cue "---" " "))))
+    (is (= :punctuation (:source (cues/word-cue "wait..." "!")))))
+  (testing "the glossary beats elongation"
+    (with-redefs [glossary/entries {"brrr" {:effect :shiver :intensity 0.9}}]
+      (is (= {:effect :shiver :intensity 0.9 :source :glossary} (cue "Brrr" " ")))))
+  (testing "elongation beats punctuation and shape"
+    (is (= {:effect :swell :intensity 0.7 :source :elongation} (cue "loooove" "!")))
+    (is (= {:effect :swell :intensity 0.7 :source :elongation} (cue "NOOOO" " ")))))
+
+(deftest punctuation-third
   (is (= {:effect :quake :intensity 0.7 :source :punctuation} (cue "really" "!")))
   (is (= {:effect :wobble :intensity 0.5 :source :punctuation} (cue "why" "?")))
   (testing "punctuation beats shape"
     (is (= :punctuation (:source (cues/word-cue "NOPE" "!"))))))
 
-(deftest shape-third
+(deftest shape-fourth
   (is (= {:effect :launch :intensity 0.8 :source :shape} (cue "NOPE" " ")))
   (is (= {:effect :shimmer :intensity 0.5 :source :shape}
          (cue "internationalisation" " ")))

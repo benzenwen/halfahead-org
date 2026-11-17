@@ -3,10 +3,12 @@
   draft and a time, where every letter stands, how it is turned, how big,
   bright and wobbly it is. Every frame is computed from scratch, never
   simulated, so a renderer may ask for any moment in any order, and every
-  motion ends exactly on the layout within 2500 ms of its cause, in every
-  style (plain births take 400 ms, cues 1500 ms, ghosts 600 ms; a style
-  stretches or squeezes the first two by its tempo, see lab.style), and
-  within 5000 ms of a direction (see lab.director) for its shot. Apart from
+  motion ends exactly on the layout within 5000 ms of its cause, in every
+  style (plain births take 400 ms, ghosts 600 ms, and a cue as long as its
+  gesture's patch plays, at most 2400 ms plus a 900 ms stagger, see
+  lab.gestures; a style stretches or squeezes births and cues by its tempo,
+  at most 1.5, see lab.style), and within 5000 ms of a direction (see
+  lab.director) for its shot. Apart from
   a :card, which takes a phrase out of the line on purpose, no letter ever
   strays more than half an em sideways from its place, so a word's motion
   stays out of its neighbours' room: effects that gather or scatter use
@@ -24,8 +26,10 @@
   so reaching a level never jerks a letter already moving; what a level
   adds (the peel, the crawl) is eased in and settled within 900 ms of it."
   (:require [clojure.string :as str]
+            [halfahead.lab.gestures :as gestures]
             [halfahead.lab.reveal :as reveal]
-            [halfahead.lab.style :as style]))
+            [halfahead.lab.style :as style]
+            [halfahead.lab.synth :as synth]))
 
 ;; --- arithmetic --------------------------------------------------------------
 ;; Math/* reads the same in Clojure and ClojureScript, so no reader
@@ -144,7 +148,7 @@
       (* (Math/floor (/ (* v steps) d)) (/ (double d) steps))
       v)))
 
-(def ^:private displacements #{:x :y :z :rx :ry :rz :scale})
+(def ^:private displacements #{:x :y :z :rx :ry :rz :scale :sx :sy :skew})
 
 (defn- amplified [delta amplitude]
   (reduce-kv (fn [m k v] (assoc m k (if (displacements k) (* amplitude v) v)))
@@ -196,71 +200,8 @@
                     :opacity (- (clamp 0.0 1.0 (/ a 90.0)) 1.0)}
                    ps age dur id)))))
 
-(def ^:private effect-ms
-  "How long each effect moves a glyph; none exceeds 1400 ms."
-  {:pop 400 :launch 1400 :shimmer 1400 :skitter 900 :quake 1000 :melt 1400
-   :rewind 700 :fuse 900 :jitter 1400 :glow 1000 :wobble 1400})
-
-(defn- effect-delta
-  "The delta for one effect at local time u (0 <= u < its duration), at
-  intensity k, for the glyph at position pos in the cue."
-  [effect u k id pos]
-  (let [d (double (effect-ms effect))
-        p (/ u d)
-        fade (- 1.0 p)]
-    (case effect
-      :pop {:scale (* 0.35 k (sin (* Math/PI p)))}
-
-      :launch (if (< u 700)
-                (let [q (/ u 700.0)
-                      arc (* 4.0 q (- 1.0 q))]
-                  {:y (* 1.2 k arc) :z (* 1.5 k arc)})
-                (let [e (- 1.0 (/ (- u 700.0) 700.0))]
-                  {:wobble (* k e e)}))
-
-      :shimmer {:glow (* 0.8 k fade fade (Math/abs (sin (/ (* tau u) 350.0))))
-                :y (* 0.05 k fade (sin (/ (* tau u) 700.0)))}
-
-      :skitter {:x (* 0.12 k fade fade (sin (+ (/ (* tau u) 90.0) (phase id 1))))}
-
-      :quake (let [a (+ (/ (* tau u) 70.0) (phase id 2))]
-               {:x (* 0.15 k fade (sin a))
-                :y (* 0.15 k fade (cos a))
-                :glow (* k (max 0.0 (- 1.0 (/ u 600.0))))})
-
-      :melt (let [droop (if (< u 600)
-                          (sin (* 0.5 Math/PI (/ u 600.0)))
-                          (let [q (/ (- u 600.0) 800.0)]
-                            (* (- 1.0 q) (- 1.0 q) (cos (* 3.0 Math/PI q)))))]
-              {:y (* -0.4 k droop) :rx (* 0.6 k droop)})
-
-      :rewind {:rz (* (- tau) k (- 1.0 (smoothstep p)))}
-
-      ;; the letters come in from a staggered layer in front of the line,
-      ;; alternately above and below it; nothing moves sideways
-      :fuse (let [apart (* k (- 1.0 (smoothstep p)))]
-              {:z (* 0.6 apart (if (even? pos) 1.0 0.5))
-               :y (* 0.2 apart (if (even? pos) 1.0 -1.0))})
-
-      :jitter {:x (* 0.04 k fade (sin (+ (/ (* tau u) 60.0) (phase id 3))))
-               :y (* 0.04 k fade (sin (+ (/ (* tau u) 75.0) (phase id 4))))}
-
-      :glow {:glow (* 0.9 k (sin (* Math/PI p)))}
-
-      :wobble {:wobble (* k fade fade)})))
-
-(defn- stagger-step
-  "25 ms between neighbours, compressed so the last glyph of any cue starts
-  within 100 ms: 100 + the longest effect (1400) is the 1500 ms settle."
-  [n]
-  (if (> n 5) (/ 100.0 (dec n)) 25.0))
-
 (def ^:private slowest-tempo
   (reduce max (map (comp :tempo style/params) style/styles)))
-
-(def ^:private longest-cue-ms
-  "The last glyph of a cue starts within 100 ms and moves at most 1400."
-  (* slowest-tempo (+ 100 (reduce max (vals effect-ms)))))
 
 (defn- cue-ms
   "The plain effect time for a styled cue u real ms into a glyph's part:
@@ -274,27 +215,30 @@
       v)))
 
 (defn- cue-deltas
-  "id -> [delta ...] for every glyph a cue is moving at time t, each cue
-  performed in the style style-of gives for its firing time."
+  "id -> [delta ...] for every glyph a cue is moving at time t: the cue's
+  gesture played by lab.synth, each cue performed in the style style-of
+  gives for its firing time, which also stretches the stagger."
   [cues t style-of]
   (reduce
    (fn [acc {:keys [glyph-ids cue at-ms]}]
-     (let [since (- t (double at-ms))]
-       (if (or (neg? since) (>= since longest-cue-ms))
+     (let [since (- t (double at-ms))
+           {:keys [effect intensity]} cue
+           patch (gestures/patch effect)
+           n (count glyph-ids)
+           total (synth/total-ms patch n)]
+       ;; the slowest tempo first: finding the style in force (for :auto, a
+       ;; reading of the rhythm) is only worth it for a cue that may be live
+       (if (or (neg? since) (>= since (* slowest-tempo total)))
          acc
-         (let [{:keys [effect intensity]} cue
-               {:keys [tempo] :as ps} (style/params (style-of at-ms))
-               n (count glyph-ids)
-               step (stagger-step n)
-               d (effect-ms effect)
-               dur (* d tempo)]
+         (let [{:keys [tempo] :as ps} (style/params (style-of at-ms))
+               ms (:ms patch)
+               dur (* ms tempo)]
            (reduce
             (fn [acc [i id]]
-              (let [pos (if (= :rewind effect) (- n 1 i) i)
-                    u (- since (* step tempo pos))]
+              (let [u (- since (* tempo (synth/start-ms patch i n)))]
                 (if (and (>= u 0) (< u dur))
                   (update acc id (fnil into [])
-                          (performed (effect-delta effect (cue-ms u d ps) (double intensity) id i)
+                          (performed (synth/delta patch (cue-ms u ms ps) i n id (double intensity))
                                      ps u dur id))
                   acc)))
             acc
@@ -367,8 +311,32 @@
   than a space on either side, however many cues overlap on it."
   0.5)
 
+(def ^:private score-channels
+  "channel -> [rest lo hi] for the channels that came with the score. A
+  pose carries one only while it is away from rest, so a frame in which
+  none is moved is the frame it always was."
+  {:sx [1.0 0.0 ##Inf]
+   :sy [1.0 0.0 ##Inf]
+   :skew [0.0 ##-Inf ##Inf]
+   :weight [0.0 -1.0 1.0]
+   :blur [0.0 0.0 1.0]
+   :fill [1.0 0.0 1.0]})
+
+(defn- off-rest
+  "pose, whose score channels hold summed deltas so far, with each at its
+  value (rest plus the delta, kept in range) or absent when that is rest."
+  [pose]
+  (reduce-kv (fn [p channel [at-rest lo hi]]
+               (if-let [delta (get p channel)]
+                 (let [v (clamp lo hi (+ at-rest delta))]
+                   (if (== v at-rest) (dissoc p channel) (assoc p channel v)))
+                 p))
+             pose
+             score-channels))
+
 (defn- apply-deltas
-  "base plus every delta, with x held within x-reach of the base x."
+  "base plus every delta, with x held within x-reach of the base x and
+  every other channel within its range."
   [{base-x :x :as base} deltas]
   (if (empty? deltas)
     base
@@ -377,7 +345,11 @@
         (update :scale #(max 0.0 %))
         (update :opacity #(clamp 0.0 1.0 %))
         (update :glow #(clamp 0.0 1.0 %))
-        (update :wobble #(clamp 0.0 1.0 %)))))
+        (update :wobble #(clamp 0.0 1.0 %))
+        off-rest
+        ;; a tint mixes towards the letter's ink, and nothing gives a
+        ;; letter an ink yet
+        (dissoc :tint))))
 
 (def ^:private ember-ms 600)
 
