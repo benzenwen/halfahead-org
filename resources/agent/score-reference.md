@@ -68,8 +68,9 @@ channels of each letter along curves:
 
 - `ms`: 50 to 2400. `stagger`: each letter starts `ms-per-glyph` after
   the one before (`order`: `forward`, `reverse`, `centre-out`).
-- `channel` and the most a patch may move it: `x` ±0.5 em, `y` ±2 em,
-  `z` ±3 em (toward the reader is +), `rx` `ry` `rz` ±6.3 radians,
+- `channel` and the most a patch may move it: `x` ±0.5 em (right is +),
+  `y` ±2 em (up is +, so a sag is negative), `z` ±3 em (toward the reader
+  is +), `rx` `ry` `rz` ±6.3 radians,
   `scale` `sx` `sy` −0.9 to +3, `skew` ±1, `weight` ±1, `blur` 0 to 1,
   `opacity` −0.95 to 0, `glow` 0 to 1, `wobble` 0 to 1, `fill` −1 to 0.
 - `curve` over the mod's window: `one` (1), `rise` (0→1), `fall` (1→0),

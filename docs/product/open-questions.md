@@ -38,6 +38,7 @@ with; the cheap ones can flip in one order.*
 | Q26 | Does a sentence with an ellipsis land? | No: "So... yes." and "I don't know... maybe" get no landing | Trailing off is the opposite of landing; restraint when unsure | Low |
 | Q27 | Dress before the board | With the cap as it is, the queue runs dress (illumination) before the board, and the flick last | You asked for beautiful first; the board is power, the flick needs both | Order only |
 | Q28 | How bright is the swell's glow? | 0.22 at full intensity, half the first value | In the first screenshot the halo around "loooove" read as an alarm; the Music app's glow is soft | One number in `lab.gestures` |
+| Q29 | Which way is up, for an agent? | The reference now says `y` up is +, `x` right is + | In the H4 run an agent's "sag" went up because the page never said | Low |
 
 ## Still yours from before
 
