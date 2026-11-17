@@ -1,6 +1,6 @@
 {:id "0052-lab-dress"
  :title "Lab dress: what a mark leaves behind (versal, rubric, gilt, strong, whisper), and gold that catches the pointer"
- :lupa/deps #{"0051-lab-board"}
+ :lupa/deps #{"0050-lab-reading"}
  :lupa/area :lab
  :lupa/risk :medium
  :goal "docs/product/score.md, 'Dress' and 'Illumination, now', and

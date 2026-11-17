@@ -12,6 +12,7 @@
         head longer; a long message does not hold the reader and shows only
         its strongest marks. A pace control sets words per minute."
  :scope ["src/halfahead/lab/reading.cljc" "test/halfahead/lab/reading_test.cljc"
+         "src/halfahead/lab/pace.cljc" "test/halfahead/lab/pace_test.cljc"
          "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
          "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
          "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
@@ -19,6 +20,18 @@
  :design "Schema (the foreman's; do not edit): :ha/reading (entries carry
           :ms), :ha/placed-cue's optional :tempo, :ha/word-cue's :source
           :score, :ha/glyph-pose's optional :fill.
+          lab.pace (measured in order 0046: under the 5 s cap a 150 wpm
+          reader gets no reading head for anything over about ten words,
+          so the slowest readers got the least pacing): (reading score
+          pace opts) takes :cap-ms in opts, default 5000, everything as
+          now at the default; a reading is paced when its stops sum to at
+          most cap - 1000, and entries are granted up to cap. The schema
+          now allows :duration-ms up to 30000. The five-second rule is for
+          performances that start by themselves; a read-back is asked
+          for and Escape stops it, so the lab passes :cap-ms 30000. Add
+          tests: at 150 wpm with :cap-ms 30000 the acceptance sentence is
+          paced; the default is unchanged; the H6 properties hold with cap
+          in place of 5000 for caps from 5000 to 30000.
           halfahead.lab.reading (.cljc, pure): what a reading asks of the
           frame.
           (natural-ms point n effect) -> how long a gesture lasts
@@ -30,8 +43,8 @@
             message: s is (score/from-text text point); each mark's
             gesture is (marks/gesture-for point mark), and a mark the
             style does not perform is left out of the score before
-            pacing; r is (pace/reading s pace {:ms-of ...natural-ms of
-            the mark's gesture over its letters...}).
+            pacing; r is (pace/reading s pace {:cap-ms 30000 :ms-of
+            ...natural-ms of the mark's gesture over its letters...}).
           (cues plan glyphs t0) -> the :ha/placed-cue for each entry of
             the reading: :glyph-ids the glyphs whose characters lie in the
             mark's span (a glyph's offset is the sum of the UTF-16 lengths
@@ -89,8 +102,9 @@
           at most one fraction, a dim suffix); (b) the boundary agrees
           with headAt(that frame's time) within 1.5 characters; (c) no
           letter of 'loooove' lifts before the head reaches the word, and
-          at least one sampled frame after shows it lifted; (d) 5.5 s
-          after the start no pose has a :fill and every letter is at rest;
+          at least one sampled frame after shows it lifted; (d) once
+          reading() is nil again (wait on the data) no pose has a :fill,
+          and 5.5 s later every letter is at rest;
           (e) with the pace at 400 the reading's durationMs is smaller
           than at 150; (f) Escape during a reading leaves no :fill in the
           next frame. Screenshot out/lab/reading.png taken about 40% of
@@ -105,8 +119,9 @@
    Plain and in Elegant, which marks performed, when, and with what tempo"]
  :non-goals
  ["No dress, no A/B flick, no board (later orders); no model calls"
-  "No change to lab.pace, lab.score, lab.marks, lab.synth, gestures, the
-   renderer, the director, reveal or the stage; do not edit the schema"
+  "No change to lab.score, lab.marks, lab.synth, gestures, the renderer,
+   the director, reveal or the stage, and none to lab.pace beyond :cap-ms;
+   do not edit the schema"
   "Do not run `bb e2e` or `bb play`"]
  :context ["docs/product/score.md" "docs/product/lab-notebook.md"
            "src/halfahead/schema.cljc" "src/halfahead/lab/pace.cljc"

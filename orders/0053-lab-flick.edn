@@ -1,6 +1,6 @@
 {:id "0053-lab-flick"
  :title "Lab flick: 'better like this, or like this?' reads your line back two ways, and your style moves toward the one you pick"
- :lupa/deps #{"0052-lab-dress"}
+ :lupa/deps #{"0051-lab-board" "0052-lab-dress"}
  :lupa/area :lab
  :lupa/risk :medium
  :goal "docs/product/score.md, 'How people and agents drive it', and the

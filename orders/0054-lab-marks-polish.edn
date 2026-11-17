@@ -3,6 +3,14 @@
  :lupa/deps #{"0044-lab-marks"}
  :lupa/area :lab
  :lupa/risk :low
+ ;; Respecced 2026-11-17 after two REWORK verdicts. The reviewer was right
+ ;; twice: no test would fail if the threshold's epsilon were deleted, and
+ ;; the foreman's arithmetic in this order was wrong (at Caffeinated the
+ ;; threshold computes to 0.29999999999999993, so 0.3 already performed;
+ ;; the cases that round up are flourish 0.6 with amount 0.42 and 0.7
+ ;; with 0.34). It also showed that the ellipsis rule as first written
+ ;; made a landing span a trail-off ('So... yes'), which the design below
+ ;; now rules out.
  :goal "Gaps in the foreman's spec for order 0044, found by its reviewer
         and by arithmetic. (1) gesture-for scales a mark's intensity by the
         style's energy, but energy already slows and shrinks motion
@@ -13,8 +21,9 @@
         'WWW', 'III' and 'XXX'. (3) An ellipsis ends a sentence, so 'I
         don't know... maybe' lands on 'maybe', though trailing off is the
         opposite of landing. (4) A held letter written with combining
-        marks is missed. (5) The performing threshold is 0.30000000000000004
-        at Caffeinated, so a mark of amount exactly 0.3 does not perform."
+        marks is missed. (5) The performing threshold 0.9 - 0.8 flourish
+        can round up (0.42000000000000004 at flourish 0.6), so a mark of
+        amount exactly on it (0.42) does not perform."
  :scope ["src/halfahead/lab/marks.cljc" "test/halfahead/lab/marks_test.cljc"]
  :design "In halfahead.lab.marks only:
           - gesture-for: intensity is the mark's amount, kept in [0.1 1].
@@ -29,16 +38,28 @@
             address), or when the whole word is the one repeated letter
             ('www', 'III', 'XXX', 'zzz' are not holds; 'sooo' and 'nooo'
             are).
-          - read, landing: an ellipsis ('…' or three or more full stops)
-            does not end a sentence for the purpose of :land: text after
-            it belongs to the same sentence, and a message that ends with
-            an ellipsis has no :land. The ellipsis tell itself (:hold on
-            the word before it) is unchanged.
+          - read, landing: a last sentence that contains an ellipsis
+            ('…' or three or more full stops) anywhere, inside it or at
+            its end, has no :land: 'I don't know... maybe', 'It works.
+            So... yes.' and 'Done...' do not land. For this purpose an
+            ellipsis does not end a sentence (the text after it is the
+            same sentence), unless it is followed by '?' or '!'. The
+            ellipsis tell itself (:hold on the word before it) is
+            unchanged, and lists (:build) still stop at an ellipsis. Say
+            in a comment at the call site why landing and builds see
+            sentences differently.
           Update the tests that pin the old intensity; add an example for
           each change, including that the acceptance sentence of 0044
           still reads exactly as before; keep every property."
  :acceptance
  ["marks tests updated and extended as in the design, on both hosts"
+  "The epsilon is pinned: a mark of amount 0.42 performs at flourish 0.6
+   and one of 0.34 at flourish 0.7 (both fail without the 1e-9), and a
+   property over flourish f/100 for f from 0 to 100 asserts that a mark
+   whose amount is the decimal 0.9 - 0.8 f/100 (computed exactly, in
+   thousandths, then as a double) performs"
+  "(read \"It works. So... yes.\") has a :hold on 'So' and no :land;
+   (read \"one. two...\\nthree\") has no :land"
   "(gesture-for (style/point :elegant) {:span [0 7] :kind :hold :amount
    0.7}) is {:effect :swell :intensity 0.7}"
   "`bb test` stays green"]

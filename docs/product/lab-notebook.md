@@ -29,12 +29,12 @@ slow. In typed text the held syllable is elongation: "loooove".
 
 | # | hypothesis | test | result |
 |---|---|---|---|
-| H1 | One small synthesizer (≤ 10 curves, 4 waves, windows, stagger) can express every effect the lab has | Re-express the 11 effects as patches; deltas must match the hand-written functions at sampled times | pending |
+| H1 | One small synthesizer (≤ 10 curves, 4 waves, windows, stagger) can express every effect the lab has | Re-express the 11 effects as patches; deltas must match the hand-written functions at sampled times | **Holds**: all 11 match within 1e-9 (below) |
 | H2 | The held-syllable swell reads as subtle and reserved in typed text when tied to elongation | Build `:swell` from the measurements; property tests on its bounds; Ben's eyes | pending |
 | H3 | Weight, focus, ink, stretch, slant and fill cost nothing extra to draw | Add them as per-instance attributes of the one instanced mesh; compare frame times before and after | pending |
 | H4 | An agent can write valid, varied scores from one page of reference | N prompts through the `claude` CLI; rate of schema-valid scores on the first try; spread of marks across moods | pending |
 | H5 | A style can be learned from about a dozen flicks | Simulate readers with hidden style points and noisy choices; error against number of flicks | **Holds for a careful chooser, fails for a noisy one** (below) |
-| H6 | Pacing by the reader's beat keeps every performance inside reading time and the 5 s cap | Properties over generated scores and paces from 120 to 600 words a minute | pending |
+| H6 | Pacing by the reader's beat keeps every performance inside reading time and the 5 s cap | Properties over generated scores and paces from 100 to 800 words a minute | **Holds, and shows the cap starves slow readers** (below) |
 | H7 | Dress (versal, rubric, gilt) stays readable on paper and on the dark stage | Contrast of each ink against both backgrounds ≥ 4.5:1, computed; screenshots | pending |
 
 ## Results
@@ -85,4 +85,54 @@ What to do about it (not yet built):
   staircase). Worth an order once real flicks exist to tune it against.
 - Percentiles are nearest rank; each reader's seed comes from the
   experiment's own generator (a Lehmer generator, so both hosts agree).
+
+### H1: one synthesizer for every effect (orders 0042 and 0045, 2026-11-17)
+
+The eleven hand-written effects (pop, launch, shimmer, skitter, quake,
+melt, rewind, fuse, jitter, glow, wobble) were rewritten as patches: data
+for `lab.synth`, using 6 of its 10 curves (arc, arch, fade, fade2, fall,
+rise-sine), sine and cosine waves phased per letter, windows, `:each`,
+`:alternate?`, `:abs?` and two stagger orders (all nineteen gestures
+together use 8 curves). The old functions were
+moved into the test as the reference. Every patch matches its old
+function within 1e-9 on every channel, on a 7 ms grid over the effect's
+length, for positions 0 to 5, three glyph ids and two intensities. No
+exceptions. The hand-written code is deleted; `lab.pose` now plays
+patches. Eight new gestures were then added as data alone.
+
+What it cost to get here: the synthesizer's safety check was rejected by
+review twice, both times for flaws in the foreman's design. The check now
+covers every letter (per-letter oscillators are bounded by their
+envelope, not sampled), and springs fade their residual so they land
+exactly. A patch with no problems cannot leave its bounds or end off
+rest, for any letter.
+
+### H6: pacing by the reader's beat (order 0046, 2026-11-17)
+
+Properties over generated scores and paces from 100 to 800 words a
+minute all hold: the reading is valid, nothing passes the cap, stops
+cover the words in order, a faster pace never makes a word later, a
+stronger hold never shortens its word's stay.
+
+For "I loooove this (honestly). But maybe not. Ship it!" (nine words):
+
+| pace | reading | lasts | longest message that still gets a reading head (five-letter words, no marks) |
+|---|---|---|---|
+| 150 wpm | highlights only: no head | 2.7 s | 10 words |
+| 250 wpm | paced, the head takes 2.76 s | 3.9 s | 16 words |
+| 400 wpm | paced, the head takes 1.73 s | 3.0 s | 26 words |
+
+At 250 wpm the head stays 240 ms on an ordinary word, 408 ms on
+"loooove" (the hold stretches it by 1.7), 432 ms on "(honestly)." and
+360 ms on words that end a sentence.
+
+What it says: the five-second cap gives the slowest readers the least
+pacing. At 150 wpm even this nine-word sentence gets no reading head.
+
+What was done about it (choice Q25): the cap is for motion that starts
+by itself. A read-back the writer asks for, and can stop with Escape,
+may run to 30 s (order 0050). Messages that arrive unasked keep the 5 s
+cap, so for those a slow reader still gets highlights only; whether
+arrival should instead wait for a tap ("read it to me") is an open
+product question.
 

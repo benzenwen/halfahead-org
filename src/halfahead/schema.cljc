@@ -404,10 +404,13 @@
     ;; reaches each word, and when each mark that performs begins and how
     ;; long it is given. Marks
     ;; that do not perform (a long message shows only its strongest) are
-    ;; absent from :entries.
+    ;; absent from :entries. A reading that starts by itself (a message
+    ;; arriving) lasts at most max-performance-ms; one a person asked for
+    ;; and can stop (the lab's read-back, Escape) may run to 30 s, since
+    ;; the five-second rule is about motion nobody requested.
     :ha/reading
     [:map {:closed true}
-     [:duration-ms [:int {:min 0 :max max-performance-ms}]]
+     [:duration-ms [:int {:min 0 :max 30000}]]
      [:beat-ms [:and :ha/finite [:> 0]]]
      [:stops [:vector [:map {:closed true}
                        [:span :ha/span]

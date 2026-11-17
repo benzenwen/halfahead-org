@@ -34,6 +34,9 @@ with; the cheap ones can flip in one order.*
 | Q22 | `:draw` (ink wiping in) | Every letter wipes at once, no stagger | A staggered wipe needs letters to wait unlit before their turn, which a patch cannot say yet; the reading head does the real left-to-right wipe | Low: a "before my turn" state for patches |
 | Q23 | Calm styles and intensity | A mark's intensity is its amount; the style's energy acts only through tempo and amplitude (order 0054) | As first built, energy counted twice and Elegant lifted a held word about 0.06 em, a third of the Music app's lift | One line in `lab.marks` |
 | Q24 | Squash or merge? | See Q12; also reported to Lupa as a finding | — | — |
+| Q25 | Does the 5 s cap apply to a read-back? | No: a reading someone asks for and can stop with Escape may run to 30 s; anything that starts by itself keeps the cap | H6 measured that under the cap a 150 wpm reader gets no reading head beyond ten words; WCAG 2.2.2 is about motion nobody requested | Charter wording is yours: "no flourish holds a reader longer than 5 s" |
+| Q26 | Does a sentence with an ellipsis land? | No: "So... yes." and "I don't know... maybe" get no landing | Trailing off is the opposite of landing; restraint when unsure | Low |
+| Q27 | Dress before the board | With the cap as it is, the queue runs dress (illumination) before the board, and the flick last | You asked for beautiful first; the board is power, the flick needs both | Order only |
 
 ## Still yours from before
 

@@ -25,6 +25,13 @@ write it up when you want it.
   deploys nothing. Until now the only gate ran inside the foreman's
   container.
 - Workflow files can be pushed by the foreman's GitHub access (tested).
+- `bb site` assembles the site into `out/site`: a one-screen landing page
+  and the lab as an optimized release build, nothing of the app. `bb
+  site:e2e` runs the lab's 25 browser checks against that release build
+  (they pass).
+- `.github/workflows/pages.yml` builds that site and publishes it to
+  GitHub Pages when main changes. It is switched off: it does nothing
+  until the repository variable `PAGES` is `on`.
 
 ## What you need to give, for step 1
 
@@ -45,16 +52,18 @@ write it up when you want it.
      only into integration branches."
    - "Anything that would deploy outside GitHub Pages, send a message to
      a person, or spend money outside the agent engine."
-3. **Repository setting**: Settings → Pages → Build and deployment →
-   Source: **GitHub Actions**.
+3. **Two repository settings**: Settings → Pages → Build and deployment →
+   Source: **GitHub Actions**; and Settings → Secrets and variables →
+   Actions → Variables → New repository variable: `PAGES` = `on`. That
+   variable is also the off switch: set it to anything else and deploys
+   stop.
 4. **The domain**: Settings → Pages → Custom domain: `halfahead.org`,
    and at your DNS provider the four A records GitHub documents for an
    apex domain (plus AAAA if you want IPv6), or a CNAME for `www`. Tick
    "Enforce HTTPS" once the certificate is issued.
 
-After 1 to 3 the foreman adds a deploy workflow (build the lab, publish
-the landing page and `/lab/`), merges, and checks the live page in a
-browser. The domain (4) can follow; until then the site is at
+After 1 to 3 the foreman merges (the deploy workflow is already written
+and switched off) and checks the live page in a browser. The domain (4) can follow; until then the site is at
 `benzenwen.github.io/halfahead-org`.
 
 ## What stays as it is
