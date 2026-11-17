@@ -1,0 +1,74 @@
+{:id "0038-lab-reveal"
+ :title "Lab reveal levels: it starts like a normal chat box, then the house lights go down"
+ :lupa/deps #{"0037-lab-sound"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Experiment 1 of Ben's product outline: start with a familiar,
+        Slack-like box and progressively reveal what it can do. Four reveal
+        levels, data in every frame: 0 flat and familiar (paper background,
+        ink text, frontal camera, no floor, only the gentlest letter pop);
+        1 small in-line word effects (the iMessage level); 2 depth (letters
+        lift into z, the floor fades in, the house lights go down to the
+        dark stage); 3 the full stage (shots and the crawl). Levels advance
+        by use or by a deliberate 'wand' gesture, and the transition itself
+        is the theatrical moment."
+ :scope ["src/halfahead/lab/reveal.cljc" "test/halfahead/lab/reveal_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+         "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (added by the foreman; do not edit): optional :reveal on
+          :ha/glyph-frame, {:level 0..3 :lights unit}; :lights 0 is house
+          lights up (paper), 1 is the dark stage.
+          halfahead.lab.reveal (.cljc, pure):
+            (levels draft t opts) -> the times each level was reached, from
+              opts {:start-level 0..3 :wands [t ...]} and the draft: level
+              1 when 3 words have been finished; level 2 when 4 non-default
+              cues (glossary, punctuation or shape) have fired; level 3 when
+              a phrase has been directed with a non-line shot (the director
+              runs from level 2 on, so its first spectacle is what opens
+              level 3). Each wand time raises the level by one at that time.
+              Levels never go down; :start-level starts there at t 0.
+            (state draft t opts) -> {:level n :lights u :entered-ms t0} with
+              :lights easing from the previous level's value over 900 ms
+              (levels 0-1: 0; 2-3: 1).
+            (flick? samples) -> true for a pointer sample sequence [{:x :y
+              :t}] that moves at least 600 px in under 250 ms (the wand
+              gesture by mouse).
+          pose/frame (opts gain :reveal-opts): the frame carries :reveal;
+          at level 0 every glyph only gets a birth pop at a third of its
+          amplitude, z 0, no cues performed, camera frontal (pitch 0); at
+          level 1 cues perform in-plane only (z 0, no rotations beyond rz,
+          everything within the half-em x bound); at level 2 cues perform
+          fully, no shots; at level 3 everything, including shots and the
+          crawl. On entering level 2, every live glyph gets a one-off peel:
+          a z lift of 0.6 em that settles over 700 ms (the letters coming
+          off the flat page). All existing invariants hold at every level;
+          reduced motion keeps levels advancing but performs no transitions.
+          render.cljs: background, text colour and floor from :reveal
+          (paper #f6f1e7 and ink at :lights 0, the dark stage at 1,
+          interpolated; floor opacity follows level >= 2 and :lights).
+          main.cljs: ?reveal=N sets :start-level (default 0); Ctrl+. and a
+          mouse flick over the stage (flick?) are wands; the director runs
+          only from level 2. The debug overlay shows the level.
+          e2e/lab.mjs: from /lab/: level 0 and a light background (sample
+          the canvas pixel colour); after 3 words, level 1; after
+          'deploy crash merge finally ' level 2 and a dark background 1.5 s
+          later; after 'WHAT A DAY! ' level 3 with a card performed; with
+          ?reveal=3 the existing steps run unchanged (update them to use
+          ?reveal=3); Ctrl+. raises the level; a synthesized flick does
+          too; screenshots out/lab/reveal-0.png ... reveal-3.png."
+ :acceptance
+ ["reveal tests: levels from usage, wands, start level, monotonicity,
+   light easing, flick detection (fast and slow gestures)"
+  "Property: at every level the existing frame invariants hold (valid,
+   live chars spell the draft, settling, reduced motion)"
+  "`bb lab:e2e` passes with the reveal steps and all existing steps (now
+   at ?reveal=3); `bb test` stays green"]
+ :non-goals
+ ["No changes to cues, styles, the director's rules, or sound"
+  "Do not edit the schema; do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/halfahead-org-product-outline.md"
+           "src/halfahead/schema.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+           "src/halfahead/lab/director.cljc" "e2e/lab.mjs" "docs/LAB.md"]
+ :budget-usd 12.0}

@@ -1,0 +1,55 @@
+{:id "0032-lab-steady-line"
+ :title "Lab: the line holds still while you type, and words move in depth, not into their neighbours"
+ :lupa/deps #{"0031-lab-debug"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Ben's first screen recording on his M5 (WebGPU, 33.6 s, read frame
+        by frame by the foreman; docs/sample-media) shows two problems the
+        tests could not. (1) The whole line slides left as he types: the
+        renderer centres the text block on its live extent, so every new
+        letter shifts everything by half its advance (\"This\" drifted about
+        60 px in two seconds). Typing into a moving target. (2) :fuse
+        spreads a word's letters sideways so far that they collide with the
+        previous word and jump past the caret (\"am e r g |e\"). Fix both:
+        a steady writing surface, and effects that use depth and height
+        rather than invading the neighbours' space."
+ :scope ["src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Steady surface (render.cljs, main.cljs): lay text out in a column
+          of fixed width (the width-em main.cljs already chooses), and centre
+          the COLUMN on the stage, not the text's live extent. Text is
+          left-aligned within the column, like a page, so a line grows to
+          the right and never moves while you type. The camera stays on the
+          column's centre (the lean check keeps passing). Vertically, the
+          block may still ease upward as lines are added (one move per new
+          line, eased, never per keystroke).
+          Contained effects (pose.cljc): horizontal displacement of a cued
+          glyph must stay within half an em of its base x at all times for
+          every effect, so a word never reaches its neighbours. :fuse
+          becomes a convergence in depth and height: letters start spread
+          in z (toward the camera) and slightly in y, alternating by
+          position, and converge to the line; :skitter and :jitter keep
+          their x motion inside the same bound. All existing properties
+          (valid frame, letters spell the draft, settling, reduced motion)
+          keep holding.
+          e2e/lab.mjs: a step that types \"This is a merge of a \" at 70 ms
+          per key and samples the base-layout x of the first glyph's
+          projected position every 100 ms while typing: it may not move by
+          more than 2 px (the line holds still); and a step asserting that
+          during the :fuse of \"merge\" no glyph of \"merge\" is ever
+          projected left of the right edge of the preceding \"a\".
+          docs/LAB.md: a line on the steady surface and contained effects."
+ :acceptance
+ ["Property: for every effect, at every time, every cued glyph's |x - base
+   x| <= 0.5 em (new test over generated drafts and times)"
+  "All existing pose properties still pass"
+  "`bb lab:e2e` passes with the two new steps; the final message lists the
+   screenshots (the foreman will look at them)"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not edit the schema, lab.draft, lab.cues, or the glossary"
+  "No new effects; do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/pose.cljc" "src/halfahead/lab/render.cljs"
+           "src/halfahead/lab/main.cljs" "e2e/lab.mjs" "docs/LAB.md"]
+ :budget-usd 10.0}

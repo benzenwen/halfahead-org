@@ -125,7 +125,124 @@
      [:text :ha/message-text]
      [:delivery :ha/delivery]
      [:emphasis [:vector {:max 8} (text 1 200)]]
-     [:cost-usd optional [:and number? [:>= 0]]]]}))
+     [:cost-usd optional [:and number? [:>= 0]]]]
+
+    ;; --- the typing lab (derived, never persisted) -------------------------
+    ;; The lab renders the draft being typed as letters in 3D space. The
+    ;; pure core turns edits into glyphs with stable identities, words into
+    ;; cues, and (glyphs, cues, t) into a frame of poses; a renderer only
+    ;; draws frames. Invariant beyond these shapes, checked by tests: the
+    ;; live (non-ghost) poses of a frame, in order, spell exactly the draft.
+
+    :ha/finite      [:and number?
+                     [:fn {:error/message "must be finite"}
+                      #(and (== % %) (not (#{##Inf ##-Inf} %)))]]
+    :ha/unit        [:and :ha/finite [:>= 0] [:<= 1]]
+
+    ;; One character of the draft: a UTF-16 unit, or a surrogate pair kept
+    ;; whole. :id is stable across edits and never reused.
+    :ha/glyph
+    [:map {:closed true}
+     [:id [:int {:min 0}]]
+     [:char [:string {:min 1 :max 2}]]
+     [:born-ms :int]]
+
+    ;; A deleted glyph on its way out, remembered where it last stood.
+    :ha/ghost
+    [:map {:closed true}
+     [:id [:int {:min 0}]]
+     [:char [:string {:min 1 :max 2}]]
+     [:died-ms :int]
+     [:index [:int {:min 0}]]]
+
+    ;; What a finished word does. Closed, like deliveries: lookups choose,
+    ;; renderers draw, nobody invents motion in between.
+    :ha/word-effect [:enum :pop :launch :shimmer :skitter :quake :melt
+                     :rewind :fuse :jitter :glow :wobble]
+
+    :ha/word-cue
+    [:map {:closed true}
+     [:word (text 1 64)]
+     [:effect :ha/word-effect]
+     [:intensity :ha/unit]
+     [:source [:enum :glossary :punctuation :shape :default]]]
+
+    ;; A cue placed on the draft: which glyphs it moves, and when it fired.
+    :ha/placed-cue
+    [:map {:closed true}
+     [:glyph-ids [:vector {:min 1} [:int {:min 0}]]]
+     [:cue :ha/word-cue]
+     [:at-ms :int]]
+
+    ;; How the whole draft moves: a named set of physics parameters
+    ;; (tempo, springiness, amplitude, drift) that every effect is tuned by.
+    ;; :auto means inferred from the writer's own typing rhythm.
+    :ha/style [:enum :plain :elegant :caffeinated :drunken :coarse]
+    :ha/style-choice [:enum :auto :plain :elegant :caffeinated :drunken :coarse]
+
+    ;; How a finished phrase is staged, like a trailer editor's cut. Closed:
+    ;; a director (rules now, an on-device model later) chooses; the pure
+    ;; core performs.
+    ;;   :line  stays in the line (the default)
+    ;;   :card  takes over the stage, big, a beat per word, then folds back
+    ;;   :push  the camera moves in on the phrase, then returns
+    ;;   :pull  the camera pulls back to reveal the paragraph, then returns
+    :ha/shot [:enum :line :card :push :pull]
+
+    :ha/direction
+    [:map {:closed true}
+     [:glyph-ids [:vector {:min 1} [:int {:min 0}]]]
+     [:shot :ha/shot]
+     [:energy :ha/unit]
+     [:at-ms :int]
+     [:source [:enum :rules :model]]]
+
+    :ha/draft
+    [:map {:closed true}
+     [:text :string]
+     [:glyphs [:vector :ha/glyph]]
+     [:ghosts [:vector :ha/ghost]]
+     [:cues [:vector :ha/placed-cue]]
+     [:next-id [:int {:min 0}]]
+     [:directions optional [:vector :ha/direction]]]
+
+    ;; One glyph as the renderer should draw it at a moment. Units: em
+    ;; (1 = the font size); angles in radians. :wobble is the amplitude of a
+    ;; jelly deformation the renderer applies to the glyph's own quad.
+    :ha/glyph-pose
+    [:map {:closed true}
+     [:id [:int {:min 0}]]
+     [:char [:string {:min 1 :max 2}]]
+     [:ghost? :boolean]
+     [:x :ha/finite] [:y :ha/finite] [:z :ha/finite]
+     [:rx :ha/finite] [:ry :ha/finite] [:rz :ha/finite]
+     [:scale [:and :ha/finite [:>= 0]]]
+     [:opacity :ha/unit]
+     [:glow :ha/unit]
+     [:wobble :ha/unit]]
+
+    ;; Where the camera is and what it looks at, in the same em units as the
+    ;; poses. Part of the frame so shots are data and testable; a renderer
+    ;; follows it and decides nothing.
+    :ha/camera
+    [:map {:closed true}
+     [:x :ha/finite] [:y :ha/finite] [:z :ha/finite]
+     [:tx :ha/finite] [:ty :ha/finite] [:tz :ha/finite]
+     [:fov [:and :ha/finite [:> 0] [:< 180]]]]
+
+    :ha/glyph-frame
+    [:map {:closed true}
+     [:t-ms :int]
+     [:poses [:vector :ha/glyph-pose]]
+     [:caret [:map {:closed true} [:x :ha/finite] [:y :ha/finite]]]
+     [:camera optional :ha/camera]
+     [:style optional :ha/style]
+     ;; How much of the stage has been revealed: level 0 is a familiar
+     ;; flat chat box with the house lights up (:lights 0); level 3 is the
+     ;; full dark stage (:lights 1). See docs/product (experiment 1).
+     [:reveal optional [:map {:closed true}
+                        [:level [:int {:min 0 :max 3}]]
+                        [:lights :ha/unit]]]]}))
 
 (def ^:private compiled
   (memoize (fn [k] (m/schema k {:registry registry}))))

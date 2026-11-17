@@ -1,0 +1,52 @@
+{:id "0030-lab-stage"
+ :title "Lab staging: centred, upright letters on a stage that reads as 3D"
+ :lupa/deps #{"0029-lab-renderer"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "The foreman's review of the first lab screenshots: everything works,
+        but the letters on the left lean like italics even when settled
+        (all their poses have zero rotation and wobble). The cause is the
+        camera: it looks up at the text from below and off to one side, so
+        perspective converges vertical strokes far from the image centre.
+        The text also sits small in the top-left corner of an empty dark
+        page, and nothing tells the eye there is depth. Stage it: the text
+        block centred under the camera, letters upright at rest, larger
+        type, and a faint stage floor so depth reads as intended."
+ :scope ["src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+         "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Presentation only; the pure core decides nothing new.
+          - Camera: its axis passes through the centre of the text block, it
+            pitches at most 8 degrees, and its field of view is modest
+            (35-45 degrees), so a settled glyph's vertical edges lean by
+            less than 2 degrees anywhere in the block.
+          - Composition: the renderer centres the block (from the extent of
+            the live poses' base layout, i.e. their x/y) horizontally and
+            places it a little above the vertical centre of the viewport; it
+            follows the block smoothly as lines are added (ease, no jumps).
+            The type size fills about 70% of the viewport width at the
+            layout width main.cljs chooses (pick width-em so a line is a
+            comfortable 30-45 characters).
+          - Depth: a faint stage floor below the text (a plane receding
+            into the distance with fine lines or a soft gradient, in the
+            ink palette, low contrast, aria-hidden like the canvas) and a
+            gentle fog so letters further back (higher z) are dimmer. No
+            new effects; z motion should simply read now.
+          - Expose window.__lab.lean(i): the angle in degrees between the
+            projected left edge of live glyph i's quad (bottom-left to
+            top-left corners, through the instance matrix, camera and
+            viewport) and the screen vertical.
+          e2e/lab.mjs: after the settled step, assert |lean(i)| < 2 for
+          every live glyph, and that the projected centre of the text block
+          is within 12% of the viewport width of the horizontal centre.
+          Keep every existing step. docs/LAB.md: a line on the staging."
+ :acceptance
+ ["`bb lab:e2e` passes with the new lean and centring assertions, and the
+   final message lists the screenshots (the foreman will look at them)"
+  "`bb test` stays green; nothing outside the scope changes"]
+ :non-goals
+ ["No changes to lab.draft, lab.cues, lab.pose, the glossary, or the
+   schema; no new word effects; no sending yet"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+           "e2e/lab.mjs" "docs/LAB.md" "src/halfahead/lab/pose.cljc"]
+ :budget-usd 10.0}

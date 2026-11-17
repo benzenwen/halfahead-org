@@ -1,0 +1,68 @@
+{:id "0033-lab-crawl-camera"
+ :title "Lab: the camera becomes data, and old lines recede into the distance"
+ :lupa/deps #{"0032-lab-steady-line"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Two things Ben's second recording showed. Long drafts run off the
+        top of the stage (the first line cut, the floor gone), because
+        nothing handles text taller than the screen. And the camera is
+        decided inside the renderer, so no shot can ever be tested. Make
+        the camera part of every frame (pure, in em units), keep the line
+        being written in front of it, and let finished lines recede up and
+        back into the dark, like an end-credits crawl, so the draft uses
+        depth instead of falling off the screen."
+ :scope ["src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+         "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (already in halfahead.schema, do not edit): :ha/camera
+          {:x :y :z :tx :ty :tz :fov}, optional :camera on :ha/glyph-frame.
+          pose/frame: opts gain :aspect (viewport width / height, from
+          main.cljs). The frame always carries :camera:
+          - Target (tx ty tz): x at the column's centre (width-em / 2), y at
+            the line being written (the line of the last live glyph, or line
+            0), z 0. When the current line changes, the target eases from
+            the previous line's y to the new one over 450 ms, timed from the
+            born-ms of the first glyph on the new line. Pure: a function of
+            the draft and t, no stored state.
+          - Position: in front of the target, pitched down at most 8
+            degrees, at the distance where the column width fills about 75%
+            of the view horizontally for the given :aspect and :fov (40).
+          Crawl, in poses: lines more than 3 lines above the current line
+          recede, each further line a step more: z moves back 0.9 em per
+          line beyond 3, opacity scales down 0.18 per line (never below
+          0.12), and the line tilts back (rx up to -0.5 rad). The recession
+          is part of the line's base, so it holds when settled and
+          everything still settles exactly onto it. The current line and
+          the 3 above it are untouched.
+          render.cljs follows :camera from the frame and decides nothing
+          about where to look; remove its own following and easing. Keep
+          window.__lab.lean and block-centre working (now against the
+          frame's camera). Widen the debug overlay box so its first line is
+          never clipped (it was cut at 'worst 18.0 r' on Ben's screen) and
+          add the camera target to it.
+          e2e/lab.mjs: keep every step; add one that types 14 lines of text
+          and asserts every live glyph is either projected inside the
+          viewport or has opacity <= 0.3, that the current line is inside
+          the middle 60% of the viewport height, and screenshots
+          out/lab/crawl.png."
+ :acceptance
+ ["Property: every frame now has a valid :camera; the camera is a pure
+   function of (draft, t, opts) (equal inputs, equal camera)"
+  "Property: the settling property still holds, with recession included in
+   the settled base (lines more than 3 above the current one settle at
+   their receded z, opacity and rx)"
+  "Property: live chars still spell the draft; reduced motion still leaves
+   live poses at their (receded) bases and the camera on its target with no
+   easing"
+  "Test: after the current line changes, the camera target y is between the
+   old and new line's y at +225 ms and equal to the new line's y at +450 ms"
+  "`bb lab:e2e` passes with the crawl step and the existing lean, steady
+   and centring steps; the final message lists the screenshots"
+  "`bb test` stays green"]
+ :non-goals
+ ["No shots, styles or director yet (later orders); no schema edits"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/schema.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

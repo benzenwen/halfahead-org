@@ -1,0 +1,75 @@
+{:id "0035-lab-director"
+ :title "Lab director v0: finished phrases get shots, under a spectacle budget"
+ :lupa/deps #{"0034-lab-styles"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Ben: 'Think first about using the whole space. Then restraint. Like
+        the best movie trailers.' A director reads each finished phrase and
+        chooses how it is staged: stay in the line, take over the stage as
+        a title card, or have the camera push in or pull back. Rules only
+        here, on the device (a local model comes later behind the same
+        function). Restraint is a tested property: a spectacle budget, so
+        the big moments stay rare and land."
+ :scope ["src/halfahead/lab/director.cljc" "test/halfahead/lab/director_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+         "test/halfahead/lab/debug_test.cljc" "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (already present; do not edit): :ha/shot (:line :card
+          :push :pull), :ha/direction {:glyph-ids :shot :energy :at-ms
+          :source}, optional :directions on :ha/draft, :ha/camera.
+          halfahead.lab.director (.cljc, pure):
+            (direct draft now-ms) -> draft with a direction placed on every
+              phrase finished and not yet directed. A phrase is the run of
+              glyphs after the previous phrase's end, ending at . ! ? or a
+              newline, or, when the writer has paused, at the last glyph if
+              none was born in the last 1200 ms. Its glyph ids are the
+              non-space glyphs of the phrase.
+            Rules, first match: a phrase ending in ! or with most of its
+            words in CAPITALS -> :card, energy 0.9; ending in ? -> :push,
+            energy 0.6; 12 or more words ending in . -> :pull, energy 0.5;
+            else :line, energy 0.2. :source :rules, :at-ms now-ms.
+            Budget: a non-:line shot is placed only if the previous
+            non-:line direction is at least 10000 ms earlier; otherwise the
+            phrase gets :line. Directions on glyphs no longer present are
+            dropped, as cues are.
+          pose/frame performs shots (every invariant stays: live chars
+          spell the draft, all numbers finite, settle within 5000 ms of the
+          latest direction, reduced motion means :line only):
+            :card  the phrase's glyphs leave the line for the centre of
+                   the view (at the camera target), set large so the
+                   phrase spans about 70% of the view width, revealed a
+                   word per 220 ms beat, held 1200 ms, then fold back to
+                   the line over 400 ms; the other glyphs dim to 0.25
+                   opacity meanwhile. Total under 4500 ms.
+            :push  the camera moves 35% closer to the phrase's centre over
+                   500 ms, holds 700 ms, eases back over 500 ms.
+            :pull  the camera pulls 40% further back over 600 ms, holds
+                   900 ms, eases back over 600 ms.
+            :line  nothing extra.
+          main.cljs: after every edit, and on each frame (for pause-ended
+          phrases), call (director/direct draft now). The debug overlay
+          lists recent directions (phrase start... -> shot energy).
+          e2e/lab.mjs: type \"WHAT A DAY! \" and assert that 900 ms later
+          some glyph of the phrase has scale > 2 and the others' opacity is
+          about 0.25 (screenshot out/lab/card.png), and that 5 s later all
+          are back at scale 1; type \"why not? \" within 10 s of the card
+          and assert it was directed :line (budget); after 11 s type \"is
+          it? \" and assert a :push moved the camera closer
+          (out/lab/push.png)."
+ :acceptance
+ ["director tests: phrase splitting (punctuation, newline, pause); each
+   rule; directions keep only present glyph ids; the budget"
+  "Property: over any sequence of edits and times, non-:line directions
+   are at least 10000 ms apart"
+  "Property: frames stay valid, live chars spell the draft, everything
+   settles 5000 ms after the latest direction, and with reduced motion
+   shots are not performed"
+  "`bb lab:e2e` passes with the director steps; `bb test` stays green"]
+ :non-goals
+ ["No models, network, or new effects; no schema edits"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/schema.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/style.cljc" "src/halfahead/lab/draft.cljc"
+           "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+           "e2e/lab.mjs" "docs/LAB.md"]
+ :budget-usd 12.0}

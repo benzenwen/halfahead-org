@@ -157,3 +157,48 @@ step, about three times the usual size) shipped first pass for $0.93 in
 about ten minutes, and the foreman's browser check found it working. One
 data point, not a conclusion: next, a larger order on purpose, then
 another, and watch where first-pass shipping breaks.
+
+## 2026-11-05 — the typing lab
+
+### H19 ★ The text box becomes a lab first, behind a data seam — Ben (go), foreman (shape)
+Ben asked for more motion and a game-like text box ("2D letterforms in 3D
+space"), with a quick lookup or a local model at each word's end, not on
+every keystroke (a word takes about a second, so this fits). Shape:
+- Everything that decides is pure `.cljc` (edits to glyphs, words to cues,
+  glyphs and time to poses); a renderer only draws `:ha/glyph-frame`s.
+  That frame is the seam where Jon, or anyone, can write a renderer.
+- Word cues come from Half Ahead's own glossary first (product voice,
+  Ben-owned), then punctuation and word shape. All on the device, so
+  drafts never leave it. A local model comes later, behind the same
+  function. Lexicons: AFINN is usable (ODbL, keep derived data open); the
+  NRC lexicons forbid redistribution, so they cannot ship to browsers.
+- The reference renderer is three.js (WebGPU, falling back to WebGL2) with
+  an SDF glyph atlas, in `public/lab/`, apart from the app until it earns
+  its way in.
+- The textarea stays the real input (IME, paste, undo, screen readers);
+  the canvas is decoration.
+- Inspiration from Jon's demos and mrdoob's Codevember 2026 is taken as
+  ideas only; no code is copied without a licence (this repo is public).
+
+### H20 ★ Space, restraint and styles; drafts never leave the device — Ben
+From Ben's second recording and the notes he typed into the lab
+("use the whole space, then restraint, like the best movie trailers";
+phrases, not only words; modes like Elegant, Coarse, Drunken,
+Caffeinated):
+- **Shots** above word cues (:line, :card, :push, :pull), chosen per
+  phrase by a **director**: rules first (order 0035), an on-device model
+  later behind the same function. **Restraint is a tested property:** at
+  most one non-line shot per 10 s.
+- **The camera is data in every frame** (pure, testable); finished lines
+  recede up and back like a credits crawl, so long drafts use depth
+  instead of running off the stage (0033).
+- **Styles** are named physics parameter sets, **picked or inferred**
+  from typing rhythm (both, Ben), each glyph performed in the style in
+  force at its birth (0034).
+- **On-device only (Ben):** drafts never leave the machine; no cloud
+  director, even opt-in. A model director must run in the browser.
+- Ben is moving to bigger-picture product thinking in `docs/product/` and
+  asked the factory to run ahead ("go a little dark"). The review rate
+  stays 1.0 per the charter: nothing records review outcomes yet, so
+  nothing has earned darkness; "dark" here means Ben is not watching each
+  tick, not that review is skipped.

@@ -1,0 +1,87 @@
+{:id "0028-lab-poses"
+ :title "Lab: the draft becomes a frame of letter poses, as a pure function of time"
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Every frame of the typing lab is computed, not simulated: given the
+        draft and the time, return where each letter is, how it is turned,
+        how big, how bright and how much it wobbles. Letters spring in as
+        they are typed, finished words play their cue, deleted letters
+        drift away as embers, and everything settles exactly onto the
+        layout. Renderers (ours, or Jon's) only draw these frames."
+ :scope ["src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"]
+ :design "New namespace halfahead.lab.pose (.cljc, pure). Shapes:
+          :ha/draft, :ha/glyph-pose, :ha/glyph-frame in halfahead.schema.
+
+          (layout chars advance width-em) -> [{:x :y} ...], one per char.
+            Units are em. Left-aligned from x 0; a line breaks at a newline,
+            or before a word that would cross width-em (a word longer than
+            the width breaks anywhere). Line n has y = -1.35 * n.
+            advance is a fn char -> em width; (default-advance c) returns
+            0.6 for everything (tests and fallback).
+
+          (frame draft t-ms opts) -> a valid :ha/glyph-frame
+            opts: {:advance fn :width-em n :reduced-motion? b}
+            Live glyphs: one pose per glyph, in order, :ghost? false, its
+            base at the layout position, z 0, no rotation, scale 1,
+            opacity 1, glow 0, wobble 0, plus motion:
+            - Birth: age a = t - born-ms. Scale follows an underdamped
+              spring from 0 to 1 (closed form; overshoot about 15%,
+              settled within 400 ms); z starts at 0.6 and springs to 0;
+              opacity rises 0 -> 1 over the first 90 ms.
+            - Cues: for each placed cue covering the glyph, local time
+              u = t - at-ms - 25 * (position of the glyph within the
+              cue). Each effect lasts at most 1400 ms and scales its
+              amplitude by the cue's intensity:
+                :pop     scale bump to 1.35 and back
+                :launch  y arc up 1.2 em with z +1.5, landing with wobble
+                         that decays
+                :shimmer glow oscillating and decaying, small y float
+                :skitter x jitter, deterministic from the glyph id,
+                         decaying
+                :quake   x/y shake +-0.15 em and a glow flash 1 -> 0
+                         (lightning)
+                :melt    y droops 0.4 em with rx tilt, springs back
+                :rewind  rz from -2 pi to 0, last glyph first
+                :fuse    x offset spread outward, converging to 0
+                :jitter  small x/y jitter throughout, decaying
+                :glow    glow pulse 0 -> 0.9 -> 0
+                :wobble  wobble 1 -> 0, decaying
+              Effects add; clamp opacity, glow and wobble into [0, 1].
+            Ghosts: one pose per ghost younger than 600 ms, :ghost? true, at
+            the layout position its :index had in the current text (clamped
+            to the end), rising 1.5 em, spinning rz, scale 1 -> 0.6,
+            opacity 1 -> 0 over 600 ms (embers). Ghost poses come after the
+            live ones.
+            Caret: just after the last live glyph's base position (x of
+            its base plus its advance; x 0 y 0 for an empty draft).
+            Reduced motion: every live pose is exactly its base, and no
+            ghost poses.
+            Deterministic: equal inputs, equal frames. No randomness; any
+            jitter derives from glyph ids.
+          Use plain arithmetic only (Math functions via a .cljc-safe
+          helper), so the same code runs in the browser and Babashka."
+ :acceptance
+ ["Property (300+ cases over generated drafts with glyphs, ghosts and
+   cues of every effect, and times before, during and after all motion):
+   the frame is a valid :ha/glyph-frame (so every number is finite and
+   opacity/glow/wobble are in [0,1])"
+  "Property: the :char of the live poses, in order, joined, equals the
+   draft text"
+  "Property (settling): at t >= 1500 ms after the latest born-ms, cue
+   at-ms and ghost died-ms, every live pose equals its base exactly (x, y
+   from layout; z, rotations, glow, wobble 0; scale and opacity 1) and
+   there are no ghost poses"
+  "Property: with :reduced-motion? true, at any t, live poses equal their
+   bases and there are no ghosts"
+  "layout: a newline starts a new line at y -1.35; a word that would cross
+   width-em moves whole to the next line; with default-advance, \"ab cd\"
+   at width 10 puts d at x 2.4"
+  "A :quake cue at t+100 ms gives its glyphs glow > 0 and a nonzero
+   offset; at t+1500 ms they are back at base"
+  "`bb test` stays green on both hosts"]
+ :non-goals
+ ["No rendering, DOM, three.js, clock reads or randomness"
+  "Do not edit halfahead.schema, lab.draft, or lab.cues"]
+ :context ["src/halfahead/schema.cljc" "docs/SCHEMA.md" "DESIGN.md"
+           "src/halfahead/perform.cljc" "docs/research/conversation-design.md"]
+ :budget-usd 12.0}

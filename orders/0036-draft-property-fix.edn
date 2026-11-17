@@ -1,0 +1,52 @@
+{:id "0036-draft-property-fix"
+ :title "Fix lab.draft's word-cue property: it discarded half its check and misjudged new letters"
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring: 0026
+ ;; shipped a property that never asserted its first check and fails on
+ ;; unlucky seeds; found by the foreman when the integration gate failed
+ ;; after tick 25 (seed 1793875586231).
+ :lupa/fixes #{"0026-lab-draft"}
+ :lupa/deps #{"0035-lab-director"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "The gate failed after tick 25 in test/halfahead/lab/draft_test.cljc
+        (every-finished-word-is-cued, seed 1793875586231). The
+        implementation is correct; the property is not, in two ways:
+        (1) its body is a let with two every? expressions and only the
+        second is returned, so 'every finished run is covered by a cue and
+        every cue's glyphs are live' has never been asserted; (2) its
+        word-glyph? model is the set of characters in word-tokens, but the
+        random edit ops can cut through surrogate pairs and join halves of
+        two different characters into a new one (here D835 from 𝒜 and DE00
+        from 😀 made 𝘀, U+1D600, a letter), which the implementation rightly
+        treats as a word character and the model calls a non-word. Fix the
+        property so it asserts everything it means to, with a model that
+        classifies characters the way Unicode does."
+ :scope ["test/halfahead/lab/draft_test.cljc"]
+ :design "In draft_test.cljc only:
+          - Combine both checks with and, so the property returns the
+            conjunction (the runs check over every draft along the way, and
+            the calls check).
+          - Replace word-glyph? with a classification by code point that is
+            written in the test (not imported from lab.draft): a glyph is a
+            word character when its code point is a Unicode letter or
+            decimal digit, or it is ' (U+0027), ’ (U+2019) or - (U+002D).
+            On the JVM use Character/isLetterOrDigit on the code point; in
+            ClojureScript a \\p{L}|\\p{Nd} regex with the u flag.
+          - Add an example test for the failing case: steps \"word\",
+            \"𝒜bc😀word\", \"𝘀word\", \"𝘀word \" (all at 0 ms) give a cue on
+            the glyphs of \"𝘀word\" and cue-fn calls [\"𝒜bc\" \"😀\"] and
+            [\"𝘀word\" \" \"].
+          - Run the fixed property with seed 1793875586231 and with 2000
+            trials once locally to confirm it passes (do not leave 2000 in
+            the file; keep 300)."
+ :acceptance
+ ["every-finished-word-is-cued returns the conjunction of both checks
+   (assert by reading: the let's body is a single and)"
+  "The property passes with :seed 1793875586231 and with 2000 trials (say
+   so in the final message with the numbers)"
+  "The new example test passes"
+  "`bb test` stays green on both hosts"]
+ :non-goals
+ ["Do not edit src/halfahead/lab/draft.cljc or any other file"]
+ :context ["test/halfahead/lab/draft_test.cljc" "src/halfahead/lab/draft.cljc"]
+ :budget-usd 6.0}

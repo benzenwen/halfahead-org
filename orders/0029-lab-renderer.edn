@@ -1,0 +1,102 @@
+{:id "0029-lab-renderer"
+ :title "Lab page: type into letters in 3D space (three.js, WebGPU with WebGL2 fallback)"
+ :lupa/deps #{"0026-lab-draft" "0027-lab-cues" "0028-lab-poses"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "public/lab/index.html is a playable prototype: you type into what
+        looks like a dark stage and your letters spring into 3D space,
+        finished words play their cues (lightning for 'crash', a launch for
+        'ship', a shimmer for 'hallucination'), and backspaced letters drift
+        off as embers. It renders with WebGPU where the browser has it and
+        WebGL2 otherwise, and it says which. The pure core (draft, cues,
+        poses) does all the deciding; this order only wires input and draws
+        frames."
+ :scope ["public/lab/index.html" "src/halfahead/lab/main.cljs"
+         "src/halfahead/lab/render.cljs" "shadow-cljs.edn" "package.json"
+         "package-lock.json" "bb.edn" "src/halfahead/dev/lab.clj"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Read docs/LAB.md first (the seam), then the three pure namespaces.
+
+          Dependencies (package.json, exact versions, lock regenerated with
+          npm install against the committed lock): three 0.187.0 and
+          @mapbox/tiny-sdf 2.3.0. Nothing else.
+
+          shadow-cljs.edn: a new :lab build (:target :browser, output
+          public/lab/js, asset-path \"js\", init halfahead.lab.main/init!).
+          Do not change the :app or :test builds.
+
+          public/lab/index.html: a full-viewport <canvas> (aria-hidden) on a
+          dark background, a real <textarea> labelled 'Type here' laid over
+          it, focused on load, with transparent text and caret (it is the
+          input: IME, paste, undo and screen readers keep working), a small
+          status line naming the backend, and a link back to the app.
+
+          halfahead.lab.main (cljs shell): one atom {:draft ..}. On every
+          input event: (lab.draft/edit draft value (js/performance.now)
+          lab.cues/word-cue). A requestAnimationFrame loop computes
+          (lab.pose/frame (lab.draft/prune draft now) now opts) and hands it
+          to the renderer; opts carry the renderer's advance function, a
+          width that fits the viewport, and :reduced-motion? from
+          matchMedia (re-read on change). Expose window.__lab with: backend
+          (\"WebGPU\" or \"WebGL2\"), liveText() (the live poses' chars
+          joined), lastFrame() (the last frame as JS), and drawn() (glyph
+          instances drawn in the last frame).
+
+          halfahead.lab.render (cljs; the only namespace that touches
+          three.js or the GPU):
+          - A WebGPURenderer from \"three/webgpu\"; it falls back to WebGL2
+            when WebGPU is unavailable; report which backend is active.
+          - A perspective camera looking at the text plane from slightly
+            below and in front, so z motion reads as depth.
+          - A glyph atlas built at start with @mapbox/tiny-sdf from a CSS
+            font stack (a sans in the label style; no font files), growing
+            lazily for characters not yet in it; expose (advance char) from
+            the glyph metrics, in em.
+          - One InstancedMesh of quads, one instance per pose; per-instance
+            attributes for the atlas rectangle, opacity, glow and wobble;
+            instance matrices from x, y, z, rx, ry, rz, scale.
+          - Material: alpha from the signed distance field with a smooth
+            edge; glow as a soft halo from the same field, tinted warm (the
+            vermilion of the app's palette); wobble as a jelly deformation
+            of the quad's vertices, sin of time and vertex position times
+            the wobble amplitude. Ghosts tinted ember orange.
+          - The caret as a thin bar at the frame's caret position.
+          If TSL node materials prove unworkable in this three.js version,
+          use WebGLRenderer with a GLSL ShaderMaterial instead and say so in
+          the final message; the frame contract does not change.
+          Only draw frames; decide nothing.
+
+          src/halfahead/dev/lab.clj and bb.edn: `bb lab` compiles :lab,
+          serves public/ with halfahead.dev.serve on a free port and prints
+          the URL of /lab/; `bb lab:e2e` runs e2e/lab.mjs against it and
+          stops the server by its handle.
+
+          e2e/lab.mjs (Playwright): open /lab/; wait for window.__lab;
+          assert backend is WebGPU or WebGL2; type \"we finally shipped it!
+          then a crash \" with 70 ms between keys; 300 ms later screenshot
+          out/lab/typing-mid.png; assert __lab.liveText() equals the
+          textarea's value and __lab.drawn() >= its length; press Backspace
+          three times, 100 ms later screenshot out/lab/embers.png and
+          assert lastFrame() has ghost poses; wait 2 s, screenshot
+          out/lab/settled.png and assert no ghosts and every live pose has
+          scale 1; repeat the typing in a context with reducedMotion
+          'reduce' and assert every live pose is at scale 1 immediately.
+
+          docs/LAB.md: keep the foreman's text; add a 'Running it' section."
+ :acceptance
+ ["`bb lab:e2e` passes in this container and the final message lists the
+   three screenshots (the foreman will look at them) and the backend the
+   headless browser used"
+  "`bb test` stays green; the :app build and the main page are unchanged"
+  "The canvas is aria-hidden and the textarea is a real, labelled, focused
+   input (assert in e2e: the focused element is the textarea)"]
+ :non-goals
+ ["No changes to lab.draft, lab.cues, lab.pose, the glossary, the schema,
+   or the app"
+  "No models, sound, or network; no fonts downloaded"
+  "Do not run `bb e2e` or `bb play` (fixed emulator ports)"]
+ :context ["docs/LAB.md" "src/halfahead/lab/draft.cljc"
+           "src/halfahead/lab/cues.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/schema.cljc" "src/halfahead/dev/serve.clj"
+           "e2e/smoke.mjs" "shadow-cljs.edn" "bb.edn" "DESIGN.md"]
+ :budget-usd 12.0}

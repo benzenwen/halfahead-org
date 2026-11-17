@@ -1,0 +1,58 @@
+{:id "0039-lab-stage-seam"
+ :title "Lab stage seam: the scene behind the letters is a pluggable module (for Jon's scenes)"
+ :lupa/deps #{"0038-lab-reveal"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "Experiment 4 of Ben's product outline: use 3D scene renderers like
+        Jon's (jalfern.com/demos) to set the stage. Jon's code is not here
+        and needs his permission, so prepare the seam: the scene behind the
+        letters becomes a small module with a tiny interface, today's grid
+        floor becomes the first stage, and stages receive the frame's
+        moments (a cue fired, a shot started, a level reached) so a storm
+        could flash lightning on a quake without knowing anything else."
+ :scope ["src/halfahead/lab/stage.cljs" "src/halfahead/lab/stage/grid.cljs"
+         "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+         "src/halfahead/lab/moments.cljc" "test/halfahead/lab/moments_test.cljc"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "halfahead.lab.moments (.cljc, pure): (moments old-frame-ctx
+          new-frame-ctx) -> the moments between two frames as data:
+          [{:kind :cue :effect e :intensity i :at-ms t} {:kind :shot :shot s
+          :energy e :at-ms t} {:kind :level :level n :at-ms t} ...], from
+          the drafts' cues and directions and the frames' :reveal (the
+          shell passes {:draft :frame} for the previous and current tick).
+          halfahead.lab.stage (.cljs): a stage is a map of functions
+            {:init   (fn [three-scene opts] state)
+             :update (fn [state frame t] state)    ; every frame
+             :moment (fn [state moment] state)     ; each moment
+             :dispose (fn [state] nil)}
+          and a registry {keyword stage}. render.cljs owns the three.js
+          scene and calls the active stage; it no longer builds the floor
+          itself.
+          halfahead.lab.stage.grid: today's receding grid floor, moved
+          here unchanged in look, plus one reaction: on a :quake cue moment
+          its lines brighten briefly in proportion to intensity (a
+          lightning hint), on a :card shot the far lines pulse once.
+          main.cljs: ?stage=grid selects (default grid); computes moments
+          each frame and passes them to the renderer. The debug overlay
+          shows the stage and the last moment.
+          docs/LAB.md: a section 'Writing a stage' for Jon: the interface,
+          what a frame and a moment contain, how to register a stage, that
+          stages decide nothing about letters.
+          e2e/lab.mjs: with ?debug, typing 'crash ' shows a :cue moment
+          for :quake in the overlay and the grid's brightness uniform rises
+          then returns (expose window.__lab.stageState() as data); all
+          existing steps still pass."
+ :acceptance
+ ["moments tests: cues, shots and level changes become moments exactly
+   once, in order"
+  "`bb lab:e2e` passes with the stage step and all existing steps; `bb
+   test` stays green; the floor looks as before when nothing happens
+   (screenshot out/lab/stage-grid.png for the foreman)"]
+ :non-goals
+ ["No new scenes beyond the grid; no copying of anyone's demo code"
+  "No changes to the pure core's motion; do not edit the schema; do not run
+   `bb e2e` or `bb play`"]
+ :context ["docs/product/halfahead-org-product-outline.md"
+           "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+           "src/halfahead/lab/debug.cljc" "e2e/lab.mjs" "docs/LAB.md"]
+ :budget-usd 10.0}
