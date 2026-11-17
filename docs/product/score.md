@@ -95,11 +95,11 @@ oscillator:
 ;; :swell, measured from the Music app's held syllable: each letter lifts
 ;; a sixth of an em as the highlight reaches it, 120 ms after its
 ;; neighbour, rises for 0.9 s and settles for longer. Amounts are at full
-;; intensity; "loooove" plays at about 0.8.
+;; intensity; "loooove" plays at 0.7, a sixth of an em.
 {:ms 2400
  :stagger {:ms-per-glyph 120 :max-ms 900 :order :forward}
- :mods [{:channel :y    :amount 0.2  :curve :rise-sine :from 0.0   :to 0.375}
-        {:channel :y    :amount 0.2  :curve :fade2     :from 0.375 :to 1.0}
+ :mods [{:channel :y    :amount 0.25 :curve :rise-sine :from 0.0   :to 0.375}
+        {:channel :y    :amount 0.25 :curve :fade2     :from 0.375 :to 1.0}
         {:channel :glow :amount 0.45 :curve :arch}]}
 ```
 

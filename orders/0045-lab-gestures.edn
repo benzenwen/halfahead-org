@@ -37,8 +37,8 @@
           which and why at the top of the final message.
           The eight new gestures, exactly these (amounts at intensity 1):
             :swell  {:ms 2400 :stagger {:ms-per-glyph 120 :max-ms 900}
-                     :mods [{:channel :y :amount 0.2 :curve :rise-sine :from 0 :to 0.375}
-                            {:channel :y :amount 0.2 :curve :fade2 :from 0.375 :to 1}
+                     :mods [{:channel :y :amount 0.25 :curve :rise-sine :from 0 :to 0.375}
+                            {:channel :y :amount 0.25 :curve :fade2 :from 0.375 :to 1}
                             {:channel :glow :amount 0.45 :curve :arch}]}
             :bloom  {:ms 1600 :stagger {:ms-per-glyph 40 :max-ms 200}
                      :mods [{:channel :weight :amount 0.6 :curve :arch}
@@ -100,7 +100,7 @@
           (elongation)'; sample window.__lab's frame on every animation
           frame for 6 s and assert, independent of frame rate: at least
           one sampled frame has a letter of 'loooove' lifted above its
-          resting y; no sampled lift exceeds 0.2 x 0.7 + 0.001 em; the
+          resting y; no sampled lift exceeds 0.25 x 0.7 + 0.001 em; the
           peak lift of each letter of the word
           comes no earlier than the letter before it (among frames
           sampled); and 5.5 s after the cue every letter is at rest.

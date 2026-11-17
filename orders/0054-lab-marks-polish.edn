@@ -1,0 +1,51 @@
+{:id "0054-lab-marks-polish"
+ :title "Lab marks polish: calm styles keep their strength, and the reader stops finding holds in URLs and landings after an ellipsis"
+ :lupa/deps #{"0044-lab-marks"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "Gaps in the foreman's spec for order 0044, found by its reviewer
+        and by arithmetic. (1) gesture-for scales a mark's intensity by the
+        style's energy, but energy already slows and shrinks motion
+        through the style's tempo and amplitude, so a calm style plays
+        marks at half strength twice over: Elegant would lift a held word
+        about 0.06 em, a third of the Music app's lift that the swell was
+        measured from. (2) read finds a :hold in 'www.example.com' and in
+        'WWW', 'III' and 'XXX'. (3) An ellipsis ends a sentence, so 'I
+        don't know... maybe' lands on 'maybe', though trailing off is the
+        opposite of landing. (4) A held letter written with combining
+        marks is missed. (5) The performing threshold is 0.30000000000000004
+        at Caffeinated, so a mark of amount exactly 0.3 does not perform."
+ :scope ["src/halfahead/lab/marks.cljc" "test/halfahead/lab/marks_test.cljc"]
+ :design "In halfahead.lab.marks only:
+          - gesture-for: intensity is the mark's amount, kept in [0.1 1].
+            The style's energy no longer scales it (tempo and amplitude
+            already carry energy). The choice of gesture is unchanged.
+          - gesture-for: a mark performs when amount >= 0.9 - 0.8
+            flourish - 1e-9, so a mark exactly on the threshold performs.
+          - read, held letters: a run counts base letters and ignores
+            combining marks (U+0300 to U+036F) between them, so 'o' with
+            an acute accent three times is a hold. A word is not held when
+            it contains '.', '/', '@' or ':' inside it (a URL, a path, an
+            address), or when the whole word is the one repeated letter
+            ('www', 'III', 'XXX', 'zzz' are not holds; 'sooo' and 'nooo'
+            are).
+          - read, landing: an ellipsis ('…' or three or more full stops)
+            does not end a sentence for the purpose of :land: text after
+            it belongs to the same sentence, and a message that ends with
+            an ellipsis has no :land. The ellipsis tell itself (:hold on
+            the word before it) is unchanged.
+          Update the tests that pin the old intensity; add an example for
+          each change, including that the acceptance sentence of 0044
+          still reads exactly as before; keep every property."
+ :acceptance
+ ["marks tests updated and extended as in the design, on both hosts"
+  "(gesture-for (style/point :elegant) {:span [0 7] :kind :hold :amount
+   0.7}) is {:effect :swell :intensity 0.7}"
+  "`bb test` stays green"]
+ :non-goals
+ ["No change to the tells' amounts, the gesture table, dress-for, style
+   points or anything outside the two files; do not edit the schema"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["src/halfahead/lab/marks.cljc" "test/halfahead/lab/marks_test.cljc"
+           "docs/product/score.md" "DESIGN.md"]
+ :budget-usd 6.0}

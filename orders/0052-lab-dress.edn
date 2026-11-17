@@ -1,0 +1,110 @@
+{:id "0052-lab-dress"
+ :title "Lab dress: what a mark leaves behind (versal, rubric, gilt, strong, whisper), and gold that catches the pointer"
+ :lupa/deps #{"0051-lab-board"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'Dress' and 'Illumination, now', and
+        hypothesis H7 in docs/product/lab-notebook.md. Gestures return to
+        rest; dress is what stays, the way bold does. On the paper page
+        (reveal level 1) a dressed draft should look like a page from a
+        manuscript: a raised initial, a red-letter phrase, a word in gold,
+        a whispered aside. And the gold is alive without moving: it
+        brightens under the pointer, as gold leaf caught a candle."
+ :scope ["src/halfahead/lab/dress.cljc" "test/halfahead/lab/dress_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/main.cljs" "src/halfahead/lab/render.cljs"
+         "src/halfahead/lab/debug.cljc" "test/halfahead/lab/debug_test.cljc"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (the foreman's; do not edit): :ha/dress, :ha/ink, the
+          optional keys of :ha/glyph-pose.
+          halfahead.lab.dress (.cljc, pure):
+          looks -> a public map, what each dress does to a letter at rest:
+            :versal  {:size 1.8}                      ; a raised initial
+            :rubric  {:ink :signal}
+            :gilt    {:ink :gold :glint true}
+            :strong  {:weight 0.55}
+            :whisper {:size 0.85 :ink :muted :weight -0.2}
+          (placed dress glyphs) -> [{:as kw :glyph-ids [..]}], each dress's
+            span as glyph ids (a glyph's offset is the sum of the UTF-16
+            lengths of the glyphs before it, as lab.reading does); a dress
+            whose span holds no glyph is left out.
+          (seen prev placed t) -> {[as first-glyph-id] since-ms}: when each
+            placed dress was first seen, keeping earlier times from prev
+            and dropping dress that is gone (the shell keeps this between
+            frames; it is the only memory dress needs).
+          (sizes placed glyphs) -> {glyph-id size} for glyphs whose dress
+            changes their size (a glyph in two such dress takes the
+            larger change from 1).
+          (at-rest pose look w light) -> pose with the look applied at
+            weight w (0 to 1): :ink the look's ink with :tint w; :weight
+            w x the look's; and for :glint, :glow raised by the light: 0.12
+            w with no light, else w x (0.12 + 0.5 e^(-d^2 / (2 x 1.2^2))),
+            d the distance in em from the light to the letter (x, y).
+          lab.pose: frame's opts gain :dress {:placed [...] :seen {...}
+            :light {:x :y} or nil}. From reveal level 1 up: layout uses
+            each glyph's size (its advance multiplied, so nothing overlaps
+            and lines wrap as they should); a sized glyph's pose is
+            scaled by its size and kept on the baseline at its left edge
+            (shift x by half (size - 1) x advance and y by 0.35 (size - 1),
+            as a :card does); each dressed live pose gets its look at
+            weight w = smoothstep((t - since) / 500), so dress eases in
+            over half a second; size eases the same way (1 toward size).
+            With reduced motion w is 1 at once. At level 0, and with no
+            :dress, frames are exactly as before. The caret follows the
+            sized layout. All existing invariants hold with dress: the
+            live poses spell the draft; cues and shots perform on top of
+            the dressed rest; sideways motion stays within half an em of
+            the dressed place.
+          lab.render: only if needed to draw a sized or tinted glyph
+            correctly; no new draw call.
+          lab.main: after every edit, and when the style changes, the
+            draft's dress is (score/from-text text point)'s :dress for the
+            style point in force, placed on the glyphs; seen is updated
+            each frame; the pointer's position over the stage, projected
+            onto the text plane in em (render has the camera), is the
+            :light, nil when the pointer is away or the device has none.
+            window.__lab.dress() -> the placed dress as plain data. The
+            debug overlay lists it ('dress: gilt \"the one thing\" ·
+            whisper \"trust me\"').
+          Tests: placed and sizes for each dress, with emoji before the
+          span; seen keeps, adds and drops; at-rest for each look at w 0,
+          0.5 and 1, and the glint against distance; pose: a versal's
+          neighbours do not overlap it and the line's width grows by 0.8 of
+          its advance; a whisper narrows its span; dress eases in and is
+          instant with reduced motion; level 0 ignores dress; and every
+          existing pose test passes unchanged. Property: for generated
+          drafts and dress, the frame is valid, live poses spell the
+          draft, and no two neighbouring letters on a line overlap at rest.
+          e2e/lab.mjs, a new step 'dress', by data and stills:
+          (a) /lab/?debug&reveal=1 (paper), Elegant picked: type 'This is
+          *the one thing* that matters (trust me).', wait 1 s: the glyphs
+          of 'the one thing' carry ink gold and tint 1, those of 'trust
+          me' are smaller than 1 and muted; the most common inked colour
+          inside the gold word's box matches lab.ink's gold for paper;
+          screenshot out/lab/dress-paper.png. (b) move the mouse over the
+          gold word: its letters' :glow in lastFrame rises above 0.4; move
+          it away: back to about 0.12. (c) Caffeinated picked, a sentence
+          of 14 words: the first letter's scale is about 1.8 and the
+          second letter starts at or beyond the first's scaled right edge.
+          (d) the same on the dark stage (?reveal=3): screenshot
+          out/lab/dress-dark.png. (e) Plain picked: no dress at all.
+          docs/LAB.md: a section 'Dress' (the five, when the rules give
+          them, the glint, that dress is presentation and never text)."
+ :acceptance
+ ["dress and pose tests as in the design, on both hosts"
+  "`bb lab:e2e` passes with the dress step and every existing step; `bb
+   test` stays green; the two dress screenshots for the foreman"]
+ :non-goals
+ ["No dropped (multi-line) initials; no borders, pictures or marginal
+   glosses (later releases); no time-based shimmer: the glint follows the
+   pointer only"
+  "No change to marks, score, gestures, synth, pace, the board, the
+   director, reveal levels or the stage; do not edit the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/score.md" "docs/product/lab-notebook.md"
+           "src/halfahead/schema.cljc" "src/halfahead/lab/score.cljc"
+           "src/halfahead/lab/marks.cljc" "src/halfahead/lab/ink.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

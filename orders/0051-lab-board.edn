@@ -1,0 +1,107 @@
+{:id "0051-lab-board"
+ :title "Lab board: a few pads that mark what you just wrote, and one XY pad for your style (no parameters)"
+ :lupa/deps #{"0050-lab-reading"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'How people and agents drive it'. People
+        will not tune parameters. Give them an instrument instead: a small
+        board, hidden until asked for, with pads that say what the last
+        phrase is doing (STRESS, HOLD, ASIDE, TURN, DOUBT, LAND), one big
+        moment (BOOM, a card), and one XY pad whose position is the
+        writer's style: energy across, flourish up. Keyboard first. The
+        Cramer end of the dial."
+ :scope ["src/halfahead/lab/board.cljc" "test/halfahead/lab/board_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+         "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (the foreman's; do not edit): :ha/style-point,
+          :ha/mark-kind, :ha/word-cue's :source :board, :ha/direction.
+          halfahead.lab.board (.cljc, pure):
+          pads -> the board's pads in order, data: [{:id :stress :label
+            \"STRESS\" :key \"1\"} {:id :hold ..\"2\"} {:id :aside ..\"3\"}
+            {:id :turn ..\"4\"} {:id :doubt ..\"5\"} {:id :land ..\"6\"}
+            {:id :boom :label \"BOOM\" :key \"7\"}].
+          (target text selection) -> the [from to) span a pad acts on, in
+            UTF-16 units, or nil when there is nothing to mark: the
+            selection {:from :to} when it is not empty (trimmed of
+            whitespace at both ends); else the last phrase: from the end
+            of the previous sentence (after . ! ? … or a newline, and any
+            spaces) to the end of the text without trailing whitespace,
+            and no more than its last 12 words.
+          (press pad point glyphs span t amount) -> what a pad adds to the
+            draft at time t, {:cues [...]} or {:directions [...]}: a mark
+            pad places one :ha/placed-cue on the glyphs in the span (as
+            lab.reading maps spans to glyphs) whose cue is (marks/
+            gesture-for point {:kind pad :amount amount ...}), forced to
+            perform even in a spare style (a pad is a deliberate act: if
+            gesture-for gives nil, use the gesture it would choose at
+            flourish 1), with :source :board and :word the span's text
+            (at most 64 chars); BOOM places a :ha/direction {:shot :card
+            :energy amount :source :rules} on those glyphs. amount is 0.7
+            for a tap and rises to 1.0 for a pad held 600 ms or longer.
+          (xy->point point x y) -> point with :energy x and :flourish y
+            (both kept in [0 1]); (point->xy point) -> [x y].
+          lab.pose: frame's :style-choice may also be a :ha/style-point;
+            then births and cues use (style/from-point point) and the
+            frame has no :style key. Everything else as before.
+          lab.main and index.html: a 'Board' toggle in the bar and Ctrl+B
+            show and hide the board (hidden on load; remembered per viewer
+            in localStorage, every access in try/catch). The board is
+            real buttons in a toolbar labelled 'Board', each with its
+            name and key, operable by Tab and Enter/Space, and by Alt+1 to
+            Alt+7 from the textarea without it losing focus or gaining a
+            character. Pressing a pad calls board/press on the board's
+            target with the style point in force, adds the result to the
+            draft (cues, or directions, exactly as typing would have) and
+            voices it when sound is on. A pad with nothing to mark does
+            nothing. Board cues survive like any cue: an edit that removes
+            their glyphs removes them.
+            The XY pad is a square with a dot: dragging or clicking sets
+            the point, arrow keys move it by 0.05 when it has the focus,
+            and it has an accessible name and value text ('Energy 60%,
+            flourish 40%'). Moving it makes the style 'Mine': the style
+            picker gains a Mine option that is selected then, and picking
+            a named style moves the dot to that style's point (style/
+            point). The point is remembered per viewer. With Mine picked,
+            frame gets the point as :style-choice.
+            window.__lab.board() -> {visible point target} as plain data.
+            The debug overlay shows 'style mine (e 0.60 f 0.40 s 0.50 w
+            0.50)' when a point is in force, and board cues read like any
+            other ('did it -> glow 0.7 (board)').
+          Tests: target for a selection, for text ending mid-sentence,
+          after a full stop, with trailing spaces, over 12 words, empty;
+          press for each mark pad at Plain's and Caffeinated's points
+          (the forced gesture in a spare style), the amount from the hold,
+          BOOM's direction; xy round trip; pose with a point as
+          :style-choice equals pose with params from from-point, and
+          every existing pose test passes unchanged.
+          e2e/lab.mjs, a new step 'board' (?debug&reveal=3, Plain): the
+          board is hidden on load; Ctrl+B shows it; type 'we did it'; click
+          STRESS: the overlay shows a (board) cue on 'we did it' and a
+          sampled frame shows those letters moving; Alt+2: a swell on the
+          same phrase, and the textarea still has the focus and the same
+          text; select 'did' and press LAND: the cue's glyphs are those of
+          'did' only; BOOM places a :card direction (window.__lab
+          .directions()); click the XY pad's top right corner: board()
+          .point has energy and flourish above 0.9, the picker shows Mine,
+          and the next cue's gesture plays faster than the same one in
+          Plain (compare the time from its start to rest in sampled
+          frames, by data not by clock); reload: the board is still
+          shown and the point kept. Screenshot out/lab/board.png."
+ :acceptance
+ ["board, pose and debug tests as in the design, on both hosts"
+  "`bb lab:e2e` passes with the board step and every existing step; `bb
+   test` stays green; out/lab/board.png for the foreman"]
+ :non-goals
+ ["No learning from choices (the flick is a later order); no dress"
+  "No change to marks, gestures, synth, pace, score, the renderer, the
+   director's rules, reveal or the stage; do not edit the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/score.md" "src/halfahead/schema.cljc"
+           "src/halfahead/lab/marks.cljc" "src/halfahead/lab/style.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/director.cljc" "src/halfahead/lab/main.cljs"
+           "src/halfahead/lab/debug.cljc" "public/lab/index.html"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}
