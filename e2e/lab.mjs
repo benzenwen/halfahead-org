@@ -296,6 +296,8 @@ async function revealLevel(page, atLeast = 0) {
 const browser = await chromium.launch({
   args: ['--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-angle=swiftshader'],
 });
+// The second browser, of the webgpu step; closed with the first.
+let gpuBrowser = null;
 let code = 0;
 try {
   const page = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
@@ -1401,22 +1403,176 @@ try {
       + `past its right edge; Plain wears nothing; on the stage ${onStage.summary}`);
   }
 
+  // The lab on three.js's real WebGPU path. The browser above never gets
+  // there: this Chromium's GPUTexture.createView rejects the 'swizzle' field
+  // three.js 0.187 passes, so the lab falls back to WebGL2, which has no
+  // limit on vertex buffers and so drew ten of them happily while WebGPU
+  // (which guarantees eight) drew nothing. Here a shim drops the field, and
+  // every render pipeline the page asks the device for is recorded.
+  {
+    begin('webgpu', null);
+    gpuBrowser = await chromium.launch({
+      args: ['--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-angle=swiftshader'],
+    });
+    const context = await gpuBrowser.newContext({ viewport: { width: 1000, height: 640 } });
+    await context.addInitScript(() => {
+      window.__pipelines = [];
+      if (!('gpu' in navigator) || typeof GPUDevice === 'undefined' || typeof GPUTexture === 'undefined') return;
+      const createView = GPUTexture.prototype.createView;
+      GPUTexture.prototype.createView = function (descriptor) {
+        if (!descriptor || !('swizzle' in descriptor)) return createView.call(this, descriptor);
+        const { swizzle, ...rest } = descriptor;
+        return createView.call(this, rest);
+      };
+      for (const name of ['createRenderPipeline', 'createRenderPipelineAsync']) {
+        const create = GPUDevice.prototype[name];
+        GPUDevice.prototype[name] = function (descriptor) {
+          // counted now: three.js reuses and resets the descriptor
+          const buffers = [...(descriptor?.vertex?.buffers ?? [])].filter(Boolean);
+          window.__pipelines.push({
+            label: descriptor?.label ?? '',
+            buffers: buffers.length,
+            attributes: buffers.reduce((n, b) => n + [...(b.attributes ?? [])].length, 0),
+          });
+          return create.call(this, descriptor);
+        };
+      }
+    });
+    // Not tracked: a software device that is lost logs errors that are this
+    // container's nature. The step asserts on what it collects itself.
+    const listen = (page) => {
+      const messages = [];
+      page.on('console', (m) => messages.push(m.text()));
+      page.on('pageerror', (e) => messages.push(String(e)));
+      return messages;
+    };
+    const word = 'hello';
+    const at = (params) => {
+      const u = new URL(url);
+      for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+      return u.href;
+    };
+    const typeWord = async (page) => {
+      await page.selectOption('#style', 'plain');
+      await page.locator('#type').focus();
+      await page.keyboard.type(word, { delay: 30 });
+      // on the data, not a clock: the frame spells the word and its poses
+      // have not changed for 700 ms of the lab's own time
+      await page.waitForFunction((word) => {
+        const f = window.__lab.lastFrame();
+        const here = JSON.stringify(f.poses);
+        const w = (window.__still ??= {});
+        if (here !== w.here) { w.here = here; w.since = f['t-ms']; }
+        return window.__lab.liveText() === word && f.poses.every((p) => !p['ghost?']) && f['t-ms'] - w.since >= 700;
+      }, word, { timeout: 45000 })
+        .catch(() => { throw new Error(`the letters of "${word}" did not come to rest in 45 s`); });
+    };
+    // How many pixels of the word's box are mostly ink, in a screenshot.
+    const inkedPixels = async (page) => {
+      const { box, ink } = await page.evaluate(() => {
+        const lab = window.__lab;
+        const f = lab.lastFrame();
+        const poses = f.poses.filter((p) => !p['ghost?']);
+        const first = poses[0], last = poses[poses.length - 1];
+        const top = lab.project(first.x, first.y + 0.9, 0);
+        const bottom = lab.project(last.x + lab.advance(last.char), last.y - 0.3, 0);
+        return { box: { x0: top.x, y0: top.y, x1: bottom.x, y1: bottom.y }, ink: lab.inkColour('text', f.reveal.lights) };
+      });
+      const img = decodePng(await page.screenshot());
+      return inkMap(img, box, commonColour(img), ink).cov.reduce((n, c) => n + (c > 0.5 ? 1 : 0), 0);
+    };
+    // Fewer than this and the word is not there: five letters ink thousands.
+    const drawnPixels = 200;
+    const state = (page) => page.evaluate(() => ({
+      gpu: 'gpu' in navigator,
+      backend: window.__lab.backend,
+      status: document.getElementById('status').textContent,
+      pipelines: window.__pipelines,
+      errors: window.__lab.gpuErrors(),
+      allowed: window.__lab.vertexBuffers(),
+    }));
+
+    // (a) the pipelines three.js really asks WebGPU for
+    const page = await context.newPage();
+    const messages = listen(page);
+    current = page;
+    await open(page, at({ reveal: '3', debug: '' }));
+    await typeWord(page);
+    const first = await state(page);
+    let proved;
+    if (first.pipelines.length) {
+      const most = (k) => Math.max(...first.pipelines.map((p) => p[k]));
+      const over = first.pipelines.filter((p) => p.buffers > 8 || p.attributes > 16);
+      if (over.length) throw new Error(`pipelines beyond WebGPU's guaranteed 8 buffers and 16 attributes: ${JSON.stringify(over)}`);
+      if (most('buffers') > first.allowed)
+        throw new Error(`the glyph pipeline binds ${most('buffers')} vertex buffers; lab.instance says ${first.allowed}`);
+      const failed = messages.filter((m) => /pipeline creation failed|exceeds the maximum/i.test(m));
+      if (failed.length) throw new Error(`WebGPU refused a pipeline: ${failed.join(' | ')}`);
+      proved = `three.js's WebGPU path asked the device for ${first.pipelines.length} render pipelines: `
+        + `the glyph pipeline binds ${most('buffers')} vertex buffers (lab.instance ${first.allowed}, WebGPU's limit 8), `
+        + `at most ${most('attributes')} attributes (limit 16), no pipeline refused`;
+    } else {
+      proved = `${first.gpu ? 'no WebGPU pipeline was asked for' : 'navigator.gpu is absent'}, so NO pipeline was checked`;
+      if (first.backend === 'WebGPU') throw new Error('the lab reports WebGPU but asked the device for no render pipeline');
+    }
+    if (first.backend === 'WebGL2' && !((await inkedPixels(page)) >= drawnPixels))
+      throw new Error(`on WebGL2 "${word}" is not drawn; status "${first.status}"`);
+
+    // (b) never blank and silent: the word is drawn, or the status line
+    // names what went wrong. A software device may be lost at any moment
+    // after the start, so wait for one of the two, bounded.
+    let outcome = null, last = first;
+    for (const until = Date.now() + 30000; !outcome && Date.now() < until;) {
+      last = await state(page);
+      const pixels = await inkedPixels(page);
+      if (pixels >= drawnPixels)
+        outcome = last.backend === 'WebGL2'
+          ? `the lab fell back to WebGL2 and drew "${word}" (${pixels} inked px)`
+          : `"${word}" drawn on WebGPU (${pixels} inked px)`;
+      else if (/with errors|Couldn't start/.test(last.status))
+        outcome = `nothing drawn, and the status line says so: "${last.status}" (${last.errors[0] ?? 'no message'})`;
+      else await page.waitForTimeout(500);
+    }
+    await page.screenshot({ path: `${out}/webgpu.png` });
+    if (!outcome)
+      throw new Error(`blank and silent: "${word}" is not drawn and the status line reads "${last.status}" on ${last.backend}; `
+        + `console: ${messages.slice(-5).join(' | ')}`);
+    await page.close();
+
+    // (c) ?webgl never touches WebGPU
+    const forced = await context.newPage();
+    listen(forced);
+    current = forced;
+    await open(forced, at({ webgl: '' }));
+    await typeWord(forced);
+    const gl = await state(forced);
+    if (gl.backend !== 'WebGL2' || !gl.status.includes('WebGL2')) throw new Error(`?webgl ended on ${gl.backend}; status "${gl.status}"`);
+    if (gl.pipelines.length || gl.errors.length)
+      throw new Error(`?webgl asked WebGPU for ${gl.pipelines.length} pipelines and kept ${gl.errors.length} GPU errors`);
+    const glPixels = await inkedPixels(forced);
+    if (!(glPixels >= drawnPixels)) throw new Error(`with ?webgl "${word}" is not drawn (${glPixels} inked px)`);
+    await forced.close();
+    await gpuBrowser.close();
+    done(`${proved}; not blank and silent: ${outcome}; ?webgl starts on WebGL2 without asking WebGPU for anything and draws "${word}" (${glPixels} inked px)`);
+  }
+
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark', 'webgpu',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
   console.error(`FAIL ${step}: ${e.message}`);
-  const errors = current ? consoleErrors.get(current) : [];
+  const errors = (current && consoleErrors.get(current)) ?? [];
   console.error(`console errors (${errors.length}):`);
   errors.forEach((m) => console.error('  ' + m));
   try { await current?.screenshot({ path: `${out}/failure.png` });
         console.error(`screenshot: ${out}/failure.png`); } catch {}
 } finally {
+  await gpuBrowser?.close();
   await browser.close();
 }
 process.exit(code);

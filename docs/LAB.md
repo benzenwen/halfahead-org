@@ -375,6 +375,35 @@ one draw call.
 | `:ink` | `:text` | the palette | The letter's colour: `:text` mixed `:tint` of the way towards the ink, both for the frame's lights. |
 | `:tint` | 1 with an `:ink` | 0 to 1 | How far towards the ink. Without an `:ink` there is nothing to move towards. |
 
+### Vertex buffers: the limit, and adding a channel
+
+WebGPU guarantees a pipeline 8 vertex buffers and 16 vertex attributes
+(`maxVertexBuffers`, `maxVertexAttributes`), and every per-instance
+attribute is a buffer of its own. WebGL2 has no such limit, so a layout
+that is too wide draws on WebGL2 and draws nothing at all on WebGPU: with
+one attribute per channel (ten buffers) the lab was blank on WebGPU for a
+day. The channels are therefore packed into four attributes, listed as
+data in `halfahead.lab.instance`:
+
+| attribute | width | holds |
+|---|---|---|
+| `glyphRect` | 4 | the glyph's rectangle in the atlas |
+| `glyphLook` | 4 | opacity, glow, wobble, ghost |
+| `glyphShape` | 3 | `:weight`, `:blur`, `:fill` |
+| `glyphInk` | 3 | the letter's colour, in linear light |
+
+With the quad's position and uv and the instance matrix that is 7 buffers
+and 10 attribute slots (a mat4 takes four); the quad has no normal, which
+the renderer deletes. `test/halfahead/lab/instance_test.cljc` fails when
+the layout goes past 7, so one buffer stays spare. (`:sx`, `:sy` and
+`:skew` cost nothing: they are in the instance matrix.)
+
+To add a channel, put it in a spare component of a packed attribute,
+never in a new attribute: widen `glyphShape` or `glyphInk` to 4 in
+`lab.instance` and name the channel in its `:holds`, read the component in
+`glyph-material`, and write it in `draw!`. Only when all four are full
+does a fifth attribute come up, and that takes the last spare buffer.
+
 Glow's vermilion now shows only where the halo does: a letter's own edge
 keeps the letter's ink however soft it is, where before every edge pixel
 was mixed towards vermilion.
@@ -734,7 +763,8 @@ bb lab:e2e    # the same page in headless Chromium (e2e/lab.mjs)
 ```
 
 Add `?reveal=3` to the URL for the full stage at once (see The reveal),
-or `?specimen` for the type specimen (see The specimen page).
+`?specimen` for the type specimen (see The specimen page), or `?webgl` to
+start on WebGL2 without trying WebGPU (see the backend, below).
 
 `bb lab` serves `public/` on a free port and prints the URL of
 `/lab/index.html` (the local server maps only `/` to an index); Ctrl-C
@@ -835,20 +865,68 @@ on the dark stage (`?reveal=3`, `dress-dark.png`). All along it asserts on
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
-`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png` and `dress-dark.png`, and stops the server it started. It is not part of
+`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png`, `dress-dark.png` and `webgpu.png`, and stops the server it started. It is not part of
 `bb test`.
+
+### The webgpu step
+
+Every step above runs on WebGL2 in the check's browser: headless Chromium
+has a software WebGPU adapter, but its `GPUTexture.createView` rejects the
+`swizzle` field three.js 0.187 passes, so the lab falls back. The last
+step, `webgpu`, opens a second browser with an init script that drops
+`swizzle` before calling the real `createView`, and that records the
+vertex buffers and attributes of every descriptor given to
+`GPUDevice.createRenderPipeline` and `createRenderPipelineAsync`. On
+`/lab/?reveal=3&debug` it types a word, and of the pipelines recorded it
+asserts that none has more than 8 buffers or 16 attributes, that the
+widest (the glyph pipeline) has no more than `__lab.vertexBuffers()`, and
+that no console message says "pipeline creation failed" or "exceeds the
+maximum". Then the page may not be blank and silent: either the word's box
+holds inked pixels, or the status line names an error. Last, `/lab/?webgl`
+must end on WebGL2, record no pipeline at all, and draw the word. The
+step's line says which of these it saw. Where the browser has no
+`navigator.gpu`, or no pipeline is asked for, it says that no pipeline was
+checked and asserts only that the word is drawn.
+
+What it proves: the descriptors are the ones three.js's real WebGPU path
+builds from the lab's own scene, and the software device does validate
+them (given nine buffers it answers "Vertex buffer count (9) exceeds the
+maximum number of vertex buffers (8)", and the step fails). What it
+cannot: in a cloud container that device is lost a moment after the first
+frame is submitted ("A valid external Instance reference no longer
+exists"), so nothing is presented and no pixel is ever checked on WebGPU;
+the lab's start-up probe sees the loss and falls back to WebGL2, which is
+what the step then photographs. It says nothing about a real GPU, whose
+limits may be higher but never lower, nor about the path without the
+shim. And three.js binds only the attributes the shader reads, and moves
+the instance matrix into a uniform buffer when the geometry is crowded,
+so the recorded count can be lower than `lab.instance`'s, never higher.
+
+### The backend
 
 The status line names the backend. `halfahead.lab.render` asks three.js's
 `WebGPURenderer` for WebGPU, which falls back to WebGL2 when the browser
 has none. Some browsers expose a WebGPU older than this three.js expects,
-which only shows when drawing, so the renderer draws one empty frame first
-and starts over on WebGL2 if that fails. One TSL material serves both
-backends.
+or with less room than a pipeline asks for, and WebGPU reports nearly
+every failure after the call that caused it has returned, where a
+try/catch cannot see it. So the renderer first draws a probe frame (one
+letter and the caret, so that every pipeline the lab uses is made) inside
+WebGPU error scopes, waits for the device to finish the work, and reads
+the scopes; it also counts whatever three.js logs as an error meanwhile
+(three catches a refused pipeline itself and then skips its draws in
+silence), the device being lost, and five seconds without an answer. Any
+of those is warned of in the console and the renderer starts over on
+WebGL2. An error WebGPU reports after a good start, or the device being
+lost then, is warned of once and kept: `window.__lab.gpuErrors()` returns
+the messages (five at most) and the status line reads "Rendering with
+WebGPU, with errors: add ?webgl to the address". `?webgl` starts the
+renderer on WebGL2 directly. One TSL material serves both backends.
 
 The page is offline: no network, no downloaded fonts (the glyph atlas is
 rasterised with tiny-sdf from the system's sans faces), no audio files:
 sound, when turned on, is synthesized.
-`window.__lab` exposes `backend`, `liveText()`, `lastFrame()`,
+`window.__lab` exposes `backend`, `gpuErrors()` and `vertexBuffers()`
+(the buffers `lab.instance` allows the glyph pipeline), `liveText()`, `lastFrame()`,
 `directions()` (the draft's directions), `drawn()`, `lean(i)` (degrees between drawn glyph i's projected left edge
 and the screen vertical) and `blockCentre()` (the block's drawn centre,
 where the frame's camera target lands, and the viewport size, in CSS
