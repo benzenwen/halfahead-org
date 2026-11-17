@@ -92,12 +92,15 @@
           at u as the same cue without it at 2u (property), and :fills
           reaches poses and is ignored with reduced motion; every existing
           pose test passes unchanged.
-          e2e/lab.mjs, a new step 'reading' (?debug&reveal=3, Plain
-          picked, pace set to 250), sampling window.__lab.lastFrame() and
+          e2e/lab.mjs, a new step 'reading' (?debug&reveal=3, Elegant
+          picked, pace set to 250; Plain would perform no marks at all,
+          its flourish being 0, and Elegant has no sway), sampling window.__lab.lastFrame() and
           reading() on every animation frame so nothing depends on frame
           rate: type 'I loooove this (honestly). But maybe not. Ship it!';
           wait until every letter is at rest (the typing's own cues and
-          any shot are over, about 6 s); press Ctrl+Enter; then (a) in every sampled frame during the
+          any shot are over; in Elegant a swell takes up to 5 s, so wait on
+          the data: every live pose at its resting place for 500 ms);
+          press Ctrl+Enter; then (a) in every sampled frame during the
           stops the fills along the text are non-increasing (a lit prefix,
           at most one fraction, a dim suffix); (b) the boundary agrees
           with headAt(that frame's time) within 1.5 characters; (c) no
