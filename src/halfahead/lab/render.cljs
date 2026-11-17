@@ -129,10 +129,10 @@
   same field, in vermilion; wobble as a jelly sway of the quad's corners."
   [^js atlas-texture ^js atlas-size]
   (let [rect (tsl/attribute "glyphRect" "vec4")
-        opacity (tsl/attribute "glyphOpacity" "float")
-        glow (tsl/attribute "glyphGlow" "float")
-        wobble (tsl/attribute "glyphWobble" "float")
-        ghost (tsl/attribute "glyphGhost" "float")
+        ;; opacity, glow, wobble and ghost share one attribute: see per-instance
+        ^js look (tsl/attribute "glyphLook" "vec4")
+        ^js opacity (.-x look), ^js glow (.-y look)
+        ^js wobble (.-z look), ^js ghost (.-w look)
         ^js shape (tsl/attribute "glyphShape" "vec3")
         ^js weight (.-x shape), ^js blur (.-y shape), ^js filled (.-z shape)
         glyph-ink (tsl/attribute "glyphInk" "vec3")
@@ -174,7 +174,14 @@
 ;; --- instances ---------------------------------------------------------------
 
 (def ^:private per-instance
-  {"glyphRect" 4 "glyphOpacity" 1 "glyphGlow" 1 "glyphWobble" 1 "glyphGhost" 1
+  ;; Every attribute here is its own vertex buffer, beside position, uv and
+  ;; instanceMatrix, and WebGPU guarantees only eight vertex buffers to a
+  ;; pipeline. Ten (one per channel) drew nothing at all on WebGPU while
+  ;; WebGL2 was fine, so channels are packed: four attributes, seven
+  ;; buffers. Add a channel to a packed attribute, not as a new one.
+  {"glyphRect" 4
+   ;; opacity, glow, wobble, ghost
+   "glyphLook" 4
    ;; weight, blur, fill; and the letter's colour, in linear light
    "glyphShape" 3 "glyphInk" 3})
 
@@ -407,8 +414,7 @@
         ^js mesh (ensure-capacity! r n)
         ^js geometry (.-geometry mesh)
         attr (fn [k] (.-array (.getAttribute geometry k)))
-        rects (attr "glyphRect"), opacity (attr "glyphOpacity"), glow (attr "glyphGlow")
-        wobble (attr "glyphWobble"), ghost (attr "glyphGhost")
+        rects (attr "glyphRect"), look (attr "glyphLook")
         shape (attr "glyphShape"), inks (attr "glyphInk")
         lights (get-in frame [:reveal :lights] 1)
         ;; nearly every letter is in the :text ink: convert it once
@@ -441,10 +447,7 @@
               0  0        0 1)
         (.setMatrixAt mesh i (.multiplyMatrices scratch-matrix (.-matrix o) scratch-shape))
         (.set rects #js [rx ry rw rh] (* 4 i))
-        (aset opacity i (:opacity p))
-        (aset glow i (:glow p))
-        (aset wobble i (:wobble p))
-        (aset ghost i (if (:ghost? p) 1 0))
+        (.set look #js [(:opacity p) (:glow p) (:wobble p) (if (:ghost? p) 1 0)] (* 4 i))
         (.set shape #js [(:weight p 0) (:blur p 0) (:fill p 1)] (* 3 i))
         (.set inks #js [(.-r c) (.-g c) (.-b c)] (* 3 i))))
     (.set (.-value atlas-size) atlas-width (:height @atlas))
