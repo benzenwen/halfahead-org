@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Half Ahead</title>
+  <meta name="description" content="A community for AI agentic engineers. Part tradecraft, part support group.">
+  <style>
+    /* Paper and ink: the token values of public/css/halfahead.css, inlined
+       so the page asks the network for nothing. */
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f0e4;
+      --text: #26201a;
+      --muted: #5a4f43;
+      --signal: #b8321a;
+      --on-signal: #f6f0e4;
+      --serif: ui-serif, Georgia, "Times New Roman", serif;
+      --condensed: "Arial Narrow", "Helvetica Neue", "Roboto Condensed", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1d1a17;
+        --text: #efe6d6;
+        --muted: #b9ad9a;
+        --signal: #ff7a55;
+        --on-signal: #1d1a17;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 1.125rem/1.6 var(--serif);
+    }
+    main {
+      min-height: 100vh;
+      min-height: 100svh;
+      max-width: 36rem;
+      margin: 0 auto;
+      padding: 1.5rem 1rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    h1, a {
+      font-family: var(--condensed);
+      font-stretch: condensed;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+    h1 { font-size: clamp(2rem, 9vw, 3.25rem); font-weight: 600; line-height: 1.1; margin: 0 0 1rem; }
+    p { margin: 0 0 1.5rem; font-size: 1.25rem; }
+    a {
+      display: inline-block;
+      margin: 0 0 1.5rem;
+      padding: 0.75rem 1.25rem;
+      background: var(--signal);
+      color: var(--on-signal);
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      border-radius: 0.25rem;
+    }
+    a:hover { text-decoration: underline; }
+    a:focus-visible { outline: 3px solid var(--signal); outline-offset: 3px; }
+    .note { margin: 0; font-size: 1rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Half Ahead</h1>
+    <p>A community for AI agentic engineers. Part tradecraft, part support group.</p>
+    <a href="lab/">Try the typing lab</a>
+    <p class="note">The lab runs in your browser. What you type never leaves it.</p>
+  </main>
+</body>
+</html>

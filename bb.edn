@@ -67,6 +67,16 @@
            :requires ([halfahead.dev.lab])
            :task     (halfahead.dev.lab/e2e!)}
 
+  site    {:doc      "Assemble what would be deployed into out/site: the landing page and the typing lab's release build, nothing of the app. Deploys nothing"
+           :depends  [deps]
+           :requires ([halfahead.dev.site])
+           :task     (halfahead.dev.site/-main)}
+
+  site:e2e {:doc      "bb site, then the lab's browser check (e2e/lab.mjs) against the release build served from out/site (not part of bb test)"
+            :depends  [deps]
+            :requires ([halfahead.dev.site])
+            :task     (halfahead.dev.site/e2e!)}
+
   dev     {:doc     "Watch the app and serve public/ at http://localhost:8000"
            :depends [deps]
            :task    (shell "npx shadow-cljs watch app")}
