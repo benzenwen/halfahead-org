@@ -347,14 +347,83 @@ schema; write its patch in `halfahead.lab.gestures`; give it its own name
 in the glossary; add a row above. Nothing in `lab.pose` changes, and the
 tests refuse a patch with problems or without a name.
 
-**The new channels are data for now.** `:sx` and `:sy` (stretch, resting
-at 1, never below 0), `:skew` (slant, 0), `:weight` (0, within -1 to 1),
-`:blur` (0, within 0 to 1) and `:fill` (how much is inked, 1, within 0 to
-1) reach the frame, each present in a pose only while it is away from
-rest, so a frame without them is the frame it always was. The reference
-renderer does not draw them yet (a later order), so `:bloom`, `:hush`,
-`:lean` and `:draw` show only their glow, scale and opacity for now. A
-`:tint` is dropped: nothing gives a letter an ink yet.
+**The score's channels.** `:sx` and `:sy` (stretch, resting at 1, never
+below 0), `:skew` (slant, 0), `:weight` (0, within -1 to 1), `:blur` (0,
+within 0 to 1) and `:fill` (how much is inked, 1, within 0 to 1) reach the
+frame, each present in a pose only while it is away from rest, so a frame
+without them is the frame it always was. The reference renderer draws
+them (see Channels), so `:bloom`, `:slam`, `:hush`, `:lean`, `:shiver` and
+`:draw` show in full. A `:tint` is still dropped by `lab.pose`: nothing
+gives a letter an ink yet (dress is a later order), though the renderer
+would draw one.
+
+## Channels
+
+Everything a pose can vary beyond place, turn, size and light, and how
+the reference renderer (`halfahead.lab.render`) draws it. A missing key is
+its rest value. Each is a per-instance attribute of the one instanced
+mesh, read by the one TSL material: a frame using all of them is still
+one draw call.
+
+| key | rest | range | drawn as |
+|---|---|---|---|
+| `:sx` `:sy` | 1 | ≥ 0 | The quad's width and height, times `:scale`, about the quad's centre. |
+| `:skew` | 0 | any | The quad sheared along x by `:skew` times the height above the letter's baseline: + leans right, and the baseline stays put. Composed into the instance matrix after the stretch and before the turn. |
+| `:weight` | 0 | −1 to 1 | The distance field's edge moved: at +1 out by 2.6 atlas pixels (of a 48 px em), at −1 in by 1.3. Those limits keep a black letter inside its quad (the field runs out 8 px from the outline) with its counters open, and leave a hairline its core. |
+| `:blur` | 0 | 0 to 1 | The edge's soft band widened from ±0.7 atlas pixels to ±3.6. The band never reaches the quad's border nor past the field's middle, so at 1 the letter is very soft but still a letter. |
+| `:fill` | 1 | 0 to 1 | The part of the quad left of `:fill` (in the quad's own 0 to 1 width) at full alpha and the rest at 35%, with a boundary 0.08 wide; 0 is all dim, 1 all inked. The wipe is across each letter's own quad. |
+| `:ink` | `:text` | the palette | The letter's colour: `:text` mixed `:tint` of the way towards the ink, both for the frame's lights. |
+| `:tint` | 1 with an `:ink` | 0 to 1 | How far towards the ink. Without an `:ink` there is nothing to move towards. |
+
+Glow's vermilion now shows only where the halo does: a letter's own edge
+keeps the letter's ink however soft it is, where before every edge pixel
+was mixed towards vermilion.
+
+## The palette
+
+`halfahead.lab.ink` maps the closed palette (`:ha/ink`) to colours, one for
+paper (`:lights` 0, background `#f6f1e7`) and one for the dark stage
+(`:lights` 1, `#141210`); between the two it is a straight mix.
+`(ink/colour ink lights)` is `[r g b]` in 0 to 1, and `(ink/contrast a b)`
+the WCAG 2 contrast ratio. Nobody authors a colour.
+
+| ink | on paper | contrast | on the stage | contrast |
+|---|---|---|---|---|
+| `:text` | `#1d1a16` | 15.40 | `#efe6d6` | 15.09 |
+| `:signal` | `#c2401c` | 4.61 | `#ff7a55` | 7.27 |
+| `:gold` | `#7d5a00` | 5.59 | `#e8b84a` | 10.13 |
+| `:cool` | `#1f5f8b` | 6.08 | `#7fb8e6` | 8.81 |
+| `:muted` | `#5a5044` | 7.00 | `#b9ad9a` | 8.46 |
+
+`:text`, `:signal` and `:muted` are the page's own. The tests hold every
+ink to 4.5:1 against its background and every pair of inks at least 0.2
+apart (distance in RGB, 0 to 1 a component) on each background.
+
+## The specimen page
+
+`/lab/?specimen` draws a type specimen on every frame instead of what is
+typed: rows of "Halfahead" (as much of it as lets a row fit the layout
+width), each row one channel at fixed values and everything else at rest.
+`?reveal=0` or `1` shows it on paper; `2`, `3` or nothing, on the dark
+stage. Typing does nothing there. The frame is
+`(halfahead.lab.specimen/frame {:advance f :width-em n :aspect n :lights
+0|1})`, pure and valid like any other, seen straight on by a camera that
+fits the rows.
+
+| row | values, left to right |
+|---|---|
+| weight | −1, −0.5, 0, 0.5, 1 |
+| blur | 0, 0.33, 0.66, 1 |
+| skew | −0.3, 0, 0.3 |
+| stretch | at rest, `:sx` 1.4, `:sy` 1.4 |
+| fill | 0, 0.25, 0.5, 0.75, 1, on a single H (the wipe is per letter) |
+| ink | `:text`, `:signal`, `:gold`, `:cool`, `:muted` |
+
+`(specimen/samples opts)` lists the samples as `{:row :value :glyph-ids}`.
+On the page `window.__lab.specimen()` returns them, each with `box` (`x0
+y0 x1 y1`, the CSS pixels its quads were drawn in), and
+`window.__lab.inkColour(ink, lights)` the 0 to 255 colour of an ink, so a
+still can be measured: `bb lab:e2e` does (see Running it).
 
 ## Directing
 
@@ -526,7 +595,8 @@ bb lab        # compile the :lab build, serve public/, print the page's URL
 bb lab:e2e    # the same page in headless Chromium (e2e/lab.mjs)
 ```
 
-Add `?reveal=3` to the URL for the full stage at once (see The reveal).
+Add `?reveal=3` to the URL for the full stage at once (see The reveal),
+or `?specimen` for the type specimen (see The specimen page).
 
 `bb lab` serves `public/` on a free port and prints the URL of
 `/lab/index.html` (the local server maps only `/` to an index); Ctrl-C
@@ -579,14 +649,31 @@ there" at least 1.9 em behind where they settle (`card.png`), and that
 5 s later all are at scale 1; types "why not? " within 10 s of the card
 and checks it was directed `:line` (the budget); and 11 s after the card
 types "is it? " and checks that a `:push` brought the camera at least 25%
-nearer its target (`push.png`). Finally it repeats with reduced motion (on every frame the camera target
-is on the current line and drawn at the canvas centre), asserting on
-`window.__lab` along the way; it leaves `typing-mid.png`, `embers.png`,
+nearer its target (`push.png`). It repeats with reduced motion (on every frame the camera target
+is on the current line and drawn at the canvas centre). Finally the
+`specimen` step opens `/lab/?specimen` and `/lab/?specimen&reveal=0` at
+1280 × 900, checks that typing changes nothing, and measures each
+screenshot's pixels inside every sample's box, as ink from 0 (the
+background) to 1 (the sample's ink) in linear light: the ink grows with
+weight, by at least 15% from −1 to 0 and from 0 to +1, and −1 keeps at
+least a quarter of 0's; the count of half-inked pixels grows with blur;
+the ink in the top third of the box is right of the bottom third's at
+skew +0.3 and left at −0.3 (less the upright sample's own offset, since
+the word's ascenders are not evenly placed); the inked box is wider for
+`:sx` and taller for `:sy` than at rest; at fill 0.5 the left half of the
+H holds at least twice the right half's ink, and at 0 and 1 the halves are
+even, 0 holding about 35% of 1's; and the most common inked colour of each
+ink's sample is within 12/255 of `__lab.inkColour`. They are stills, so no
+timing is involved. The same step types a 200 character paragraph on
+`/lab/?debug`, waits for it to rest and reports the overlay's mean frame
+time (lab-notebook H3; headless numbers are for comparison only, so
+nothing is asserted). All along it asserts on
+`window.__lab`; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
-`out/lab/`, and stops the server it started. It is not part of
+`out/lab/`, with `specimen-dark.png` and `specimen-paper.png`, and stops the server it started. It is not part of
 `bb test`.
 
 The status line names the backend. `halfahead.lab.render` asks three.js's
@@ -606,5 +693,6 @@ where the frame's camera target lands, and the viewport size, in CSS
 pixels),
 `project(x, y, z)` (where a point in em landed on the canvas, in CSS
 pixels), `advance(c)` (a character's advance in em), `soundLog()` and
-`bounds()` (see Sound) for tests and for anyone poking at
+`bounds()` (see Sound), `specimen()` and `inkColour(ink, lights)` (see The
+specimen page; `specimen()` is null on the ordinary page) for tests and for anyone poking at
 it from the console.
