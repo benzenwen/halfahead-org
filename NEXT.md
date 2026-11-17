@@ -1,5 +1,71 @@
 # Next: what needs Ben, and what the factory does after
 
+## The score drive, 2026-11-17 (newest first)
+
+The design is `docs/product/score.md`; what was measured is in
+`docs/product/lab-notebook.md`; every choice made without you is in
+`docs/product/open-questions.md`; the path to production is
+`docs/PROD.md`.
+
+### Try it (five minutes)
+
+```sh
+bb lab          # prints the URL of /lab/
+```
+
+- **The held note.** Type `I loooove it ` and watch "loooove": each
+  letter lifts in turn, as in the Music app's lyrics.
+- **Read back.** Pick **Elegant**, type `I loooove this (honestly). But
+  maybe not. Ship it!`, press **Ctrl+Enter**. The line dims and fills
+  with ink at the Pace slider's words a minute, and each mark performs
+  as the head reaches it. Try 150 and 400. Escape stops it. Then pick
+  Caffeinated and do it again: the same marks, a different performance.
+- **Dress.** Add `?reveal=1` (the paper page), pick Elegant, type `This
+  is *the one thing* that matters (trust me).`: gold and a whisper. Move
+  the mouse over the gold. In Caffeinated a sentence of twelve words or
+  more gets a raised initial.
+- **The gestures.** Type their names: `swell bloom slam hush lean nod
+  shiver draw` (and the earlier eleven).
+- **The type specimen.** `/lab/?specimen`, and `&reveal=0` for paper:
+  weight, focus, slant, stretch, fill and the five inks.
+- **An agent writing scores.** `bb lab:score-eval` (28 model calls, about
+  $1); the page it is given is `resources/agent/score-reference.md`.
+- `?debug` shows what fired; `?reveal=3` skips to the dark stage.
+
+### Decisions you owe
+
+1. **The cap.** Factory spend is $142.64 of your $150. The board (pads
+   and an XY pad) and the flick (A/B that learns your style) are
+   specified and queued (orders 0051, 0053), about $10 each; three small
+   fixes below are another $10 to $15 together. Name a number.
+2. **Production.** `docs/PROD.md`: one sentence from you, two repository
+   settings, and the charter wording. The deploy workflow is written and
+   switched off.
+3. **What Plain means (Q30).** Auto is the default style and falls back
+   to Plain, and Plain performs no marks and no dress. So a visitor who
+   types at an ordinary pace sees the swell and nothing else of this
+   drive, and dress disappears six seconds after typing stops. The
+   foreman's recommendation: Plain keeps its plain motion but gets a
+   modest flourish (0.35), and bareness is the reveal level's job.
+4. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q32.
+   The ones that are expensive to change later are Q1 (the first tier is
+   rhetorical), Q5 (patches are bounded) and Q25 (a requested read-back
+   may run past five seconds).
+
+### Next orders, in the order the foreman would run them
+
+| order | what | why |
+|---|---|---|
+| (new) | Plain's flourish, and dress that stays | Q30: the default experience shows too little |
+| (new) | A reading keeps the style it started in | In Auto a reading can outlast its grant when the rhythm window lapses |
+| (new) | The glow takes the letter's ink | Gold glints pink: the halo has always been vermilion |
+| 0051 | The board | People get an instrument, not parameters |
+| 0053 | The flick | A style that learns you; H5 says make the two options obviously different |
+| (new) | Scout writes scores | Bring the score into the app: `:ha/engine-reply` carries one (your yes on experiment 5) |
+| (new) | Glosses in the margin | The illuminator's other half: agents annotate beside the text |
+
+## The first drive, 2026-10-21
+
 Written by the foreman at the end of the first overnight drive
 (2026-10-21). DECISIONS.md has the reasoning; this page is the to-do list.
 
