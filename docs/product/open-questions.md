@@ -37,6 +37,7 @@ with; the cheap ones can flip in one order.*
 | Q25 | Does the 5 s cap apply to a read-back? | No: a reading someone asks for and can stop with Escape may run to 30 s; anything that starts by itself keeps the cap | H6 measured that under the cap a 150 wpm reader gets no reading head beyond ten words; WCAG 2.2.2 is about motion nobody requested | Charter wording is yours: "no flourish holds a reader longer than 5 s" |
 | Q26 | Does a sentence with an ellipsis land? | No: "So... yes." and "I don't know... maybe" get no landing | Trailing off is the opposite of landing; restraint when unsure | Low |
 | Q27 | Dress before the board | With the cap as it is, the queue runs dress (illumination) before the board, and the flick last | You asked for beautiful first; the board is power, the flick needs both | Order only |
+| Q28 | How bright is the swell's glow? | 0.22 at full intensity, half the first value | In the first screenshot the halo around "loooove" read as an alarm; the Music app's glow is soft | One number in `lab.gestures` |
 
 ## Still yours from before
 

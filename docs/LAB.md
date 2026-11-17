@@ -300,7 +300,7 @@ A patch is:
  :stagger {:ms-per-glyph 120 :max-ms 900}
  :mods [{:channel :y    :amount 0.25 :curve :rise-sine :from 0     :to 0.375}
         {:channel :y    :amount 0.25 :curve :fade2     :from 0.375 :to 1}
-        {:channel :glow :amount 0.45 :curve :arch}]}
+        {:channel :glow :amount 0.22 :curve :arch}]}
 ```
 
 The nineteen gestures (amounts at intensity 1; "ripple" is the first
