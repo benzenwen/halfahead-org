@@ -138,6 +138,7 @@
                      [:fn {:error/message "must be finite"}
                       #(and (== % %) (not (#{##Inf ##-Inf} %)))]]
     :ha/unit        [:and :ha/finite [:>= 0] [:<= 1]]
+    :ha/signed-unit [:and :ha/finite [:>= -1] [:<= 1]]
 
     ;; One character of the draft: a UTF-16 unit, or a surrogate pair kept
     ;; whole. :id is stable across edits and never reused.
@@ -158,14 +159,16 @@
     ;; What a finished word does. Closed, like deliveries: lookups choose,
     ;; renderers draw, nobody invents motion in between.
     :ha/word-effect [:enum :pop :launch :shimmer :skitter :quake :melt
-                     :rewind :fuse :jitter :glow :wobble]
+                     :rewind :fuse :jitter :glow :wobble
+                     ;; added with the score (docs/product/score.md)
+                     :swell :bloom :slam :hush :lean :nod :shiver :draw]
 
     :ha/word-cue
     [:map {:closed true}
      [:word (text 1 64)]
      [:effect :ha/word-effect]
      [:intensity :ha/unit]
-     [:source [:enum :glossary :punctuation :shape :default]]]
+     [:source [:enum :glossary :punctuation :shape :elongation :board :default]]]
 
     ;; A cue placed on the draft: which glyphs it moves, and when it fired.
     :ha/placed-cue
@@ -219,7 +222,25 @@
      [:scale [:and :ha/finite [:>= 0]]]
      [:opacity :ha/unit]
      [:glow :ha/unit]
-     [:wobble :ha/unit]]
+     [:wobble :ha/unit]
+     ;; Channels added with the score; a renderer treats a missing one as
+     ;; its rest value (in brackets).
+     ;;   :sx :sy  stretch along one axis, times :scale [1]
+     ;;   :skew    slant, as the tangent of the angle; + leans right [0]
+     ;;   :weight  -1 hairline to +1 black [0]
+     ;;   :blur    0 crisp to 1 soft [0]
+     ;;   :fill    how much of the glyph is inked, wiped in from the left;
+     ;;            the rest is drawn dim, like an unsung lyric [1]
+     ;;   :ink     which ink of the closed palette [:text]
+     ;;   :tint    how far the glyph's colour has moved from :text to :ink [1]
+     [:sx optional [:and :ha/finite [:>= 0]]]
+     [:sy optional [:and :ha/finite [:>= 0]]]
+     [:skew optional :ha/finite]
+     [:weight optional :ha/signed-unit]
+     [:blur optional :ha/unit]
+     [:fill optional :ha/unit]
+     [:ink optional :ha/ink]
+     [:tint optional :ha/unit]]
 
     ;; Where the camera is and what it looks at, in the same em units as the
     ;; poses. Part of the frame so shots are data and testable; a renderer
@@ -242,7 +263,153 @@
      ;; full dark stage (:lights 1). See docs/product (experiment 1).
      [:reveal optional [:map {:closed true}
                         [:level [:int {:min 0 :max 3}]]
-                        [:lights :ha/unit]]]]}))
+                        [:lights :ha/unit]]]]
+
+    ;; --- the score (derived or authored, never trusted) ---------------------
+    ;; docs/product/score.md. Marks say what a span of text is doing; a
+    ;; style turns a mark into a gesture; a gesture is a patch; a patch
+    ;; modulates channels. Everything here is data an agent may write, so
+    ;; everything is closed and bounded, and halfahead.lab.synth/problems
+    ;; checks what a schema cannot (a patch ends at rest and stays in
+    ;; bounds).
+
+    ;; What one letter can vary. Deltas are added to the letter at rest.
+    :ha/channel [:enum :x :y :z :rx :ry :rz :scale :sx :sy :skew :weight
+                 :blur :opacity :glow :wobble :tint :fill]
+
+    ;; The closed palette. A renderer maps each to a colour for paper and
+    ;; for the dark stage, keeping contrast; nobody authors a colour.
+    :ha/ink [:enum :text :signal :gold :cool :muted]
+
+    ;; The shape of a modulation over its window, p from 0 to 1:
+    ;;   :one 1            :rise smoothstep 0->1     :fall 1 - smoothstep
+    ;;   :fade 1 - p       :fade2 (1 - p)^2          :arch sin(pi p)
+    ;;   :arc 4p(1 - p)    :rise-sine sin(pi p / 2)
+    ;;   :spring           a damped spring's step response, 0 -> 1 with
+    ;;                     overshoot (the one births use)
+    ;;   :spring-fall      1 - :spring
+    :ha/curve [:enum :one :rise :fall :fade :fade2 :arch :arc :rise-sine
+               :spring :spring-fall]
+
+    ;; Multiplies a curve. Time runs from the start of the modulation's
+    ;; window. :phase :same gives every letter the same phase, :index adds
+    ;; a quarter turn per position (a travelling wave), :id a fixed angle
+    ;; per glyph id and :salt (deterministic jitter). :abs? rectifies.
+    :ha/osc
+    [:map {:closed true}
+     [:wave [:enum :sine :cosine :triangle :noise]]
+     [:period-ms [:and :ha/finite [:>= 20] [:<= 5000]]]
+     [:phase optional [:enum :same :index :id]]
+     [:salt optional [:int {:min 0 :max 64}]]
+     [:abs? optional :boolean]]
+
+    ;; One channel moved by :amount (in the channel's unit, times the
+    ;; cue's intensity) along :curve, inside the window [:from :to) of the
+    ;; patch's time (default the whole of it), zero outside. :each limits
+    ;; it to even or odd positions in the cue; :alternate? flips its sign
+    ;; on odd positions.
+    :ha/mod
+    [:and
+     [:map {:closed true}
+      [:channel :ha/channel]
+      [:amount :ha/finite]
+      [:curve :ha/curve]
+      [:from optional :ha/unit]
+      [:to optional :ha/unit]
+      [:osc optional :ha/osc]
+      [:each optional [:enum :all :even :odd]]
+      [:alternate? optional :boolean]]
+     [:fn {:error/message ":from must be < :to"}
+      (fn [{:keys [from to]}] (< (or from 0) (or to 1)))]]
+
+    ;; A gesture written out. Each letter of the cue starts :ms-per-glyph
+    ;; after the one before (in :order), compressed so the last starts
+    ;; within :max-ms (default 900). With the slowest style's tempo (1.5),
+    ;; (2400 + 900) x 1.5 stays inside the 5 s cap.
+    :ha/patch
+    [:map {:closed true}
+     [:ms [:int {:min 50 :max 2400}]]
+     [:mods [:vector {:min 1 :max 12} :ha/mod]]
+     [:stagger optional
+      [:map {:closed true}
+       [:ms-per-glyph [:and :ha/finite [:>= 0] [:<= 500]]]
+       [:max-ms optional [:and :ha/finite [:>= 0] [:<= 900]]]
+       [:order optional [:enum :forward :reverse :centre-out]]]]]
+
+    ;; What a span of text is doing for its reader: the first tier.
+    ;;   :stress what matters          :hold  to be lingered on
+    ;;   :aside  under the breath      :turn  a change of direction
+    ;;   :doubt  unsure, hedged, wry   :build climbing
+    ;;   :land   the conclusion        :voice someone else's words
+    :ha/mark-kind [:enum :stress :hold :aside :turn :doubt :build :land :voice]
+
+    ;; A mark on a span of a message's text. :energy runs calm (-1) to
+    ;; excited (+1), :warmth harsh (-1) to tender (+1); both default 0.
+    ;; :gesture overrides the style's choice with a named gesture, :patch
+    ;; with a written-out one (checked by lab.synth/problems; a patch with
+    ;; problems is ignored and the style chooses).
+    :ha/mark
+    [:map {:closed true}
+     [:span :ha/span]
+     [:kind :ha/mark-kind]
+     [:amount :ha/unit]
+     [:energy optional :ha/signed-unit]
+     [:warmth optional :ha/signed-unit]
+     [:gesture optional :ha/word-effect]
+     [:patch optional :ha/patch]]
+
+    ;; What a mark leaves behind when the motion ends, like bold does.
+    ;;   :versal  an enlarged first letter    :rubric the signal ink
+    ;;   :gilt    gold that glints            :strong heavier weight
+    ;;   :whisper smaller, lighter, muted
+    :ha/dress
+    [:map {:closed true}
+     [:span :ha/span]
+     [:as [:enum :versal :rubric :gilt :strong :whisper]]]
+
+    ;; Where a style sits: every axis 0 to 1.
+    ;;   :energy   slow and small to fast and large
+    ;;   :flourish spare to lavish (how often anything performs)
+    ;;   :softness crisp and snappy to gliding
+    ;;   :warmth   cool ink and glassy sound to gold and wood
+    :ha/style-point
+    [:map {:closed true}
+     [:energy :ha/unit]
+     [:flourish :ha/unit]
+     [:softness :ha/unit]
+     [:warmth :ha/unit]]
+
+    ;; How fast this reader reads; one beat is one word's time.
+    :ha/pace
+    [:map {:closed true}
+     [:wpm [:int {:min 100 :max 800}]]]
+
+    ;; A message as an agent (or the lab's own rules) would have it
+    ;; performed. Spans index :text in UTF-16 units and must lie within
+    ;; it (checked by halfahead.lab.score, which drops what does not).
+    :ha/score
+    [:map {:closed true}
+     [:text :ha/message-text]
+     [:marks [:vector {:max 16} :ha/mark]]
+     [:dress optional [:vector {:max 8} :ha/dress]]
+     [:style optional [:or :ha/style :ha/style-point]]
+     [:shot optional :ha/shot]]
+
+    ;; A score laid out in time for one reader: when the reading head
+    ;; reaches each word, and when each mark that performs begins. Marks
+    ;; that do not perform (a long message shows only its strongest) are
+    ;; absent from :entries.
+    :ha/reading
+    [:map {:closed true}
+     [:duration-ms [:int {:min 0 :max max-performance-ms}]]
+     [:beat-ms [:and :ha/finite [:> 0]]]
+     [:stops [:vector [:map {:closed true}
+                       [:span :ha/span]
+                       [:at-ms [:int {:min 0}]]
+                       [:ms [:int {:min 0}]]]]]
+     [:entries [:vector [:map {:closed true}
+                         [:mark [:int {:min 0}]]
+                         [:at-ms [:int {:min 0}]]]]]]}))
 
 (def ^:private compiled
   (memoize (fn [k] (m/schema k {:registry registry}))))

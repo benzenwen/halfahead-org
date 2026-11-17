@@ -202,3 +202,35 @@ Caffeinated):
   stays 1.0 per the charter: nothing records review outcomes yet, so
   nothing has earned darkness; "dark" here means Ben is not watching each
   tick, not that review is skipped.
+
+### H21 ★ The score: marks, styles, gestures, patches, channels, and a clock — foreman, for Ben to review
+Ben (2026-11-17): "we didn't really do much design around a DSL… What would
+a rich, capable, creative description of animated text look like?", the
+full language for agents, people with "relatively little patience for
+tweaking", a subtle read (the Music app's held syllable), pacing that
+varies by reader, and "the modern equivalent of the illuminated
+manuscript". The design is `docs/product/score.md`; every choice made
+without Ben is in `docs/product/open-questions.md`; what is measured goes
+in `docs/product/lab-notebook.md`.
+- **The first tier is rhetorical**: eight marks (stress, hold, aside,
+  turn, doubt, build, land, voice) with an amount and an affect (energy,
+  warmth). A style turns a mark into a gesture; a gesture is a patch; a
+  patch modulates channels. Music's structure, on purpose.
+- **One engine**: a text synthesizer (`lab.synth`). Patches are data, and
+  are checked to end at rest and stay in bounds, so any agent may write
+  one.
+- **Time is counted in the reader's beats**, with a reading head and the
+  5 s cap; while typing, the clock stays the keystrokes.
+- **Dress** is what a mark leaves at rest (versal, rubric, gilt, strong,
+  whisper); inks are a closed palette.
+- **People get two instruments, no parameters**: the flick (an A/B that
+  moves a style point) and a small board.
+- **Autonomy** (Ben: "a little darker… run more autonomously… low
+  stakes"): the foreman now chooses and keeps going, logging choices. The
+  review rate stays 1.0 (review catches about half of known defects, so
+  nothing has earned less). Merging to main and deploying still need
+  Ben's words, because the charter says so; `docs/PROD.md` lists exactly
+  what to grant.
+- Main is merged with merge commits only: Lupa reads `factory(<id>)`
+  commits to know what is merged, and a squash would strand the graph.
+

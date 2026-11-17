@@ -35,7 +35,7 @@
 ;; --- coverage ----------------------------------------------------------------
 
 (deftest the-vocabularies-are-the-schemas
-  (is (= 11 (count effects)))
+  (is (= 19 (count effects)))
   (is (= [:line :card :push :pull] shots))
   (is (= (set style/styles) (set (m/children (m/deref-all (schema/schema :ha/style)))))))
 
