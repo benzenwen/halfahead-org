@@ -5,6 +5,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [halfahead.lab.director :as director]
+            [halfahead.lab.gestures :as gestures]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.reveal :as reveal]
             [halfahead.lab.style :as style]
@@ -12,8 +13,12 @@
 
 ;; --- generators -------------------------------------------------------------
 
-(def ^:private effects
+(def ^:private old-effects
   [:pop :launch :shimmer :skitter :quake :melt :rewind :fuse :jitter :glow :wobble])
+
+(def ^:private effects
+  "Every gesture: the eleven the lab began with, then the eight of the score."
+  (into old-effects [:swell :bloom :slam :hush :lean :nod :shiver :draw]))
 
 (def gen-char
   ;; newlines are frequent so drafts run past four lines and recede
@@ -152,7 +157,7 @@
 (defspec everything-settles-onto-the-layout 300
   (prop/for-all [[draft opts _] gen-case
                  k (gen/choose 0 3000)]
-    (let [t (+ (max (+ (latest draft) 2500) (level-latest draft opts)) k)
+    (let [t (+ (max (+ (latest draft) 5000) (level-latest draft opts)) k)
           f (pose/frame draft t opts)]
       (and (= (rest-poses draft opts (level draft opts t)) (live f))
            (empty? (ghosts f))
@@ -282,7 +287,7 @@
       (testing (str effect)
         (is (some true? (for [dt [50 150 300 500 800]]
                           (not= base (live (pose/frame draft (+ 5000 dt) {}))))))
-        (is (= base (live (pose/frame draft 6500 {}))))))))
+        (is (= base (live (pose/frame draft 10000 {}))))))))
 
 (deftest stacked-cues-stay-within-half-an-em
   (let [cue {:glyph-ids [0]
@@ -404,7 +409,7 @@
       (testing (str s " " effect)
         (is (some true? (for [dt [50 150 300 500 800]]
                           (not= base (live (pose/frame draft (+ 5000 dt) opts))))))
-        (is (= base (live (pose/frame draft 7500 opts))))))))
+        (is (= base (live (pose/frame draft 10000 opts))))))))
 
 (deftest styles-differ
   (let [draft (draft-of "boom " 10000 [quake])
@@ -465,6 +470,83 @@
     (testing "but the burst itself is styled from the rhythm"
       (is (= :coarse (:style (pose/frame (draft (into slow burst)) (+ b 280) {:style-choice :auto})))))))
 
+;; --- the score's channels ------------------------------------------------------
+
+(def ^:private score-keys [:sx :sy :skew :weight :blur :fill :ink :tint])
+
+(defn- cue-on [text effect intensity at]
+  (draft-of text 0 [{:glyph-ids (vec (range (count text)))
+                     :cue {:word text :effect effect :intensity intensity :source :default}
+                     :at-ms at}]))
+
+(deftest effects-cover-every-gesture
+  (is (= (set effects) (set (keys gestures/patches)))))
+
+(deftest new-channels-reach-the-frame-and-rest
+  (testing "mid-cue the channel is in the pose, off its rest and in range"
+    (doseq [[effect channel dt in-range?] [[:bloom :weight 800 #(< 0 % 1)]
+                                           [:hush :weight 700 #(< -1 % 0)]
+                                           [:hush :blur 700 #(< 0 % 1)]
+                                           [:lean :skew 390 pos?]
+                                           [:draw :fill 250 #(< 0 % 1)]]]
+      (let [f (pose/frame (cue-on "a" effect 1 5000) (+ 5000 dt) {})
+            v (get (first (live f)) channel)]
+        (is (schema/valid? :ha/glyph-frame f) (str effect))
+        (is (and (some? v) (in-range? v)) (str effect " " channel " is " v)))))
+  (testing "ink starts unfilled: a draw's first frame has :fill 0"
+    (is (= 0.0 (:fill (first (live (pose/frame (cue-on "a" :draw 1 5000) 5000 {})))))))
+  (testing "a pose at rest carries none of the new keys"
+    (doseq [effect effects
+            p (live (pose/frame (cue-on "abc" effect 1 5000) 10000 {}))]
+      (is (not-any? #(contains? p %) score-keys) (str effect))))
+  (testing "nor does any pose moved by one of the first eleven effects"
+    (doseq [effect old-effects
+            dt (range 0 1500 50)
+            p (live (pose/frame (cue-on "abcdef" effect 1 5000) (+ 5000 dt) {}))]
+      (is (not-any? #(contains? p %) score-keys) (str effect " at " dt))))
+  (testing "stacked cues stay in range"
+    (let [slam {:glyph-ids [0]
+                :cue {:word "b" :effect :slam :intensity 1 :source :default}
+                :at-ms 5000}
+          hush (assoc-in slam [:cue :effect] :hush)
+          draw (assoc-in slam [:cue :effect] :draw)
+          at (fn [cue dt]
+               (let [f (pose/frame (draft-of "b" 0 (vec (repeat 4 cue))) (+ 5000 dt) {})]
+                 (is (schema/valid? :ha/glyph-frame f))
+                 (first (live f))))]
+      (is (= 1.0 (:weight (at slam 30))) "four slams would be 3 unclamped")
+      (is (= -1.0 (:weight (at hush 700))))
+      (is (= 1.0 (:blur (at hush 700))))
+      (is (= 0.0 (:fill (at draw 100)))))))
+
+(deftest amplitude-scales-skew
+  (doseq [s [:plain :elegant :caffeinated]]
+    (let [{:keys [amplitude tempo]} (style/params s)
+          draft (cue-on "a" :lean 1 5000)
+          peak (reduce max (for [t (range 5000 (+ 5000 (* 1300 tempo)))]
+                             (:skew (first (live (pose/frame draft t {:style-choice s}))) 0.0)))]
+      (is (< (abs (- peak (* 0.28 amplitude))) 1e-3) (str s " peaks at " peak)))))
+
+(deftest swell-lifts-each-letter-in-turn
+  (let [k 0.7
+        draft (cue-on "loooove" :swell k 5000)
+        times (range 5000 8300 5)
+        lifts (mapv (fn [t] (mapv :y (live (pose/frame draft t {})))) times)
+        peak-at (fn [i] (apply max-key #(nth (nth lifts (quot (- % 5000) 5)) i) (reverse times)))
+        peaks (map peak-at (range 7))]
+    (testing "each letter's lift peaks 120 ms after the one before"
+      (is (= (map #(+ 5900 (* 120 %)) (range 7)) peaks)))
+    (testing "a sixth of an em at 0.7, and never more"
+      (is (close? (* 0.25 k) (reduce max (map #(reduce max %) lifts))))
+      (is (every? #(<= 0.0 % (+ (* 0.25 k) 1e-9)) (flatten lifts))))
+    (testing "it glows as it lifts"
+      (is (pos? (:glow (first (live (pose/frame draft 5900 {})))))))
+    (testing "and the word is at rest when the last letter's 2400 ms are up"
+      (is (not= (rest-poses draft {:advance pose/default-advance :width-em 40})
+                (live (pose/frame draft 8115 {}))))
+      (is (= (rest-poses draft {:advance pose/default-advance :width-em 40})
+             (live (pose/frame draft 8120 {})))))))
+
 ;; --- shots ------------------------------------------------------------------
 
 (def ^:private gen-directed-case
@@ -507,7 +589,7 @@
 (defspec everything-settles-after-directions 300
   (prop/for-all [[draft opts _] gen-directed-case
                  k (gen/choose 0 3000)]
-    (let [t (+ (max (+ (latest draft) 2500) (+ (latest-direction draft) 5000)
+    (let [t (+ (max (+ (latest draft) 5000) (+ (latest-direction draft) 5000)
                     (level-latest draft opts))
                k)
           f (pose/frame draft t opts)]

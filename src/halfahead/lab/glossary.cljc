@@ -83,4 +83,15 @@
    "fuse"          {:effect :fuse    :intensity 0.9}
    "jitter"        {:effect :jitter  :intensity 0.9}
    "glow"          {:effect :glow    :intensity 0.9}
-   "wobble"        {:effect :wobble  :intensity 0.9}})
+   "wobble"        {:effect :wobble  :intensity 0.9}
+
+   ;; the eight gestures that joined with the score perform their names too
+   ;; (added 2026-11-17, order 0045)
+   "swell"         {:effect :swell   :intensity 0.9}
+   "bloom"         {:effect :bloom   :intensity 0.9}
+   "slam"          {:effect :slam    :intensity 0.9}
+   "hush"          {:effect :hush    :intensity 0.9}
+   "lean"          {:effect :lean    :intensity 0.9}
+   "nod"           {:effect :nod     :intensity 0.9}
+   "shiver"        {:effect :shiver  :intensity 0.9}
+   "draw"          {:effect :draw    :intensity 0.9}})

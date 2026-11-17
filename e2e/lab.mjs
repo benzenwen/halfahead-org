@@ -605,6 +605,78 @@ try {
     + `"WHAT A DAY!" -> card hit of ${hit.sound.voices.length} voices; remembered on, then off, across reloads`);
   await sounding.close();
 
+  // A held letter swells: each letter of "loooove" lifts in turn and comes
+  // back. Read from every frame drawn, whatever the frame rate: the lift is
+  // one hump per letter, each a copy of the one before starting later, so
+  // among any samples a later letter's highest sample is never earlier.
+  begin('swell', null);
+  {
+    const swelling = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = swelling;
+    const swellUrl = new URL(url);
+    swellUrl.searchParams.set('debug', '');
+    swellUrl.searchParams.set('reveal', '3');
+    await open(swelling, swellUrl.href);
+    // Plain, so no style adds a sway of its own to y.
+    await swelling.selectOption('#style', 'plain');
+    const held = 'loooove';
+    const swellLine = `${held} -> swell 0.7 (elongation)`;
+    await swelling.evaluate(({ line, from, count }) => {
+      const samples = [];
+      window.__swell = { samples, shownAt: null };
+      const sample = () => {
+        const f = window.__lab.lastFrame();
+        const live = f ? f.poses.filter((p) => !p['ghost?']) : [];
+        const last = samples[samples.length - 1];
+        if (f && live.length >= from + count && (!last || last.t !== f['t-ms'])) {
+          // the space before the word is in no cue: its y is the line's rest
+          samples.push({ t: f['t-ms'], rest: live[from - 1].y, ys: live.slice(from, from + count).map((p) => p.y) });
+          if (window.__swell.shownAt === null && document.getElementById('debug').textContent.includes(line))
+            window.__swell.shownAt = f['t-ms'];
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }, { line: swellLine, from: 2, count: held.length });
+    await swelling.keyboard.type(`I ${held} it `, { delay: 70 });
+    await swelling.waitForFunction(() => window.__swell.shownAt !== null, null, { timeout: 5000 })
+      .catch(() => {});
+    const swellOverlay = await swelling.locator('#debug').textContent();
+    if (!swellOverlay.includes(swellLine))
+      throw new Error(`the overlay does not show "${swellLine}": "${swellOverlay}"`);
+    await swelling.waitForTimeout(800);
+    await swelling.screenshot({ path: `${out}/swell.png` });
+    // The cue fired no later than the overlay showed it, so 5.5 s after the
+    // showing is at least 5.5 s after the cue.
+    await swelling.waitForFunction(() => {
+      const { samples, shownAt } = window.__swell;
+      return samples.length && samples[samples.length - 1].t >= shownAt + 6000;
+    }, null, { timeout: 20000 });
+    const swell = await swelling.evaluate(() => window.__swell);
+    const lifts = swell.samples.map((m) => ({ t: m.t, lifts: m.ys.map((y) => y - m.rest) }));
+    const highest = Math.max(...lifts.flatMap((m) => m.lifts));
+    const swellCap = 0.25 * 0.7 + 0.001;
+    if (!(highest > 1e-6)) throw new Error(`no letter of "${held}" lifted in ${lifts.length} sampled frames`);
+    if (!(highest <= swellCap)) throw new Error(`a letter lifted ${highest} em, above ${swellCap}`);
+    const dipped = Math.min(...lifts.flatMap((m) => m.lifts));
+    if (!(dipped >= -1e-9)) throw new Error(`a letter sank ${-dipped} em below the line`);
+    const peakTimes = [...held].map((_, i) =>
+      lifts.reduce((best, m) => (m.lifts[i] > best.lift ? { t: m.t, lift: m.lifts[i] } : best), { t: null, lift: 0 }).t);
+    peakTimes.forEach((t, i) => {
+      if (t === null) throw new Error(`letter ${i} of "${held}" never lifted in ${lifts.length} sampled frames`);
+      if (i > 0 && t < peakTimes[i - 1])
+        throw new Error(`letter ${i} peaked at ${t} ms, before letter ${i - 1} at ${peakTimes[i - 1]} ms`);
+    });
+    const atRest = lifts.filter((m) => m.t >= swell.shownAt + 5500);
+    if (!atRest.length) throw new Error("no frame was sampled 5.5 s after the cue");
+    const stillLifted = atRest.find((m) => m.lifts.some((l) => l !== 0));
+    if (stillLifted)
+      throw new Error(`${stillLifted.t - swell.shownAt} ms after the cue the lifts are ${JSON.stringify(stillLifted.lifts)}`);
+    done(`"${swellLine}"; over ${lifts.length} frames the highest lift was ${highest.toFixed(3)} em (cap ${swellCap}); `
+      + `peaks in order over ${Math.round(peakTimes[held.length - 1] - peakTimes[0])} ms; at rest in all ${atRest.length} frames from 5.5 s on`);
+    await swelling.close();
+  }
+
   begin('director', null);
   const directed = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
   current = directed;
@@ -729,7 +801,7 @@ try {
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'card', 'push',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;

@@ -31,6 +31,24 @@
     (<= 12 (count word))        {:effect :shimmer :intensity 0.5}
     (re-matches #"[0-9]+" word) {:effect :pop :intensity 0.4}))
 
+(defn- held-run
+  "The longest run of one letter in word, whatever its case."
+  [word]
+  (->> (map (comp str/lower-case str) word)
+       (partition-by identity)
+       (filter (comp cased-letter? first))
+       (map count)
+       (reduce max 0)))
+
+(defn- held
+  "A word with a letter held three times or more swells, the more the
+  longer it is held."
+  [word]
+  (let [run (held-run word)]
+    (when (<= 3 run)
+      ;; 0.5 + 0.1 (run - 2), as one division so 'loooove' is 0.7 exactly
+      {:effect :swell :intensity (min 1.0 (/ (+ 3 run) 10.0))})))
+
 (defn- high-surrogate?
   "String comparison is by UTF-16 unit on both hosts, so no interop is needed."
   [c]
@@ -52,7 +70,8 @@
 (defn word-cue
   "The cue for a just-finished word, as typed, and the one-character string
   that followed it. Rules, first match wins: Half Ahead's glossary (a
-  following \"!\" adds 0.2, capped at 1), then the following punctuation,
+  following \"!\" adds 0.2, capped at 1), then elongation (a letter held
+  three times or more, as in \"loooove\"), then the following punctuation,
   then the word's shape, then a quiet default. Pure and local; a model, if
   ever added, belongs behind this function as a fallback before the default.
   Never throws for a non-blank word."
@@ -62,9 +81,11 @@
           [{:effect effect
             :intensity (if (= "!" following) (min 1.0 (+ intensity 0.2)) intensity)}
            :glossary]
-          (if-let [cue (punctuated following)]
-            [cue :punctuation]
-            (if-let [cue (shaped word)]
-              [cue :shape]
-              [{:effect :pop :intensity 0.3} :default])))]
+          (if-let [cue (held word)]
+            [cue :elongation]
+            (if-let [cue (punctuated following)]
+              [cue :punctuation]
+              (if-let [cue (shaped word)]
+                [cue :shape]
+                [{:effect :pop :intensity 0.3} :default]))))]
     (assoc cue :word (cue-word word) :source source)))
