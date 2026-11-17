@@ -1,0 +1,95 @@
+{:id "0042-lab-synth"
+ :title "Lab synth: a text synthesizer that plays patches (curves, oscillators, stagger), safe by construction"
+ :lupa/deps #{"0041-lab-stage-flash-test"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md: every gesture is a patch, data that moves a
+        letter's channels along curves, optionally multiplied by an
+        oscillator, staggered across the letters of a cue. Build the pure
+        engine that plays a :ha/patch and the check that makes patches safe
+        to accept from any agent: a patch with no problems ends at rest
+        and never leaves its channels' bounds."
+ :scope ["src/halfahead/lab/synth.cljc" "test/halfahead/lab/synth_test.cljc"]
+ :design "Schema (the foreman's; do not edit): :ha/channel :ha/curve
+          :ha/osc :ha/mod :ha/patch in src/halfahead/schema.cljc, with the
+          meanings in its comments.
+          halfahead.lab.synth (.cljc, pure, the same on both hosts):
+          (curve k p) -> the value of :ha/curve k at p, p clamped to [0 1]:
+            :one 1; :rise smoothstep p^2(3-2p); :fall 1 - smoothstep;
+            :fade 1-p; :fade2 (1-p)^2; :arch sin(pi p); :arc 4p(1-p);
+            :rise-sine sin(pi p / 2);
+            :spring a damped spring's step response with zeta 0.517 and
+              decay 4.6 over the window: 1 - e^(-4.6 p) (cos(wd p) +
+              (zeta / sqrt(1 - zeta^2)) sin(wd p)), wd = (4.6 / zeta)
+              sqrt(1 - zeta^2), and exactly 1 at p >= 1 (the same spring
+              lab.pose uses for births; do not import it, restate it);
+            :spring-fall 1 - :spring.
+          (phase id salt) -> the fixed angle lab.pose's private phase
+            gives: h = ((id mod 65521) * 7919 + salt * 104729) mod 65521,
+            2 pi h / 65521. Restated here, with a test that pins three
+            values.
+          (start-ms patch pos n) -> when the letter at position pos (0
+            based) of an n-letter cue starts: rank * step, step =
+            :ms-per-glyph, compressed to max-ms / (n - 1) when the last
+            letter would start after :max-ms (default 900; n <= 1 gives 0);
+            rank is pos for :forward (the default), n - 1 - pos for
+            :reverse, and the distance from the middle for :centre-out
+            (the middle letter or pair starts first). No :stagger: 0.
+          (total-ms patch n) -> :ms plus the latest start.
+          (delta patch u pos n id k) -> {channel delta} for that letter u
+            ms after ITS OWN start, at intensity k: {} when u < 0 or u >=
+            :ms. Otherwise, for every mod whose window [from to) of the
+            patch's time contains u / ms (defaults 0 and 1), whose :each
+            admits pos, add amount * k * sign * curve(q) * osc to its
+            channel, q being the progress through the window, sign -1 on
+            odd pos when :alternate?, and osc (when present) the wave at t
+            = ms elapsed since the window's start: sin or cos of 2 pi t /
+            period + phi, a triangle of the same period and phase (1 at
+            phase 0), or :noise (deterministic value noise in [-1 1]: a
+            hash of the step number floor(t / period), id and salt, each
+            step eased into the next; the same on both hosts, small
+            integers only); phi is 0 for :same (the default), pos * pi / 2
+            for :index, (phase id salt) for :id (salt default 0); :abs?
+            takes the absolute value. Mods on one channel add.
+          bounds -> a public map channel -> [lo hi], the delta a patch may
+            reach at intensity 1: :x [-0.5 0.5], :y [-2 2], :z [-3 3],
+            :rx :ry :rz [-6.3 6.3], :scale :sx :sy [-0.9 3], :skew [-1 1],
+            :weight [-1 1], :blur [0 1], :opacity [-0.95 0], :glow [0 1],
+            :wobble [0 1], :tint [-1 1], :fill [-1 0].
+          (problems patch) -> [] for a patch safe to play, else a vector
+            of {:problem keyword ...} maps, in a stable order:
+            :invalid (not a :ha/patch, with the humanized explanation, and
+            nothing else is checked); :not-at-rest for each channel whose
+            summed delta as u approaches :ms is not within 1e-6 of 0
+            (evaluate each mod whose window ends at 1 at q = 1 with its
+            oscillator at that time, at intensity 1, for positions 0 and 1
+            and ids 0, 1 and 7); :out-of-bounds for each channel that
+            leaves bounds anywhere on a 5 ms grid over [0 ms) for those
+            positions and ids, with the worst value. Never throws, for any
+            input at all.
+          Tests: each curve's values at 0, 0.5 and 1 and its range on a
+          grid; start-ms for the three orders, compression and n of 0, 1
+          and 2; delta for a hand-made patch of each feature (windows,
+          :each, :alternate?, each wave, each phase rule), including that a
+          window's oscillator time starts at the window; problems for a
+          patch that is fine, one invalid, one left displaced (:one on :y),
+          one too far sideways (:x 0.8 :arch). Properties over generated
+          valid patches (write the generator by hand, small and bounded):
+          delta is finite everywhere and {} outside [0 ms); deterministic;
+          whenever (problems p) is [] the patch is within bounds on a 1 ms
+          grid for five random ids and positions (within 1e-3, the grids
+          differ) and within 1e-6 of rest at ms - 1e-9; problems never
+          throws on arbitrary data (gen/any)."
+ :acceptance
+ ["synth tests as in the design, on both hosts"
+  "The patch in docs/product/score.md (:swell) has no problems, and its :y
+   delta for position 0 at intensity 1 peaks at 0.2 at 900 ms"
+  "`bb test` stays green"]
+ :non-goals
+ ["Do not touch lab.pose or any other namespace: wiring patches into the
+   lab is the next order"
+  "No gestures library here; do not edit the schema"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["docs/product/score.md" "src/halfahead/schema.cljc"
+           "src/halfahead/lab/pose.cljc" "DESIGN.md"]
+ :budget-usd 10.0}

@@ -1,0 +1,77 @@
+{:id "0043-lab-learn"
+ :title "Lab learn: a style learned from flicks (an optometrist's exam for motion), with a simulation to measure it"
+ :lupa/deps #{"0041-lab-stage-flash-test"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "docs/product/score.md: people will not tune parameters, so a
+        style is a point in a four-axis space (:ha/style-point) that moves
+        when the writer flicks toward the one of two performances they
+        prefer: 'better like this, or like this?'. Build the pure learner
+        and a simulation that measures how many flicks it takes
+        (hypothesis H5 in docs/product/lab-notebook.md). No UI here."
+ :scope ["src/halfahead/lab/learn.cljc" "test/halfahead/lab/learn_test.cljc"]
+ :design "halfahead.lab.learn (.cljc, pure, the same on both hosts).
+          Axes, in this order: :energy :flourish :softness :warmth.
+          State: {:point :ha/style-point  ; the current best guess
+                  :step {axis s}          ; the size of the next move
+                  :dir {axis +1|-1}       ; which way the next move goes
+                  :missed {axis n}        ; rejections in a row at this step
+                  :axis k                 ; the axis asked about next
+                  :flicks n}              ; choices made so far
+          (start) and (start point) -> a state at the centre (0.5 on every
+            axis) or at point: step 0.25, dir +1, missed 0, axis :energy,
+            flicks 0.
+          (pair state) -> {:axis k :a point :b point}: :a is the current
+            point, :b the point moved by dir * step along the axis, kept
+            inside [0 1]; if that leaves :b equal to :a (at a wall), the
+            other direction is used. :a and :b always differ.
+          (choose state choice) -> the next state, choice :a or :b for the
+            pair (pair state) gave. :b: the point becomes :b, the
+            direction stays, missed 0. :a: the direction flips, missed + 1,
+            and when both directions have now been rejected at this step
+            (missed 2) the step halves (never below 1/64) and missed
+            returns to 0. Either way :flicks + 1 and :axis moves to the
+            next axis, round robin. The point never leaves [0 1] on any
+            axis and is always a valid :ha/style-point.
+          (distance p q) -> the root mean square difference over the four
+            axes.
+          A deterministic random source for the simulation, the same on
+          both hosts (a small linear congruential generator on integers
+          below 2^31; no host randomness).
+          (simulate {:hidden point :noise u :flicks n :seed s}) -> a
+            vector of n + 1 distances from the learner's point to :hidden,
+            before any flick and after each: a simulated reader picks the
+            option of each pair nearer to :hidden (by distance), and with
+            probability :noise picks the other instead.
+          (experiment {:readers r :flicks n :noise u :seed s}) ->
+            {:median [..] :p80 [..]}, each n + 1 long: over r readers with
+            hidden points drawn uniformly from the unit cube, the median
+            and 80th percentile of the distance at each flick count.
+          Tests: start and pair shapes; a wall flips the direction; a
+          scripted sequence of choices gives the expected point and steps;
+          the point stays valid for any sequence of choices (property);
+          with no noise a simulated reader's distance never increases
+          (property over hidden points); simulate and experiment are
+          deterministic for a seed and differ between seeds; and two
+          measured facts, asserted loosely so the test is not a coin toss:
+          over 300 readers, with no noise the median distance after 24
+          flicks is under 0.1, and with noise 0.1 the median after 24
+          flicks is below the median before any flick. These two numbers
+          are hypotheses, not requirements on the algorithm: if the
+          learner as specified misses one, do not tune it to pass; assert
+          the value you measured (rounded up to two decimals) instead and
+          say so at the top of the final message."
+ :acceptance
+ ["learn tests as in the design, on both hosts"
+  "The final message reports the measured curves, for the foreman's lab
+   notebook: (experiment {:readers 1000 :flicks 32 :noise 0.0 :seed 1})
+   and the same with :noise 0.1 and 0.25: the median and p80 at 0, 4, 8,
+   12, 16, 24 and 32 flicks, to three decimals"
+  "`bb test` stays green"]
+ :non-goals
+ ["No UI and no changes outside the two files; do not edit the schema"
+  "No mapping from a point to motion parameters (another order)"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["docs/product/score.md" "docs/product/lab-notebook.md"
+           "src/halfahead/schema.cljc" "DESIGN.md"]
+ :budget-usd 6.0}
