@@ -235,8 +235,8 @@ nothing depends on frame rate:
   a dim suffix, with the boundary exactly at the reading head.
   "loooove" stayed still until the head reached it, then lifted 0.14 em.
   Four marks performed (swell, hush, nod, glow); the turn and the doubt
-  were below Elegant's threshold. A reading at 400 wpm took 4.4 s and at
-  150 wpm 5.4 s: paced past five seconds because it was asked for.
+  were below Elegant's threshold. A reading at 400 wpm took 4.8 s and at
+  150 wpm 5.5 s: paced past five seconds because it was asked for.
 - **Dress** (Elegant, on paper): "the one thing" drawn in exactly the
   palette's gold (rgb 125, 90, 0), "(trust me)" at 0.85 of its size and
   muted. Under the pointer the gold's glow rose to 0.62, each letter on
