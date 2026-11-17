@@ -1,6 +1,6 @@
 {:id "0055-lab-default-feel"
  :title "Lab default feel: Plain keeps a little flourish, dress and readings stop changing behind your back, and gold glows gold"
- :lupa/deps #{"0052-lab-dress"}
+ :lupa/deps #{"0057-lab-webgpu-guard"}
  :lupa/area :lab
  :lupa/risk :medium
  :goal "Three things the builders of 0050 and 0052 reported, all from the

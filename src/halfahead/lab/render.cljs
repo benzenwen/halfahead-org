@@ -187,6 +187,8 @@
 
 (defn- glyph-mesh [capacity ^js material]
   (let [^js geometry (three/PlaneGeometry. 1 1 6 6)]
+    ;; nothing lights a letter, and an unused normal is still a vertex buffer
+    (.deleteAttribute geometry "normal")
     (doseq [[attr width] per-instance]
       (.setAttribute geometry attr
                      (doto (three/InstancedBufferAttribute. (js/Float32Array. (* capacity width)) width)

@@ -1,0 +1,119 @@
+{:id "0057-lab-webgpu-guard"
+ :title "Guard the lab's WebGPU path: pin the vertex-buffer limit in a test, check real WebGPU pipelines in the browser check, fall back instead of going blank"
+ ;; :lupa/fixes records realized consequence for Lupa's judge scoring: 0049
+ ;; added two per-instance attributes, taking the glyph mesh to ten vertex
+ ;; buffers; WebGPU allows eight, and on Ben's Safari (2026-11-17) the lab
+ ;; showed its caret and no letters. The foreman hotfixed it (commit
+ ;; 72c39d4 and the one after: four packed attributes, no normal, seven
+ ;; buffers). This order makes the class of bug impossible to ship again.
+ :lupa/fixes #{"0049-lab-channels"}
+ :lupa/deps #{"0052-lab-dress"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "The lab drew nothing on WebGPU for a day and no check noticed:
+        WebGL2 has no vertex-buffer limit, the gate's browser only ever
+        ended up on WebGL2, and WebGPU reports the failure asynchronously
+        so the start-up probe's try/catch missed it. Three guards: the
+        buffer layout as data with a test that pins the limit; a browser
+        check that runs three.js's real WebGPU path and inspects every
+        pipeline it creates; and a start-up probe that sees asynchronous
+        WebGPU errors and falls back to WebGL2 rather than a blank page."
+ :scope ["src/halfahead/lab/instance.cljc" "test/halfahead/lab/instance_test.cljc"
+         "src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+         "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md" "README.md"]
+ :design "What the foreman found, for reference. In headless Chromium
+          launched with --enable-unsafe-webgpu, navigator.gpu exists with
+          a software adapter (maxVertexBuffers 8). three.js 0.187's WebGPU
+          backend fails there at GPUTexture.createView, because this
+          Chromium rejects the newer 'swizzle' field three passes, and the
+          lab's probe falls back to WebGL2. With an init script that drops
+          'swizzle' from the descriptor before calling the real
+          createView, three's WebGPU path runs: the lab reports backend
+          WebGPU and creates its pipelines, so validation is real. (The
+          software device is then lost, 'A valid external Instance
+          reference no longer exists', and nothing is presented, so
+          pixels cannot be checked there.) Wrapping GPUDevice.prototype
+          .createRenderPipeline and createRenderPipelineAsync in the same
+          init script records each descriptor's vertex.buffers: before the
+          hotfix the glyph pipeline asked for 10 buffers and the console
+          showed 'Render pipeline creation failed ... Vertex buffer count
+          (10) exceeds the maximum number of vertex buffers (8)'; after
+          it, 7 buffers and no such error.
+          halfahead.lab.instance (.cljc, pure data): the glyph mesh's
+          per-instance attributes, moved out of lab.render so a test can
+          see them:
+            attributes -> an ordered vector of {:name s :width n :holds
+              [kw ...]}: glyphRect 4 (:rect); glyphLook 4 (:opacity :glow
+              :wobble :ghost); glyphShape 3 (:weight :blur :fill);
+              glyphInk 3 (:ink).
+            (vertex-buffers) -> the buffers the glyph pipeline binds:
+              position, uv, the instance matrix (count it always: three
+              binds it as a buffer), and one per per-instance attribute:
+              7. The geometry has no normal (the hotfix deletes it).
+            (vertex-attribute-slots) -> 1 + 1 + 4 (a mat4 takes four) +
+              one per per-instance attribute: 10.
+            limits -> {:max-vertex-buffers 8 :max-vertex-attributes 16},
+              WebGPU's guaranteed minimums.
+          Tests: vertex-buffers <= 8 with at least one to spare, and
+          vertex-attribute-slots <= 16; widths are 1 to 4; names are
+          distinct. The docstring says a new channel goes into a packed
+          attribute, never a new one, and why.
+          lab.render: build the mesh's attributes from
+          instance/attributes (no behaviour change; every existing pixel
+          check passes unchanged).
+          lab.render/start!: when the backend is WebGPU, take the
+          GPUDevice from the renderer's backend, push error scopes
+          ('validation', 'internal', 'out-of-memory'), draw the probe
+          frame (it must contain at least one letter and the caret so
+          every pipeline the lab uses is created: make it so), wait for
+          the renderer's work to be submitted, pop the scopes; if any
+          reports an error, or drawing throws, or the device is lost
+          during the probe, warn in the console with the message and fall
+          back to WebGL2 exactly as the existing catch does. Be
+          defensive: if the device cannot be found, behave as today.
+          After start, a GPUDevice 'uncapturederror' is logged once and
+          kept: window.__lab.gpuErrors() -> the messages (at most 5), and
+          the status label then reads 'Rendering with WebGPU, with errors:
+          add ?webgl to the address'.
+          lab.main: ?webgl in the URL starts the renderer on WebGL2
+          directly. window.__lab.vertexBuffers() ->
+          (instance/vertex-buffers).
+          e2e/lab.mjs, a new step 'webgpu', in a second browser launched
+          with --enable-unsafe-webgpu and the init script described
+          above (the swizzle shim and the pipeline recorder):
+            (a) open /lab/?reveal=3&debug and type a word. If the lab
+            reports backend WebGPU: assert every recorded pipeline has at
+            most 8 vertex buffers and 16 attributes, that the glyph
+            pipeline (the one with the most buffers) has at most
+            (instance/vertex-buffers), and that no console message
+            contains 'pipeline creation failed' or 'exceeds the maximum';
+            report the counts. If navigator.gpu is absent or the lab
+            ended on WebGL2 anyway, say so in the step's line and assert
+            only that the word is drawn (do not fail: other machines
+            differ).
+            (b) with the same browser and the shim, the lab must never be
+            blank and silent: either letters are drawn (inked pixels in
+            the word's box) or the status label names an error or WebGL2.
+            In this container the software device is lost after start, so
+            expect the fallback or the error label; assert one of the
+            three outcomes and report which.
+            (c) /lab/?webgl ends on WebGL2 and draws the word.
+          Every existing step runs as now.
+          docs/LAB.md: the limit, the packed attributes, how to add a
+          channel, the WebGPU step and what it can and cannot prove,
+          ?webgl. README.md: one line for ?webgl."
+ :acceptance
+ ["instance tests as in the design, on both hosts; `bb test` stays green"
+  "`bb lab:e2e` passes with the webgpu step and every existing step
+   unchanged (the specimen's pixel checks especially)"
+  "The final message says plainly what was and was not verified on
+   WebGPU, and what the lab does in this container when the software
+   device is lost"]
+ :non-goals
+ ["No change to what is drawn, to the pure core, or to the schema"
+  "Do not upgrade three.js or Playwright"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+           "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md" "README.md"
+           "DESIGN.md"]
+ :budget-usd 12.0}
