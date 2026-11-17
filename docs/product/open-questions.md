@@ -24,7 +24,7 @@ with; the cheap ones can flip in one order.*
 | Q12 | Merge method to main | Merge commits, never squash | Lupa reads `factory(<id>)` commits to know what is merged; I recommended squash on the 5th and was wrong | — |
 | Q13 | The 19 MB of build output in history | Left in history (the merge commit carries it) | Rewriting main's history is not worth it for a low-stakes repo | A history rewrite, if you ever want one |
 | Q14 | What "prod" is first | The lab only, as a static site at halfahead.org; the app waits for a Firebase project and somewhere for Scout to run | The lab is on-device and needs no backend; the app only talks to emulators today | — |
-| Q15 | Factory spend | Still inside your $150 cap ($62.96 spent before tonight) | You raised autonomy, not the cap | Say a number |
+| Q15 | Factory spend | **Settled by you:** the cap is $250 (raised from $150 on 2026-11-17, when $142.64 was spent) | Orders cost about $7 on this model, not $3 | Say a number |
 | Q16 | When does the flick ask? | Only when you ask for it (a key), never unprompted, tonight | An unprompted A/B is an interruption; earn it first | Low |
 | Q17 | What counts as a held syllable? | Three or more of the same letter in a row | "loooove", "sooo", "nooo"; two is ordinary spelling | Low |
 | Q18 | Swell's numbers | Lift 0.25 em at full intensity (0.17 em for "loooove", before the style's amplitude), 120 ms a letter, 0.9 s rise, 1.5 s settle, from your recording | Measured from 250 frames; my reading of the `l` was unreliable, the other three letters agree | Low |
@@ -39,7 +39,7 @@ with; the cheap ones can flip in one order.*
 | Q27 | Dress before the board | With the cap as it is, the queue runs dress (illumination) before the board, and the flick last | You asked for beautiful first; the board is power, the flick needs both | Order only |
 | Q28 | How bright is the swell's glow? | 0.22 at full intensity, half the first value | In the first screenshot the halo around "loooove" read as an alarm; the Music app's glow is soft | One number in `lab.gestures` |
 | Q29 | Which way is up, for an agent? | The reference now says `y` up is +, `x` right is + | In the H4 run an agent's "sag" went up because the page never said | Low |
-| Q30 | What does Plain mean? | **Open, yours.** As built, Plain has no flourish: no marks perform and nothing is dressed. Auto (the default) falls back to Plain, so dress vanishes six seconds after typing stops | The foreman's recommendation: Plain keeps plain motion but a flourish of 0.35; bareness is the reveal level's job. Found by the dress order's builder | One order |
+| Q30 | What does Plain mean? | Plain keeps plain motion but a flourish of 0.35 (a held word, a landing and capitals perform; asides whisper; the strongest stress is gilt); dress is decided when the text changes and stays; a reading keeps the style it started in (order 0055). You said "keep going" after I flagged it | As first built, Plain had no flourish, Auto (the default) falls back to Plain, and dress vanished six seconds after typing stopped | One order to change the number |
 | Q31 | The glint's halo | Left vermilion for now, so gold glints pink | The renderer's glow has always been vermilion; tinting it with the letter's ink is a small shader change, outside the dress order's scope | One small order |
 | Q32 | What an "at rest" letter is | Since dress, rest includes its dress (a whispered letter rests smaller); tests mean "stopped changing" | The builder changed one browser check to say so, and said so | — |
 

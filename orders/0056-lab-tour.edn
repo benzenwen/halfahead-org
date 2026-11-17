@@ -1,0 +1,140 @@
+{:id "0056-lab-tour"
+ :title "Lab tour: a demo of under a minute that plays itself (types, reads back, dresses, dims the lights), with captions, and stops the moment you touch a key"
+ :lupa/deps #{"0055-lab-default-feel"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Ben asked: 'is there a demo to run and look at'. The lab only shows
+        what it can do to someone who knows what to type. Add a tour: a
+        scripted minute in which the lab types into its own text box,
+        with a caption for each scene, so a visitor (or Ben, skimming) can
+        watch the held note, a read-back, the same line in another style,
+        dress and its gold, and the lights going down, then is handed the
+        keyboard. The tour is data played through the lab's ordinary
+        paths, so what it shows is what typing does."
+ :scope ["src/halfahead/lab/tour.cljc" "test/halfahead/lab/tour_test.cljc"
+         "src/halfahead/lab/main.cljs" "public/lab/index.html"
+         "resources/site/index.html" "test/halfahead/dev/site_test.clj"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "halfahead.lab.tour (.cljc, pure): the tour as data and its clock.
+          script -> a vector of scenes, each {:caption string :steps
+            [step ...]}; a step is one of
+              {:do :clear}                         empty the text box
+              {:do :type :text s :ms-per-key n}    type s, a key every n ms
+              {:do :wait :ms n}
+              {:do :style :style kw}               pick a named style
+              {:do :reveal :level n}               raise the reveal level to n
+              {:do :read-back :wpm n}              start a read-back at n wpm
+              {:do :until-read}                    wait until the read-back is over
+              {:do :light :over s :ms n}           sweep the pointer's light
+                                                   across the phrase s over n ms
+          The scenes, in order, with these captions and texts (the
+          foreman's draft of the product voice; change nothing):
+            1 'It starts like any chat box.'
+              reveal 0; style Plain; type 'Nothing to see here. Just
+              typing.' (70 ms a key); wait 900
+            2 'What matters can stay gold.'
+              clear; reveal 1 (still paper); style Elegant; type 'This is
+              *the one thing* that matters (trust me).' (60 ms a key);
+              wait 900; light over 'the one thing' for 2400 ms; wait 400
+            3 'Hold a letter, and it holds the note.'
+              clear; type 'I loooove this ' (110 ms a key); wait 3200
+            4 'Then the lights go down. Some words know what they are.'
+              clear; reveal 3; style Plain; type 'We shipped it. Finally! '
+              (90 ms a key); wait 1800
+            5 'Ctrl+Enter reads it back, at your pace.'
+              clear; style Elegant; type 'I loooove this (honestly). But
+              maybe not. Ship it!' (45 ms a key); wait 5200 (the typing's
+              own cues settle); read-back at 200 wpm; until-read; wait 600
+            6 'Same words. Another performer.'
+              style Caffeinated; wait 400; read-back at 200 wpm;
+              until-read; wait 600
+            7 'And when it deserves it: the whole stage.'
+              clear; style Plain; type 'WHAT A DAY! ' (120 ms a key);
+              wait 4200
+            8 'Your turn.'
+              clear; wait 300 (the tour ends; the text box has the focus)
+          (plan script) -> the script flattened into a timeline of
+            {:at-ms :scene i :step step}, each step starting when the one
+            before it ends: :type lasts (count of its characters) x
+            ms-per-key, :wait and :light their :ms, the rest 0;
+            :until-read has no fixed length, so the timeline is a vector
+            of segments and the shell starts the next segment's clock
+            when the read-back is over.
+          (due segment t-ms done) -> the steps of a segment that are due
+            at t-ms (ms since the segment began) and not yet in done (a
+            set of indexes), in order; for a :type step, the keys due so
+            far: (keys-due step elapsed) -> the prefix of its text to
+            have been typed.
+          (caption script scene) -> its caption; (total-ms script) -> the
+            tour's length not counting read-backs.
+          Tests: plan's times for a small script; due and keys-due at
+          several times, never skipping or repeating a step; every :type
+          text in script is a valid message text; every :style a
+          :ha/style; captions non-blank and under 60 characters; the
+          script's length is between 25 and 60 s without read-backs.
+          lab.main and index.html: the tour runs when the URL has ?tour,
+          and from a 'Tour' button in the bar; never by itself otherwise.
+            It drives the lab's own paths: typing sets the textarea's
+            value and dispatches the same input event a key does (so
+            cues, Auto's rhythm, dress and the director behave as for a
+            person); :style goes through the picker; :reveal uses the
+            wand path until the level is reached; :read-back and its pace
+            through the same function Ctrl+Enter calls (the Pace slider
+            shows the tour's wpm and is restored afterwards); :light sets
+            the same light the mouse sets, moving along the phrase's
+            glyphs.
+            A caption bar (bottom centre, large enough to read, an
+            aria-live polite region) shows the scene's caption. A 'Stop'
+            button is visible throughout. Any key press, click, tap or
+            Escape stops the tour at once: the scripted typing stops,
+            whatever is on screen stays and is the visitor's to edit, the
+            caption reads 'Your turn.' for 2 s and goes. The style and
+            pace the visitor had before the tour are restored when it
+            ends or is stopped; the reveal level stays where the tour
+            took it.
+            With reduced motion the tour does not run: the caption bar
+            says 'The tour is motion. Reduced motion is on, so here is
+            the lab instead.'
+            window.__lab.tour() -> nil, or {scene caption segment
+            running} as plain data.
+          resources/site/index.html: under 'Try the typing lab', a second
+            link 'Or watch a short tour' to lab/?tour (relative).
+            Update site_test for the new text; the page still has no
+            script and no external URL.
+          e2e/lab.mjs, a new step 'tour' on /lab/?tour&debug, waiting on
+            data, never on the clock: tour().scene advances 1 to 8 in
+            order; in scene 1 the level is 0 and the background is paper;
+            in scene 2 window.__lab.dress() has a gilt on 'the one thing'
+            and a sampled frame shows its glow above 0.4; in scene 3 a
+            swell cue appears in the overlay; in scene 4 the level reaches
+            3; in scene 5 window.__lab.reading() becomes non-nil and then
+            nil again, and the style is Elegant; in scene 6 a second
+            reading runs in Caffeinated; in scene 7 a :card direction is
+            placed; at the end
+            tour() is nil, the textarea is empty and focused, and the
+            picker shows what it showed before. Then a second run:
+            during scene 2 press a key: tour() is nil within one frame,
+            the text typed so far is still there, and typing a letter
+            appends to it. Screenshots out/lab/tour-2.png (the gold lit, on
+            paper) and out/lab/tour-5.png (mid read-back).
+          docs/LAB.md: a section 'The tour'."
+ :acceptance
+ ["tour and site tests as in the design, on both hosts where they apply;
+   `bb test` stays green"
+  "`bb lab:e2e` passes with the tour step and every existing step; the
+   two tour screenshots for the foreman"
+  "The final message gives the tour's measured length end to end in the
+   browser check"]
+ :non-goals
+ ["The tour never starts unasked and records nothing; no video, no audio
+   of its own (the lab's sound plays if the visitor turned it on)"
+  "No change to cues, marks, gestures, pace, reading, dress, styles, the
+   director, reveal rules or the renderer; do not edit the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/score.md" "NEXT.md" "src/halfahead/lab/main.cljs"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/dress.cljc"
+           "src/halfahead/lab/reveal.cljc" "src/halfahead/lab/director.cljc"
+           "public/lab/index.html" "resources/site/index.html"
+           "src/halfahead/dev/site.clj" "test/halfahead/dev/site_test.clj"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

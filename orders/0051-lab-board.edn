@@ -1,6 +1,6 @@
 {:id "0051-lab-board"
  :title "Lab board: a few pads that mark what you just wrote, and one XY pad for your style (no parameters)"
- :lupa/deps #{"0052-lab-dress"}
+ :lupa/deps #{"0056-lab-tour"}
  :lupa/area :lab
  :lupa/risk :medium
  :goal "docs/product/score.md, 'How people and agents drive it'. People

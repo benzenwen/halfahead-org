@@ -233,4 +233,8 @@ in `docs/product/lab-notebook.md`.
   what to grant.
 - Main is merged with merge commits only: Lupa reads `factory(<id>)`
   commits to know what is merged, and a squash would strand the graph.
-
+- 2026-11-17, later: Ben raised the spend cap to $250 ("keep going") and
+  asked for a demo to look at. The foreman made the Q30 choice (Plain
+  keeps a flourish of 0.35; dress and readings keep the style they began
+  in; order 0055) and queued a self-playing tour (0056), then the board
+  and the flick.
