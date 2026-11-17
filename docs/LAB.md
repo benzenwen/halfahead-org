@@ -717,6 +717,68 @@ only accompanies a cue or shot that is drawn anyway.
 intensity, or the shot and energy); it is empty while Sound is off.
 `window.__lab.bounds()` returns the bounds.
 
+## The tour
+
+For someone who does not know what to type, the lab can show itself:
+under a minute in which it types into its own text box, a caption for
+each scene. It shows a plain chat box, a phrase that stays gold and
+catches a light, a held letter holding its note, the lights going down,
+a read-back, the same words read by another style, and a card; then it
+hands over the keyboard.
+
+The tour is data, `halfahead.lab.tour/script`: eight scenes, each
+`{:caption :steps}`, a step one of
+
+| step | what the shell does |
+|---|---|
+| `{:do :clear}` | empties the textarea and dispatches its `input` event |
+| `{:do :type :text s :ms-per-key n}` | sets the textarea's value a key longer every n ms, an `input` event for each |
+| `{:do :wait :ms n}` | nothing |
+| `{:do :style :style kw}` | picks the style, as the picker does |
+| `{:do :reveal :level n}` | wands (as Ctrl+. does) until the level is n; never lowers it |
+| `{:do :read-back :wpm n}` | sets the Pace slider to n and starts a read-back, as Ctrl+Enter does |
+| `{:do :until-read}` | waits until that read-back is over |
+| `{:do :light :over s :ms n}` | moves the light the mouse sets along the drawn letters of the phrase s |
+
+Nothing in the tour draws or decides anything: every step goes through
+the path a person's hand takes, so cues, Auto's rhythm, dress, the
+director and the reveal behave as they do for typing, and what the tour
+shows is what typing does. The captions and texts are product voice;
+`tour_test.cljc` pins them.
+
+`(tour/plan script)` flattens the script into a timeline, each step
+starting when the one before it ends. A read-back lasts as long as the
+pace makes it, so the timeline is a vector of segments cut after each
+`:until-read`, and the shell starts the next segment's clock when the
+reading is over. `(tour/due segment t-ms done)` gives the steps to play
+at t-ms and `(tour/keys-due step elapsed)` how much of a `:type` step's
+text is typed by then, so a late tick catches up key by key and no step
+is skipped or played twice. `(tour/total-ms script)` is the length
+without the read-backs, about 34 s; with them the tour takes about 42 s.
+The shell plays it on a timer of its own, not the frame loop, so it
+keeps its pace however slowly the frames are drawn.
+
+It starts only when asked: with `?tour` in the address (the landing page
+links to `lab/?tour`), or from the **Tour** button in the bar. It types
+after whatever is in the text box, and its second scene clears it. A
+caption bar at the bottom centre, a polite live region, shows each
+scene's caption beside a **Stop** button. Any key press, click or tap
+stops it at once (the event still does what it does, so a letter typed
+lands after the tour's text): the scripted typing stops, what is on the
+page stays and is the visitor's to edit, and the caption reads "Your
+turn." for 2 s. When it ends or is stopped, the style and the pace the
+visitor had come back and the textarea has the focus; the reveal level
+stays where the tour took it. The tour records nothing: its pace is not
+remembered on the device, and it makes no sound of its own (the lab's
+sounds play if Sound is on).
+
+With reduced motion there is no tour. The caption bar says "The tour is
+motion. Reduced motion is on, so here is the lab instead." until the
+next key or click.
+
+`window.__lab.tour()` returns nil, or `{scene, caption, segment,
+running}` while one plays.
+
 ## Accessibility
 
 The input is a real `<textarea>`, focused, with transparent text: IME,
@@ -725,6 +787,8 @@ paste, undo, spellcheck and screen readers keep working. The canvas is
 labelled checkbox, and every sound has a visible counterpart. Read back is
 a real button and Pace a labelled range input; a reading never changes
 the textarea's text, so assistive technology has all of it throughout.
+The tour's captions are a polite live region, Stop is a real button, and
+the tour does not run with reduced motion (see The tour).
 
 ## Debug overlay
 
@@ -903,13 +967,30 @@ typed at 450 ms a key (Auto reads Elegant) and then the 14 words typed at
 40 ms a key (Caffeinated, so a versal) wear the same dress (kinds, glyph
 ids, inks, sizes) 1 s after the last key and 8 s later, when Auto reads
 Plain. The same data and colour checks as on paper pass on the dark stage
-(`?reveal=3`, `dress-dark.png`). All along it asserts on
+(`?reveal=3`, `dress-dark.png`). On `/lab/?tour&debug` (the `tour`
+step) it follows the tour by data, never by the clock: a recorder in the
+page notes every change of the caption, and the scenes must run 1 to 8
+with their captions. Scene 1 begins at level 0 on paper; in scene 2 the
+gilt is on "the one thing" and a frame with a letter glowing above 0.4
+matches dress's curve for a light placed where its two brightest letters
+put it (`tour-2.png`); scene 3 shows a swell cue in the overlay; scene 4
+reaches level 3, and scenes 2 to 4 must begin at level 1 or below; scene
+5 reads back in Elegant with the Pace slider at 200 (`tour-5.png`, taken
+as it starts and checked to have been mid-reading), scene 6 again in
+Caffeinated; scene 7 places a `:card`. At the end `tour()` is nil, the
+textarea is empty and focused, and the picker (Auto) and the pace (a
+stored 300) are as before, the stored pace untouched. It prints the
+tour's measured length (`tour: N.N s end to end on <backend>`). Then,
+started from the Tour button with Drunken picked, a Shift key in scene 2
+stops it at once: the text typed so far stays, an x typed lands after
+it, Drunken is back. With reduced motion emulated, `?tour` starts no
+tour and the caption says why. All along it asserts on
 `window.__lab`; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
-`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png`, `dress-dark.png` and `webgpu.png`, and stops the server it started. It is not part of
+`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png`, `dress-dark.png`, `tour-2.png`, `tour-5.png` and `webgpu.png`, and stops the server it started. It is not part of
 `bb test`.
 
 ### The webgpu step

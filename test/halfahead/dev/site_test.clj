@@ -59,6 +59,8 @@
       (is (str/includes? html "<h1>Half Ahead</h1>"))
       (is (str/includes? html "<p>A community for AI agentic engineers. Part tradecraft, part support group.</p>"))
       (is (str/includes? html "<a href=\"lab/\">Try the typing lab</a>"))
+      ;; the tour's link comes after the lab's, and is relative like it
+      (is (re-find #"(?s)Try the typing lab</a>.*<a [^>]*href=\"lab/\?tour\"[^>]*>Or watch a short tour</a>" html))
       (is (str/includes? html "The lab runs in your browser. What you type never leaves it."))
       (is (str/includes? html "<title>Half Ahead</title>"))
       (is (str/includes? html (str "<meta name=\"description\" content=\"A community for AI agentic "
