@@ -480,6 +480,71 @@ Shots are blended on top of births and cues, so everything is exactly at
 rest 5 s after the latest direction. With reduced motion no shot is
 performed.
 
+## Reading back
+
+A lyric is paced by the music; a message is paced by the eye
+(docs/product/score.md, "The clock"). **Ctrl+Enter**, or the **Read back**
+button in the bar, reads the current draft back as its reader would get
+it. The text dims, then fills with ink word by word at the reader's pace,
+and each mark's gesture begins as the reading head reaches it.
+
+- **The head.** `halfahead.lab.pace` lays the draft's score out in time
+  for one reader: a stop for every word, contiguous from 0. The head moves
+  linearly through a word during its stop and is at the next word's start
+  as that stop begins. Each frame gets `:fills`, a map glyph id -> how much
+  of the glyph is inked: 1 behind the head, 0 ahead of it, and the share
+  of the one letter it is in. `lab.pose` puts that on the pose as `:fill`
+  (the channel a `:draw` uses, multiplied with any a cue gives), so the
+  renderer wipes the ink in from the left; an unread letter is drawn the
+  way fill 0 is on the specimen page, faint, not absent.
+- **Beats.** One beat is one word's time: 240 ms at 250 words a minute. A
+  word longer than 8 characters stays 1.3 beats; a word ending a sentence
+  (`. ! ? …`) half a beat more, one ending in `, ; :` a quarter more.
+- **Holds.** A `:hold` the style performs stretches the head's stay on its
+  word by (1 + amount): "loooove" stays 1.7 beats in Elegant. A mark the
+  style in force does not perform (see Styles: the more flourish, the
+  fainter a mark still performs) is left out before pacing, so in Plain,
+  whose flourish is 0, nothing performs and nothing is held: the ink just
+  fills at the reader's pace.
+- **Gestures.** Each performed mark's gesture (`marks/gesture-for`) is a
+  cue on the mark's letters at the stop of the first word it touches,
+  `:source :score`. It is given its natural length (`reading/natural-ms`:
+  the patch's time over the letters times the style point's tempo) or what
+  is left before the cap; given less, the cue carries a `:tempo` below 1
+  and `lab.pose` plays the same motion faster, stagger included; given
+  less than 0.4 of it, it is not played at all.
+- **Highlights.** A message too long to pace is not dimmed and has no
+  head: only its four strongest marks perform, in reading order, 400 ms
+  apart. Restraint is what makes skimming work.
+- **The cap.** A performance that starts by itself may hold a reader 5 s
+  at most (WCAG 2.2.2), so `pace/reading` paces a message only when the
+  head crosses it within 4 s (`:cap-ms`, default 5000, less a second for
+  the last word's gesture). At 150 words a minute that is about ten words,
+  so the slowest readers got the least pacing. A read-back is asked for
+  and Escape stops it, so the lab passes `:cap-ms 30000`: a message is
+  paced when the head crosses it within 29 s, and nothing lasts past 30.
+- **Pace.** The **Pace** slider beside the style picker sets the reader's
+  words a minute, 150 to 450 in steps of 10, 250 to begin with, shown as a
+  number. It is remembered on this device in `localStorage`
+  (`halfahead.lab.pace`), read and written in try/catch; never sent
+  anywhere. A reading already playing keeps the pace it began with.
+- **Stopping.** Escape, any edit, or starting another reading ends it at
+  once, everything lit. Otherwise it ends when the head has crossed the
+  text and every gesture has had the time it was granted.
+- **What it leaves alone.** The draft is not changed: the reading's cues
+  are merged into the draft for the frame only. They count as use for the
+  reveal (a level they reach is kept), they sound when Sound is on, and
+  they are not moments, so the stage behind the letters does not react.
+  With reduced motion Ctrl+Enter and the button do nothing (the text is
+  already all there), and `:fills` is ignored by `pose/frame`.
+
+`halfahead.lab.reading` is the pure part: `plan` (text, style point, pace
+-> the score, its reading and what performs), `cues`, `fills` and `over?`.
+`window.__lab.reading()` is null, or the reading playing as data: `t0`,
+`durationMs`, `beatMs`, `stops`, `entries`, `performing` and
+`headAt(t)`, the head's place (in UTF-16 units of the text) at a time on
+the lab's clock.
+
 ## Sound
 
 Experiment 3 of the product outline: sound to calm, to excite, to
@@ -535,7 +600,9 @@ intensity, or the shot and energy); it is empty while Sound is off.
 The input is a real `<textarea>`, focused, with transparent text: IME,
 paste, undo, spellcheck and screen readers keep working. The canvas is
 `aria-hidden`. Reduced motion shows letters at rest. Sound is opt-in, a
-labelled checkbox, and every sound has a visible counterpart.
+labelled checkbox, and every sound has a visible counterpart. Read back is
+a real button and Pace a labelled range input; a reading never changes
+the textarea's text, so assistive technology has all of it throughout.
 
 ## Debug overlay
 
@@ -552,6 +619,8 @@ camera target x 9.00 · y -5.40 · z 0.00
 reveal level 3 · lights 1.00
 stage grid · moment cue quake 1.0 at 12.345 s
 sound off
+reading paced · 4483 ms · beat 240 ms
+loooove -> swell 0.7 (reading)
 ```
 
 - **frame**: frames drawn since the page loaded.
@@ -573,6 +642,10 @@ sound off
 - **stage**: the stage behind the letters and the newest moment it was
   given (`moment none` before the first); see Writing a stage.
 - **sound**: whether Sound is on.
+- **reading**: only while a read-back plays (see Reading back): `paced`
+  when the head stops on every word or `highlights` when the message is
+  too long, how long the reading lasts, its beat, then one line for each
+  mark it performs, in the order they begin.
 
 The panel grows as wide as its longest line, up to the viewport, and wraps
 beyond that, so no line is cut off.
@@ -667,13 +740,24 @@ ink's sample is within 12/255 of `__lab.inkColour`. They are stills, so no
 timing is involved. The same step types a 200 character paragraph on
 `/lab/?debug`, waits for it to rest and reports the overlay's mean frame
 time (lab-notebook H3; headless numbers are for comparison only, so
-nothing is asserted). All along it asserts on
+nothing is asserted). Last, on `/lab/?debug&reveal=3` in Elegant at pace
+250, it types "I loooove this (honestly). But maybe not. Ship it!", waits
+until every letter has stood at rest for 500 ms of frames, presses
+Ctrl+Enter and samples `lastFrame()` and `reading()` on every animation
+frame: during the stops every frame's fills are a lit prefix, at most one
+part-filled letter and a dim suffix, the lit length within 1.5 characters
+of `headAt` at that frame's time; no letter of "loooove" lifts before the
+head reaches it and one does after; once `reading()` is null no pose has a
+`:fill`, and 5.5 s later every letter is at rest; the reading is shorter
+at pace 400 than at 150 (started with the button); Escape leaves no fill
+in the next frame; `reading.png` is taken about 40% through a reading at
+150. All along it asserts on
 `window.__lab`; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
-`out/lab/`, with `specimen-dark.png` and `specimen-paper.png`, and stops the server it started. It is not part of
+`out/lab/`, with `specimen-dark.png`, `specimen-paper.png` and `reading.png`, and stops the server it started. It is not part of
 `bb test`.
 
 The status line names the backend. `halfahead.lab.render` asks three.js's
@@ -693,6 +777,6 @@ where the frame's camera target lands, and the viewport size, in CSS
 pixels),
 `project(x, y, z)` (where a point in em landed on the canvas, in CSS
 pixels), `advance(c)` (a character's advance in em), `soundLog()` and
-`bounds()` (see Sound), `specimen()` and `inkColour(ink, lights)` (see The
+`bounds()` (see Sound), `reading()` (see Reading back), `specimen()` and `inkColour(ink, lights)` (see The
 specimen page; `specimen()` is null on the ordinary page) for tests and for anyone poking at
 it from the console.

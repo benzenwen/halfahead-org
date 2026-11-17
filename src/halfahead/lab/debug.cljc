@@ -141,3 +141,17 @@
                (map (fn [{:keys [phrase shot energy]}]
                       (str phrase " -> " (name shot) " " (fixed energy 1)))
                     directions)))))
+
+(defn reading-text
+  "The overlay's lines while a read-back plays: whether the :ha/reading is
+  paced (the head stops on every word) or only highlights, how long it
+  lasts and its beat, then one line per mark it performs, given as cues
+  [{:word :effect :intensity} ...] in the order they begin."
+  [{:keys [stops duration-ms beat-ms]} cues]
+  (str/join "\n"
+            (into [(str "reading " (if (seq stops) "paced" "highlights")
+                        " · " duration-ms " ms"
+                        " · beat " (fixed beat-ms 0) " ms")]
+                  (map (fn [{:keys [word effect intensity]}]
+                         (str word " -> " (name effect) " " (fixed intensity 1) " (reading)")))
+                  cues)))

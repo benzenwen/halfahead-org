@@ -803,3 +803,84 @@
     (is (close? 0.0 (pitch 4000 opts)) "frontal with the house lights up")
     (is (< 0.0 (pitch 5450 opts) (pitch 5900 opts)))
     (is (close? (pitch 5900 opts) (pitch 0 {})) "the stage's 2 degrees once they are down")))
+
+;; --- a reading: hurried cues and the head's ink --------------------------------
+
+(defn- poses-close? [as bs]
+  (and (= (count as) (count bs))
+       (every? (fn [[a b]]
+                 (and (= (set (keys a)) (set (keys b)))
+                      (every? (fn [k]
+                                (let [x (a k), y (b k)]
+                                  (if (number? x) (close? x y) (= x y))))
+                              (keys a))))
+               (map vector as bs))))
+
+(defspec a-hurried-cue-is-the-same-motion-faster 300
+  (prop/for-all [effect (gen/elements effects)
+                 ;; a sway runs on the wall clock, whatever the cue's tempo
+                 style (gen/elements [:plain :elegant :coarse])
+                 intensity (gen/elements [0.3 0.7 1.0])
+                 n (gen/choose 1 9)
+                 u (gen/choose 0 3000)]
+    (let [text (apply str (repeat n "a"))
+          unhurried (cue-on text effect intensity 20000)
+          hurried (assoc-in unhurried [:cues 0 :tempo] 0.5)
+          opts {:style-choice style}
+          slow (pose/frame unhurried (+ 20000 (* 2 u)) opts)
+          fast (pose/frame hurried (+ 20000 u) opts)]
+      (and (schema/valid? :ha/draft hurried)
+           (schema/valid? :ha/glyph-frame fast)
+           (poses-close? (:poses slow) (:poses fast))))))
+
+(deftest a-hurried-cue-ends-sooner
+  (let [unhurried (cue-on "loooove" :swell 0.7 20000)
+        hurried (assoc-in unhurried [:cues 0 :tempo] 0.5)
+        lifted? (fn [draft t] (some #(not= 0.0 (:y %)) (live (pose/frame draft t {}))))]
+    (is (lifted? unhurried 21700))
+    (is (lifted? hurried 21500))
+    (is (not (lifted? hurried 21700)) "over in half of 3120 ms")
+    (is (= (pose/frame unhurried 20500 {})
+           (pose/frame (assoc-in unhurried [:cues 0 :tempo] 1) 20500 {}))
+        "a tempo of 1 is no tempo")))
+
+(deftest fills-reach-the-poses
+  (let [draft (draft-of "abcd" 0 [])
+        f (pose/frame draft 9000 {:fills {0 1.0, 1 0.4, 2 0.0}})]
+    (is (schema/valid? :ha/glyph-frame f))
+    (is (= [nil 0.4 0.0 nil] (mapv :fill (live f)))
+        "a glyph that is lit, or that the map leaves out, has no :fill")
+    (is (= (pose/frame draft 9000 {})
+           (update f :poses (fn [ps] (mapv #(dissoc % :fill) ps))))
+        "and nothing else changes")
+    (is (= (pose/frame draft 9000 {}) (pose/frame draft 9000 {:fills nil})))
+    (is (= (pose/frame draft 9000 {}) (pose/frame draft 9000 {:fills {}}))))
+  (testing "a cue's own fill is multiplied by the head's"
+    (let [draft (cue-on "a" :draw 1 5000)
+          drawn (:fill (first (live (pose/frame draft 5250 {}))))
+          f (pose/frame draft 5250 {:fills {0 0.5}})]
+      (is (< 0 drawn 1))
+      (is (schema/valid? :ha/glyph-frame f))
+      (is (close? (* 0.5 drawn) (:fill (first (live f)))))
+      (is (= drawn (:fill (first (live (pose/frame draft 5250 {:fills {0 1.0}}))))))))
+  (testing "embers are not inked"
+    (let [draft (assoc (draft-of "ab" 0 [])
+                       :ghosts [{:id 0 :char "x" :died-ms 8900 :index 0}]
+                       :glyphs [{:id 1 :char "a" :born-ms 0} {:id 2 :char "b" :born-ms 0}])
+          f (pose/frame draft 9000 {:fills {0 0.0 1 0.0 2 0.0}})]
+      (is (= [0.0 0.0] (mapv :fill (live f))))
+      (is (= [nil] (mapv :fill (ghosts f)))))))
+
+(defspec fills-are-ignored-with-reduced-motion 200
+  (prop/for-all [[draft opts dt] gen-case
+                 v (gen/elements [0.0 0.3 1.0])]
+    (let [fills (into {} (map (fn [g] [(:id g) v])) (:glyphs draft))
+          still (assoc opts :reduced-motion? true)
+          f (pose/frame draft dt (assoc still :fills fills))
+          moving (pose/frame draft dt (assoc opts :fills fills))]
+      (and (= f (pose/frame draft dt still))
+           (not-any? #(contains? % :fill) (:poses f))
+           (schema/valid? :ha/glyph-frame moving)
+           (if (< v 1)
+             (every? #(<= 0.0 (:fill % 1.0) v) (live moving))
+             (= moving (pose/frame draft dt opts)))))))

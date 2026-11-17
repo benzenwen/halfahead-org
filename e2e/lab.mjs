@@ -1050,12 +1050,190 @@ try {
     done(`${lines.join(' | ')} | H3: mean frame time ${mean} ms with ${timing.drawn} glyphs at rest on ${timedBackend}`);
   }
 
+  // Reading back: Ctrl+Enter reads the draft to its reader. Everything is
+  // read from the frames drawn and from __lab.reading(), sampled on every
+  // animation frame, and each sampled frame is checked against the head at
+  // that frame's own time, so nothing depends on the frame rate.
+  begin('reading', null);
+  {
+    const page = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = page;
+    const readingUrl = new URL(url);
+    readingUrl.searchParams.set('debug', '');
+    readingUrl.searchParams.set('reveal', '3');
+    await open(page, readingUrl.href);
+    // Elegant performs four of the sentence's marks and has no sway; Plain,
+    // its flourish being 0, would perform none.
+    await page.selectOption('#style', 'elegant');
+    const setPace = async (wpm) => {
+      const shown = await page.evaluate((v) => {
+        const slider = document.getElementById('pace');
+        slider.value = String(v);
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        return document.getElementById('pace-value').textContent;
+      }, wpm);
+      if (shown !== String(wpm)) throw new Error(`the pace reads "${shown}" after setting ${wpm}`);
+    };
+    await setPace(250);
+    const acceptance = 'I loooove this (honestly). But maybe not. Ship it!';
+    const held = { from: 2, to: 9 };
+    await page.evaluate(() => {
+      const samples = [];
+      window.__read = { samples };
+      const offRest = ['sx', 'sy', 'skew', 'weight', 'blur', 'fill'];
+      let place = null, restSince = null;
+      const sample = () => {
+        const lab = window.__lab;
+        const f = lab.lastFrame();
+        const last = samples[samples.length - 1];
+        if (f && (!last || last.t !== f['t-ms'])) {
+          const t = f['t-ms'];
+          const live = f.poses.filter((p) => !p['ghost?']);
+          // where every letter stands: at rest it stops changing
+          const here = JSON.stringify(live.map((p) => [p.x, p.y]));
+          const restful = live.length === f.poses.length && here === place && live.every((p) =>
+            p.scale === 1 && p.z === 0 && p.rx === 0 && p.ry === 0 && p.rz === 0
+            && p.opacity === 1 && p.glow === 0 && p.wobble === 0 && !offRest.some((k) => k in p));
+          restSince = restful ? (restSince ?? last.t) : null;
+          place = here;
+          const r = lab.reading();
+          samples.push({
+            t,
+            restFor: restSince === null ? 0 : t - restSince,
+            text: live.map((p) => p.char).join(''),
+            ys: live.map((p) => p.y),
+            lengths: live.map((p) => p.char.length),
+            fills: live.map((p) => ('fill' in p ? p.fill : null)),
+            reading: r && { t0: r.t0, durationMs: r.durationMs, stops: r.stops, head: r.headAt(t) },
+            overlay: /^reading .*$/m.exec(document.getElementById('debug').textContent)?.[0] ?? null,
+          });
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    const samplesFrom = (i) => page.evaluate((from) => window.__read.samples.slice(from), i);
+    const sampleCount = () => page.evaluate(() => window.__read.samples.length);
+    // Wait on the data: a sampled frame at or after index `from` for which
+    // the predicate (run in the page, given the sample and arg) holds.
+    const waitForSample = (from, predicate, arg, what, timeout = 30000) =>
+      page.waitForFunction(({ from, source, arg }) => {
+        const holds = new Function(`return (${source})`)();
+        return window.__read.samples.slice(from).some((m) => holds(m, arg));
+      }, { from, source: predicate.toString(), arg }, { timeout })
+        .catch(() => { throw new Error(`no sampled frame in ${timeout} ms where ${what}`); });
+    const currentReading = () => page.evaluate(() => {
+      const r = window.__lab.reading();
+      return r && { t0: r.t0, durationMs: r.durationMs, beatMs: r.beatMs, stops: r.stops,
+                    entries: r.entries, performing: r.performing };
+    });
+
+    await page.keyboard.type(acceptance, { delay: 40 });
+    // The typing's own cues and any shot are over when every letter has
+    // stood at its resting place for 500 ms (in Elegant a swell takes up to
+    // 5 s, so this waits on the frames, not on a clock).
+    let mark = await sampleCount();
+    await waitForSample(mark, (m, text) => m.text === text && m.restFor >= 500, acceptance,
+      'every letter has been at rest for 500 ms');
+    const settled = (await samplesFrom(mark)).find((m) => m.text === acceptance && m.restFor >= 500);
+    const restYs = settled.ys;
+    const atRest = (m) => m.restFor > 0 && m.ys.every((y, i) => y === restYs[i]);
+
+    mark = await sampleCount();
+    await page.keyboard.press('Control+Enter');
+    const first = await currentReading();
+    if (!first) throw new Error('Ctrl+Enter started no reading');
+    if (first.stops.length !== 9) throw new Error(`the reading at 250 wpm has ${first.stops.length} stops, not the sentence's 9 words`);
+    const gestures = first.performing.map((g) => g.effect).join(' ');
+    if (gestures !== 'swell hush nod glow') throw new Error(`Elegant performs "${gestures}"`);
+    await waitForSample(mark, (m, t0) => m.reading === null && m.t > t0, first.t0, 'the reading is over');
+    const read = (await samplesFrom(mark)).filter((m) => m.t >= first.t0);
+    const stopsEnd = first.stops[8]['at-ms'] + first.stops[8].ms;
+    const during = read.filter((m) => m.reading && m.t < first.t0 + stopsEnd);
+    if (!during.length) throw new Error(`no frame was sampled during the ${stopsEnd} ms of the stops`);
+    // (a) a lit prefix, at most one letter part filled, a dim suffix;
+    // (b) the boundary is where the head is at that frame's time
+    let worstGap = 0;
+    for (const m of during) {
+      const fills = m.fills.map((v) => v ?? 1);
+      const at = `${m.t - first.t0} ms into the reading`;
+      fills.forEach((v, i) => {
+        if (i > 0 && v > fills[i - 1]) throw new Error(`${at} letter ${i} is filled ${v}, the one before it ${fills[i - 1]}`);
+      });
+      const partial = fills.filter((v) => v > 0 && v < 1).length;
+      if (partial > 1) throw new Error(`${at} ${partial} letters are part filled`);
+      const lit = fills.reduce((sum, v, i) => sum + v * m.lengths[i], 0);
+      worstGap = Math.max(worstGap, Math.abs(lit - m.reading.head));
+      if (!(Math.abs(lit - m.reading.head) <= 1.5))
+        throw new Error(`${at} ${lit.toFixed(2)} characters are lit and the head is at ${m.reading.head.toFixed(2)}`);
+    }
+    if (!during.some((m) => m.fills.some((v) => v !== null && v < 1)))
+      throw new Error('no sampled frame during the stops has a dim letter');
+    if (!read.some((m) => m.overlay?.startsWith('reading paced · ')))
+      throw new Error(`the overlay never showed the reading: ${JSON.stringify(read.map((m) => m.overlay))}`);
+    // (c) "loooove" waits for the head, then swells
+    const reached = first.t0 + first.stops.find((s) => s.span[0] === held.from && s.span[1] === held.to)['at-ms'];
+    const lifts = (m) => m.ys.slice(held.from, held.to).map((y, i) => y - restYs[held.from + i]);
+    const early = read.filter((m) => m.t < reached).find((m) => lifts(m).some((l) => Math.abs(l) > 1e-9));
+    if (early) throw new Error(`${reached - early.t} ms before the head reached "loooove" its lifts were ${JSON.stringify(lifts(early))}`);
+    const highest = Math.max(...read.filter((m) => m.t >= reached).flatMap(lifts));
+    if (!(highest > 1e-6)) throw new Error(`no letter of "loooove" lifted in ${read.length} frames once the head had reached it`);
+    // (d) over: no ink left to fill, and 5.5 s later every letter at rest
+    const overAt = read.find((m) => m.reading === null).t;
+    await waitForSample(mark, (m, t) => m.t >= t, overAt + 5500, 'it is 5.5 s after the reading');
+    const after = (await samplesFrom(mark)).filter((m) => m.t >= overAt);
+    const inked = after.find((m) => m.fills.some((v) => v !== null));
+    if (inked) throw new Error(`${inked.t - overAt} ms after the reading a pose still has a fill`);
+    const late = after.filter((m) => m.t >= overAt + 5500);
+    const unsettled = late.find((m) => !atRest(m));
+    if (unsettled) throw new Error(`${unsettled.t - overAt} ms after the reading a letter is not at rest`);
+
+    // (e) a faster reader gets a shorter reading; the button starts one too
+    await setPace(400);
+    await page.keyboard.press('Control+Enter');
+    const fast = await currentReading();
+    await page.keyboard.press('Escape');
+    if (!fast || (await currentReading()) !== null) throw new Error('Escape did not end the reading at 400 wpm');
+    await setPace(150);
+    await page.locator('#read').click();
+    const slow = await currentReading();
+    if (!slow) throw new Error('the Read back button started no reading');
+    if (slow.stops.length !== 9) throw new Error(`at 150 wpm the reading has ${slow.stops.length} stops: not paced`);
+    if (!(fast.durationMs < slow.durationMs))
+      throw new Error(`the reading lasts ${fast.durationMs} ms at 400 wpm and ${slow.durationMs} ms at 150`);
+    if (!(fast.beatMs === 150 && slow.beatMs === 400)) throw new Error(`beats of ${fast.beatMs} and ${slow.beatMs} ms`);
+    // the still for the foreman: about 40% of the way through, at 150 wpm
+    mark = await sampleCount();
+    await waitForSample(mark, (m, t) => m.reading && m.t >= t, slow.t0 + 0.4 * slow.durationMs,
+      'the reading at 150 wpm is 40% through');
+    await page.screenshot({ path: `${out}/reading.png` });
+    // (f) Escape lights everything at once
+    await page.keyboard.press('Control+Enter');
+    const stopped = await currentReading();
+    mark = await sampleCount();
+    await waitForSample(mark, (m, t0) => m.reading?.t0 === t0 && m.fills.some((v) => v !== null && v < 1), stopped.t0,
+      'the new reading has dimmed a letter');
+    await page.keyboard.press('Escape');
+    const escapedAt = await page.evaluate(() => Math.round(performance.now()));
+    mark = await sampleCount();
+    await waitForSample(mark, (m, t) => m.t >= t, escapedAt, 'a frame was drawn after Escape');
+    const afterEscape = (await samplesFrom(mark)).filter((m) => m.t >= escapedAt);
+    const stillRead = afterEscape.find((m) => m.reading !== null || m.fills.some((v) => v !== null));
+    if (stillRead) throw new Error(`${stillRead.t - escapedAt} ms after Escape a frame still has a reading or a fill`);
+    if ((await page.inputValue('#type')) !== acceptance) throw new Error('reading back changed the text');
+    done(`Elegant at 250 wpm performs ${gestures}; ${during.length} frames during the ${stopsEnd} ms of stops: a lit prefix, `
+      + `at most one part-filled letter, a dim suffix, within ${worstGap.toFixed(2)} characters of the head; "loooove" still until the head `
+      + `reached it, then lifted ${highest.toFixed(3)} em; no fill once over and at rest in all ${late.length} frames from 5.5 s on; `
+      + `${fast.durationMs} ms at 400 wpm < ${slow.durationMs} ms at 150; no fill in ${afterEscape.length} frame(s) after Escape`);
+    await page.close();
+  }
+
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
