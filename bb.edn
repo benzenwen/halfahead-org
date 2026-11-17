@@ -67,6 +67,10 @@
            :requires ([halfahead.dev.lab])
            :task     (halfahead.dev.lab/e2e!)}
 
+  lab:score-eval {:doc      "Hypothesis H4: ask the claude CLI for a score per case and count what comes back, into out/score-eval/report.edn. MAKES MODEL CALLS AND COSTS MONEY (not part of bb test). bb lab:score-eval [--only id-prefix] [--limit n] [--repeat k]"
+                  :requires ([halfahead.dev.score-eval])
+                  :task     (apply halfahead.dev.score-eval/-main *command-line-args*)}
+
   site    {:doc      "Assemble what would be deployed into out/site: the landing page and the typing lab's release build, nothing of the app. Deploys nothing"
            :depends  [deps]
            :requires ([halfahead.dev.site])
