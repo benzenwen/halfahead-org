@@ -69,6 +69,16 @@
             The debug overlay shows 'style mine (e 0.60 f 0.40 s 0.50 w
             0.50)' when a point is in force, and board cues read like any
             other ('did it -> glow 0.7 (board)').
+          A fix to the tour (order 0056; its builder reported it, the
+          foreman's script caused it): started from the Tour button with
+          words already in the text box, the tour types after them and a
+          later scene clears them, so a visitor's draft is lost. When the
+          tour starts and the box is not empty, lab.main keeps that text;
+          the tour then begins on an empty box; and when the tour ends or
+          is stopped, the kept text is put back (through the same edit
+          path as typing, so it is the visitor's draft again, at rest).
+          When the box was empty at the start, behaviour is as now (on a
+          stop, what the tour typed stays).
           Tests: target for a selection, for text ending mid-sentence,
           after a full stop, with trailing spaces, over 12 words, empty;
           press for each mark pad at Plain's and Caffeinated's points
@@ -88,7 +98,10 @@
           and the next cue's gesture plays faster than the same one in
           Plain (compare the time from its start to rest in sampled
           frames, by data not by clock); reload: the board is still
-          shown and the point kept. Screenshot out/lab/board.png."
+          shown and the point kept. Screenshot out/lab/board.png. And in
+          the tour step: type 'my own words', start the tour from the
+          button, stop it with a key in scene 2: the text box holds 'my
+          own words' again; start it again and let it finish: the same."
  :acceptance
  ["board, pose and debug tests as in the design, on both hosts"
   "`bb lab:e2e` passes with the board step and every existing step; `bb
