@@ -11,12 +11,27 @@
         a whispered aside. And the gold is alive without moving: it
         brightens under the pointer, as gold leaf caught a candle."
  :scope ["src/halfahead/lab/dress.cljc" "test/halfahead/lab/dress_test.cljc"
+         "src/halfahead/lab/reading.cljc" "test/halfahead/lab/reading_test.cljc"
          "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
          "src/halfahead/lab/main.cljs" "src/halfahead/lab/render.cljs"
          "src/halfahead/lab/debug.cljc" "test/halfahead/lab/debug_test.cljc"
          "e2e/lab.mjs" "docs/LAB.md"]
  :design "Schema (the foreman's; do not edit): :ha/dress, :ha/ink, the
           optional keys of :ha/glyph-pose.
+          First, a fix to order 0050 that its builder reported and the
+          foreman's design caused: lab.reading/natural-ms takes a style
+          point and uses (style/from-point point)'s tempo, but lab.pose
+          plays a named style at (style/params style), so an Elegant
+          gesture (tempo 1.5, not 1.36) runs about 10% longer than the
+          reading grants and its cue is withdrawn during its tail. Make
+          the reading use the tempo actually in force: natural-ms and plan
+          take the motion parameters that lab.pose will play with (params
+          for a named style, from-point for a point) alongside the point
+          that chooses gestures and dress; lab.main passes both. Test: for
+          each named style, every cue of a reading of the acceptance
+          sentence ends (by lab.pose's own timing) no later than the
+          reading is over?, and no cue is withdrawn while a letter is
+          still off rest.
           halfahead.lab.dress (.cljc, pure):
           looks -> a public map, what each dress does to a letter at rest:
             :versal  {:size 1.8}                      ; a raised initial
