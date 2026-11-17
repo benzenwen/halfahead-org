@@ -267,6 +267,16 @@ always works.
 
 Every frame names the style in force at its time (`:style`).
 
+A style also sits at a point in the style space (`style/point`: energy,
+flourish, softness, warmth), which the score's marks are performed and
+dressed by. **Plain is plain motion with a restrained flourish**, 0.35:
+its motion parameters are the lab's unstyled ones exactly, as they were,
+but it performs a mark of amount 0.62 or more (a held word, a landing,
+CAPITALS) and dresses asides and strong stresses (see Dress), never with
+a versal. Plain is where Auto rests when the typing rhythm lapses, and
+Auto is the default, so a visitor typing at an ordinary pace sees some of
+the score. Bareness is the reveal's job: level 0 shows none of it.
+
 ## Gestures and patches
 
 What a cue does is a **gesture**, and every gesture is a **patch**: plain
@@ -404,9 +414,14 @@ never in a new attribute: widen `glyphShape` or `glyphInk` to 4 in
 `glyph-material`, and write it in `draw!`. Only when all four are full
 does a fifth attribute come up, and that takes the last spare buffer.
 
-Glow's vermilion now shows only where the halo does: a letter's own edge
+The glow's halo shows only where the halo does: a letter's own edge
 keeps the letter's ink however soft it is, where before every edge pixel
-was mixed towards vermilion.
+was mixed towards the halo's colour. The halo is in the letter's own ink
+when the letter has one other than `:text` (as mixed by its `:tint`), so
+gold glows gold and a rubric red; a letter in the text ink, and an ember,
+glows vermilion as before. The shader tells by comparing `glyphInk` with
+the `:text` ink's uniform, which a text letter carries exactly: no new
+attribute and no new draw call.
 
 ## The palette
 
@@ -533,8 +548,17 @@ and each mark's gesture begins as the reading head reaches it.
   word by (1 + amount): "loooove" stays 1.7 beats in Elegant. A mark the
   style in force does not perform (see Styles: the more flourish, the
   fainter a mark still performs) is left out before pacing, so in Plain,
-  whose flourish is 0, nothing performs and nothing is held: the ink just
-  fills at the reader's pace.
+  whose flourish is 0.35, the acceptance sentence's "loooove" swells and
+  is held and "Ship it!" nods, while its aside, turn, doubt and stress
+  pass unperformed; at flourish 0 nothing would perform or be held, and
+  the ink would just fill at the reader's pace.
+- **Its style.** A reading keeps the style it started in: the named style
+  in force when it is asked for (under Auto, the one the rhythm suggests
+  at that moment) plans it, and while it plays the shell gives the frame
+  that style as `:style-choice`, whatever Auto would infer meanwhile. So a
+  gesture granted Elegant's length is played at Elegant's tempo even
+  though the rhythm lapses to Plain a few seconds after the last key.
+  When the reading is over, or ended, the picker's choice applies again.
 - **Gestures.** Each performed mark's gesture (`marks/gesture-for`) is a
   cue on the mark's letters at the stop of the first word it touches,
   `:source :score`. It is given its natural length (`reading/natural-ms`:
@@ -594,16 +618,22 @@ a raised initial, a red-letter phrase, a word in gold, a whispered aside.
 | `:strong` | weight +0.55 | every other stress of 0.7 or more |
 | `:whisper` | 0.85 times the size, the muted ink, weight −0.2 | an aside (in parentheses), flourish 0.2 or more |
 
-So Plain (flourish 0) leaves nothing, Elegant gilds and whispers, Coarse
+So Plain (flourish 0.35, warmth 0.5) and Elegant gild and whisper, Coarse
 (warmth 0.15) rubricates, and Caffeinated and Drunken open a long message
-with a versal. A span is dressed once and a message wears at most 8.
+with a versal; only a point with flourish under 0.2 leaves nothing. A span is dressed once and a message wears at most 8.
 
-- **Where it comes from.** After every edit, and when the style in force
-  changes (the picker, or Auto changing its mind), the draft's dress is
-  `(score/from-text text point)`'s `:dress` for that style's point, placed
-  on the glyphs whose characters lie in each span (`dress/placed`; offsets
-  in UTF-16 units, as a reading's). The shell derives it in the frame
-  loop and hands it to `pose/frame` as `:dress {:placed :seen :light}`.
+- **Where it comes from.** At every edit, and when the writer picks a
+  style (the picker or its shortcuts), the draft's dress is
+  `(score/from-text text point)`'s `:dress` for the point of the style in
+  force at that moment (under Auto, the style the rhythm suggests then),
+  placed on the glyphs whose characters lie in each span (`dress/placed`;
+  offsets in UTF-16 units, as a reading's). The shell keeps that point
+  with the dress and hands the dress to `pose/frame` as
+  `:dress {:placed :seen :light}`.
+- **It stays.** Between those two moments the dress is not derived again:
+  when the typing stops and Auto falls back to Plain, what was put on
+  while typing (a versal, say) is still worn, and nothing changes behind
+  an idle writer's back. The next edit decides it afresh.
 - **Presentation, never text.** Dress adds, drops and changes no
   character: the live poses still spell the draft, the textarea is still
   what assistive technology reads, and a message's text is the same with
@@ -628,7 +658,8 @@ with a versal. A span is dressed once and a message wears at most 8.
   to the letter: 0.62 under it, back to about 0.12 four em away. It
   follows the pointer only; there is no shimmer in time, so it is kept
   with reduced motion. A finger or a pen is no light, and when the mouse
-  leaves the page the gold is back at 0.12.
+  leaves the page the gold is back at 0.12. The halo is the letter's own
+  ink (see Channels), so the glint is gold, not pink.
 - **Levels.** Dress shows from reveal level 1. At level 0, the familiar
   chat box, frames are exactly as without it.
 
@@ -846,7 +877,9 @@ head reaches it and one does after; once `reading()` is null no pose has a
 `:fill`, and 5.5 s later every letter is at rest; the reading is shorter
 at pace 400 than at 150 (started with the button); Escape leaves no fill
 in the next frame; `reading.png` is taken about 40% through a reading at
-150. Then the dress step: on `/lab/?debug&reveal=1` (paper) in Elegant it
+150; then in Plain at pace 250 the reading's `performing` is swell then
+nod, beginning at the stops of "loooove" and "Ship", and the overlay
+lists both. Then the dress step: on `/lab/?debug&reveal=1` (paper) in Elegant it
 types "This is \*the one thing\* that matters (trust me)." and waits for
 the frames to stop changing: `dress()` is a gilt on "the one thing" whose
 letters have ink gold and tint 1 and a whisper on "trust me" whose letters
@@ -855,11 +888,22 @@ inked colour in the gold phrase's box is within 12/255 of
 `inkColour('gold', 0)` (`dress-paper.png`). The mouse is moved, slowly
 enough not to be a wand, onto the phrase's middle letter: every gilt
 letter's `:glow` matches the glint's curve at its own distance within
-0.03 (`dress-glint.png`), and all are back within 0.02 of 0.12 with the
+0.03 (`dress-glint.png`), and in that screenshot the halo pixels round
+the letter under the pointer (not paper, 2 to 4 px clear of any gold ink)
+are on average nearer in rgb to a mix of paper with gold than to a mix of
+paper with vermilion; all glows are back within 0.02 of 0.12 with the
 mouse in a corner. In Caffeinated a sentence of 14 words has a first
 letter at scale 1.8 and a second starting at or beyond its scaled right
-edge; in Plain nothing is dressed. The same data and colour checks pass
-on the dark stage (`?reveal=3`, `dress-dark.png`). All along it asserts on
+edge; in Plain the sentence wears the same gilt and whisper and the 14
+words no versal. On `?reveal=0`, a fresh page for each of the five
+styles, "\*gold\* (hm)" (two words, so the level stays 0) has dress
+decided but no pose with an ink, a weight, a size or a glow. On
+`?reveal=1` with the picker on Auto and the clock held, the sentence
+typed at 450 ms a key (Auto reads Elegant) and then the 14 words typed at
+40 ms a key (Caffeinated, so a versal) wear the same dress (kinds, glyph
+ids, inks, sizes) 1 s after the last key and 8 s later, when Auto reads
+Plain. The same data and colour checks as on paper pass on the dark stage
+(`?reveal=3`, `dress-dark.png`). All along it asserts on
 `window.__lab`; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,

@@ -374,9 +374,14 @@
       (is (= :nod (effect-at soft-lively (m :land))))
       (is (= :nod (effect-at crisp-calm (m :land)))))
     (testing "a spare style performs only strong marks"
-      (is (some? (marks/gesture-for :plain (m :hold :amount 0.9))))
-      (is (nil? (marks/gesture-for :plain (m :hold :amount 0.89))))
-      (is (nil? (marks/gesture-for (style/point :plain) (m :hold :amount 0.89))))
+      (is (some? (marks/gesture-for :plain (m :hold :amount 0.62))))
+      (is (nil? (marks/gesture-for :plain (m :hold :amount 0.61))))
+      (is (nil? (marks/gesture-for (style/point :plain) (m :hold :amount 0.61))))
+      (is (some? (marks/gesture-for (assoc (style/point :plain) :flourish 0.0)
+                                    (m :hold :amount 0.9))))
+      (is (nil? (marks/gesture-for (assoc (style/point :plain) :flourish 0.0)
+                                   (m :hold :amount 0.89)))
+          "with no flourish at all, only 0.9 and over")
       (is (some? (marks/gesture-for :elegant (m :hold :amount 0.54))))
       (is (nil? (marks/gesture-for :elegant (m :hold :amount 0.53)))))
     (testing "a mark's own gesture always performs, and is the effect"
@@ -391,8 +396,12 @@
       (is (= 0.1 (:intensity (marks/gesture-for :plain (m :hold :amount 0.0 :gesture :pop))))))
     (testing "what read finds, as the named styles perform it"
       (let [ms (marks/read "I loooove this (honestly). But maybe not. Ship it!")]
-        (is (= [nil nil nil nil nil nil] (mapv #(effect-at :plain %) ms))
-            "plain performs nothing here")
+        (is (= [:swell nil nil nil :nod nil] (mapv #(effect-at :plain %) ms))
+            "plain performs the hold and the landing (0.7), nothing fainter")
+        (is (= [:swell nil nil nil :nod nil] (mapv #(effect-at (style/point :plain) %) ms)))
+        (is (= [nil nil nil nil nil nil]
+               (mapv #(effect-at (assoc (style/point :plain) :flourish 0.0) %) ms))
+            "no flourish performs nothing here")
         (is (= [:swell :hush :rewind :wobble :slam :slam]
                (mapv #(effect-at :caffeinated %) ms)))
         (is (= [:swell :hush nil nil :nod :glow]
@@ -479,7 +488,14 @@
     (testing "named styles are accepted"
       (is (= [{:span [10 14] :as :gilt}] (marks/dress-for :elegant "" [stronger])))
       (is (= [{:span [10 14] :as :rubric}] (marks/dress-for :coarse "" [stronger])))
-      (is (= [] (marks/dress-for :plain long-text ms))))
+      (is (= [{:span [0 4] :as :strong} {:span [10 14] :as :gilt} {:span [20 30] :as :whisper}]
+             (marks/dress-for :plain long-text ms))
+          "Plain whispers, gilds (its warmth is 0.5) and sets strong, but gives no versal"))
+    (testing "Plain's point, on what read finds"
+      (let [sentence "I loooove this (honestly). But maybe not. Ship it!"]
+        (is (= [{:span [16 24] :as :whisper}]
+               (marks/dress-for (style/point :plain) sentence (marks/read sentence)))
+            "the aside's whisper: its stress (0.6) is not strong enough to dress")))
     (testing "at most 8: whispers go first"
       (let [stresses (mapv (fn [i] {:span [(* 10 i) (+ 4 (* 10 i))] :kind :stress
                                     :amount (+ 0.7 (* 0.02 i))})

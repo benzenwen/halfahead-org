@@ -127,8 +127,10 @@
   "Alpha from the distance field with a smooth edge, which :weight moves and
   :blur widens; :fill dims the quad right of it; the letter in its own ink
   (glyphInk), ghosts in ember orange; glow as a wider, softer halo from the
-  same field, in vermilion; wobble as a jelly sway of the quad's corners."
-  [^js atlas-texture ^js atlas-size]
+  same field, in the letter's ink when that is not the :text ink (text-ink,
+  the uniform holding it) and in vermilion otherwise, so gold glows gold;
+  wobble as a jelly sway of the quad's corners."
+  [^js atlas-texture ^js atlas-size ^js text-ink]
   (let [rect (tsl/attribute "glyphRect" "vec4")
         ;; opacity, glow, wobble and ghost share one attribute: see lab.instance
         ^js look (tsl/attribute "glyphLook" "vec4")
@@ -154,9 +156,15 @@
         ^js wipe (.sub (.mul filled (+ 1.0 fill-edge)) fill-edge)
         dim (tsl/smoothstep wipe (.add wipe fill-edge) (.-x uv))
         base (tsl/mix glyph-ink (tsl/color ember) ghost)
-        ;; the letter lies over its halo, so vermilion shows only where the
-        ;; halo does: a soft or coloured edge keeps the letter's own ink
-        rgb (tsl/mix (tsl/color vermilion) base
+        ;; a letter in the :text ink carries exactly the uniform's colour, so
+        ;; any distance from it is an ink of the letter's own (already mixed
+        ;; by its :tint); a ghost's halo stays vermilion
+        ^js inked (.mul (tsl/step 0.004 (tsl/distance glyph-ink text-ink)) (.oneMinus ghost))
+        halo-ink (tsl/mix (tsl/color vermilion) glyph-ink inked)
+        ;; the letter lies over its halo, so the halo's colour shows only
+        ;; where the halo does: a soft or coloured edge keeps the letter's
+        ;; own ink
+        rgb (tsl/mix halo-ink base
                      (.div fill (tsl/max (tsl/max fill halo) 0.0001)))
         ^js g tsl/positionGeometry
         sway (tsl/vec3 (.mul (tsl/sin (.add (.mul tsl/time 11.0) (.mul (.-y g) 5.0))) 0.18)
@@ -461,7 +469,7 @@
   (let [atlas (atom (new-atlas))
         ^js atlas-size (tsl/uniform (three/Vector2. atlas-width (:height @atlas)))
         ^js ink-node (tsl/uniform (three/Color.))
-        {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size)
+        {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size ink-node)
         scene (three/Scene.)
         camera (three/PerspectiveCamera. 40 1 0.1 500)
         caret (three/Mesh. (three/PlaneGeometry. 0.06 1.1)

@@ -17,6 +17,8 @@
 
 (def ^:private plain (style/point :plain))
 (def ^:private elegant (style/point :elegant))
+;; no flourish at all: no mark performs
+(def ^:private bare (assoc plain :flourish 0.0))
 
 ;; what lab.pose plays each with
 (def ^:private plainly (style/params :plain))
@@ -58,8 +60,26 @@
 
 ;; --- plan --------------------------------------------------------------------
 
-(deftest plain-performs-no-mark-of-the-sentence
+(deftest plain-performs-the-hold-and-the-landing-of-the-sentence
   (let [{:keys [score performing] r :reading} (reading/plan sentence plain plainly {:wpm 250})]
+    (is (schema/valid? :ha/score score))
+    (is (schema/valid? :ha/reading r))
+    (is (= sentence (:text score)))
+    (is (= [[[2 9] :hold] [[42 49] :land]] (mapv (juxt :span :kind) (:marks score)))
+        "the aside and the stress (0.6) and the turn and the doubt (0.5) are below Plain's 0.62")
+    (is (= [{:mark 0 :effect :swell :intensity 0.7}
+            {:mark 1 :effect :nod :intensity 0.7}]
+           performing))
+    (is (= [{:mark 0 :at-ms 240 :ms 3120}
+            {:mark 1 :at-ms 2160 :ms 800}]
+           (:entries r))
+        "each for its natural length at Plain's tempo, 1")
+    (is (= (pace/words sentence) (mapv :span (:stops r))) "paced: all nine words")
+    (is (= {:span [2 9] :at-ms 240 :ms 408} (get-in r [:stops 1])) "held: 1.7 beats")
+    (is (= 3360 (:duration-ms r)))))
+
+(deftest a-style-with-no-flourish-performs-no-mark-of-the-sentence
+  (let [{:keys [score performing] r :reading} (reading/plan sentence bare plainly {:wpm 250})]
     (is (schema/valid? :ha/score score))
     (is (schema/valid? :ha/reading r))
     (is (= sentence (:text score)))
@@ -123,7 +143,16 @@
              :at-ms 3400}]
            cues)
         "unhurried, so none has a :tempo")
-    (is (= [] (reading/cues (reading/plan sentence plain plainly {:wpm 250}) glyphs 1000)))
+    (is (= [{:glyph-ids (mapv id-at (range 2 9))
+             :cue {:word "loooove" :effect :swell :intensity 0.7 :source :score}
+             :at-ms 1240}
+            {:glyph-ids (mapv id-at (range 42 49))
+             :cue {:word "Ship it" :effect :nod :intensity 0.7 :source :score}
+             :at-ms 3160}]
+           (reading/cues (reading/plan sentence plain plainly {:wpm 250}) glyphs 1000))
+        "Plain's two")
+    (is (= [] (reading/cues (reading/plan sentence bare plainly {:wpm 250}) glyphs 1000))
+        "no flourish, no cue")
     (is (= [] (reading/cues (reading/plan sentence elegant elegantly {:wpm 250}) [] 1000))
         "a mark with no glyph is no cue")))
 
@@ -255,13 +284,16 @@
 (deftest a-reading-is-over-when-its-stops-and-cues-are
   (let [glyphs (glyphs-of sentence)
         in-elegant (reading/plan sentence elegant elegantly {:wpm 250})
-        in-plain (reading/plan sentence plain plainly {:wpm 250})]
+        in-plain (reading/plan sentence plain plainly {:wpm 250})
+        in-bare (reading/plan sentence bare plainly {:wpm 250})]
     (is (not (reading/over? in-elegant glyphs 1000 1000)))
     (is (not (reading/over? in-elegant glyphs 1000 3760)) "the head has crossed; the swell plays on")
     (is (not (reading/over? in-elegant glyphs 1000 5919)))
     (is (reading/over? in-elegant glyphs 1000 5920) "240 + 4680 ms in")
-    (is (not (reading/over? in-plain glyphs 1000 3591)))
-    (is (reading/over? in-plain glyphs 1000 3592) "no cues: when the stops end")
+    (is (not (reading/over? in-plain glyphs 1000 4359)))
+    (is (reading/over? in-plain glyphs 1000 4360) "240 + 3120 ms in, at Plain's tempo")
+    (is (not (reading/over? in-bare glyphs 1000 3591)))
+    (is (reading/over? in-bare glyphs 1000 3592) "no cues: when the stops end")
     (is (reading/over? (reading/plan (str/join " " (repeat 200 "plain")) plain plainly {:wpm 250}) [] 0 0)
         "highlights with nothing to perform are over at once")))
 
@@ -288,8 +320,7 @@
                               (map #(+ (:at-ms %) (:ms %)) (:entries r))))
             still #(frame-of glyphs [] named %)]
         (is (= (count (:entries r)) (count cues)) "every mark performed has its glyphs")
-        (when (#{:elegant :caffeinated :drunken :coarse} named)
-          (is (seq cues) "a style with flourish performs something"))
+        (is (seq cues) "every named style has flourish enough to perform something")
         (is (not (reading/over? plan glyphs t0 (dec end))))
         (is (reading/over? plan glyphs t0 end))
         (is (= (still end) (frame-of glyphs cues named end))
@@ -301,3 +332,50 @@
           (is (some #(not= (still %) (frame-of glyphs [cue] named %))
                     (map #(+ at-ms (* ms %)) [0.25 0.5 0.75]))
               (str (get-in cue [:cue :effect]) " moves a letter while it plays")))))))
+
+;; --- a reading keeps its style (order 0055) -----------------------------------
+
+(deftest a-reading-keeps-the-style-it-started-in
+  ;; What lab.main passes: the sentence typed slowly and steadily, a
+  ;; read-back asked for 4 s after the last key with the picker on Auto.
+  ;; Auto still reads Elegant then, so the reading is planned in Elegant;
+  ;; 240 ms later, when the head reaches the first mark, the rhythm has
+  ;; lapsed and Auto reads Plain, whose gestures are half as long again
+  ;; shorter. The frame is given the reading's style, not the picker's.
+  (let [glyphs (vec (map-indexed (fn [i c] {:id (id-at i) :char (str c) :born-ms (* 450 i)})
+                                 sentence))
+        last-key (* 450 (dec (count sentence)))
+        t0 (+ last-key 4000)
+        named (style/infer glyphs t0)
+        {r :reading :as plan} (reading/plan sentence (style/point named) (style/params named)
+                                            {:wpm 250})
+        cues (reading/cues plan glyphs t0)
+        frame #(pose/frame {:text sentence :glyphs glyphs :ghosts [] :cues (vec %1) :next-id 1000}
+                           %3 {:style-choice %2})
+        end (+ t0 (:duration-ms r))]
+    (is (= :elegant named) "what Auto infers as the reading starts")
+    (is (= :plain (style/infer glyphs (+ t0 240))) "and no longer when the first cue fires")
+    (is (= [:swell :hush :nod :glow] (mapv #(get-in % [:cue :effect]) cues)))
+    (is (= 4 (count (:entries r))))
+    (doseq [[{:keys [ms]} {:keys [at-ms] :as cue}] (map vector (:entries r) cues)
+            :let [effect (get-in cue [:cue :effect])
+                  granted (+ at-ms ms)]]
+      (testing (str effect)
+        (is (== ms (reading/natural-ms elegantly (count (:glyph-ids cue)) effect))
+            "granted Elegant's natural length")
+        (is (every? #(not= (frame [] :elegant %) (frame [cue] :elegant %))
+                    (map #(+ at-ms (* ms %)) [0.25 0.5 0.75]))
+            "given the reading's style, it plays through its grant, as Elegant does")
+        (is (every? #(= (frame [] :elegant %) (frame [cue] :elegant %))
+                    (concat [granted end] (map #(+ granted %) [1 500 3000 10000 60000])))
+            "and has ended, by lab.pose's own timing, at every later time")))
+    (let [[swell] cues
+          ;; past Plain's 3120 ms for the swell, within Elegant's 4680
+          late (+ (:at-ms swell) 3900)]
+      (is (not= (:poses (frame [] :elegant late)) (:poses (frame [swell] :elegant late)))
+          "Elegant's swell is still playing")
+      (is (= (:poses (frame [] :auto late)) (:poses (frame [swell] :auto late)))
+          "given the picker's Auto instead, it would have been cut to Plain's length")
+      (is (= :plain (:style (frame cues :auto late))))
+      (is (= :elegant (:style (frame cues :elegant late)))
+          "the frame reports the reading's style while it plays"))))

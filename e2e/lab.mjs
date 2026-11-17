@@ -1065,7 +1065,7 @@ try {
     readingUrl.searchParams.set('reveal', '3');
     await open(page, readingUrl.href);
     // Elegant performs four of the sentence's marks and has no sway; Plain,
-    // its flourish being 0, would perform none.
+    // with its restrained flourish, performs two (checked at the end).
     await page.selectOption('#style', 'elegant');
     const setPace = async (wpm) => {
       const shown = await page.evaluate((v) => {
@@ -1226,10 +1226,32 @@ try {
     const stillRead = afterEscape.find((m) => m.reading !== null || m.fills.some((v) => v !== null));
     if (stillRead) throw new Error(`${stillRead.t - escapedAt} ms after Escape a frame still has a reading or a fill`);
     if ((await page.inputValue('#type')) !== acceptance) throw new Error('reading back changed the text');
+    // (g) Plain keeps a little flourish: the held word swells and the
+    // landing nods, each as the head reaches its first word
+    await page.selectOption('#style', 'plain');
+    await setPace(250);
+    await page.keyboard.press('Control+Enter');
+    const plainly = await currentReading();
+    if (!plainly) throw new Error('Ctrl+Enter started no reading in Plain');
+    const plainGestures = plainly.performing.map((g) => g.effect).join(' ');
+    if (plainGestures !== 'swell nod') throw new Error(`Plain performs "${plainGestures}", not "swell nod"`);
+    const stopAt = (from) => plainly.stops.find((st) => st.span[0] === from)['at-ms'];
+    const begins = plainly.entries.map((e) => e['at-ms']);
+    if (begins[0] !== stopAt(2) || begins[1] !== stopAt(42))
+      throw new Error(`Plain's gestures begin at ${begins} ms, not as the head reaches "loooove" (${stopAt(2)}) and "Ship" (${stopAt(42)})`);
+    const plainLines = ['loooove -> swell 0.7 (reading)', 'Ship it -> nod 0.7 (reading)'];
+    await page.waitForFunction((lines) => {
+      const shown = document.getElementById('debug').textContent;
+      return lines.every((line) => shown.includes(line));
+    }, plainLines, { timeout: 10000 })
+      .catch(() => { throw new Error(`the overlay never read ${JSON.stringify(plainLines)} during Plain's reading`); });
+    await page.keyboard.press('Escape');
+    if ((await currentReading()) !== null) throw new Error("Escape did not end Plain's reading");
     done(`Elegant at 250 wpm performs ${gestures}; ${during.length} frames during the ${stopsEnd} ms of stops: a lit prefix, `
       + `at most one part-filled letter, a dim suffix, within ${worstGap.toFixed(2)} characters of the head; "loooove" still until the head `
       + `reached it, then lifted ${highest.toFixed(3)} em; no fill once over and at rest in all ${late.length} frames from 5.5 s on; `
-      + `${fast.durationMs} ms at 400 wpm < ${slow.durationMs} ms at 150; no fill in ${afterEscape.length} frame(s) after Escape`);
+      + `${fast.durationMs} ms at 400 wpm < ${slow.durationMs} ms at 150; no fill in ${afterEscape.length} frame(s) after Escape; `
+      + `Plain at 250 wpm performs ${plainGestures}, on "loooove" and "Ship it"`);
     await page.close();
   }
 
@@ -1363,7 +1385,48 @@ try {
         throw new Error(`"${p.char}", ${Math.sqrt(d2).toFixed(2)} em from the pointer, glows ${lit.glows[i]}, not ${want.toFixed(3)}`);
     });
     const brightest = Math.max(...lit.glows);
-    await paper.screenshot({ path: `${out}/dress-glint.png` });
+    // Gold glows gold. The halo is the letter's ink laid thinly over the
+    // paper, so each halo pixel (not paper, and 2 to 4 px clear of every
+    // pixel that is gold ink) is measured in rgb against the nearest mix
+    // of paper with gold and the nearest mix of paper with the vermilion
+    // other letters glow in.
+    const glint = decodePng(await paper.screenshot({ path: `${out}/dress-glint.png` }));
+    const halo = await paper.evaluate((p) => {
+      const lab = window.__lab;
+      const a = lab.project(p.x, p.y + 0.9, 0), b = lab.project(p.x + lab.advance(p.char), p.y - 0.3, 0);
+      return { box: { x0: a.x - 6, y0: a.y - 6, x1: b.x + 6, y1: b.y + 6 }, vermilion: lab.inkColour('signal', 1) };
+    }, middle);
+    const paperColour = commonColour(glint), gold = onPaper.state.gold;
+    const apart = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    // how far p is from the nearest colour between paper and ink
+    const offMix = (p, ink) => {
+      const along = ink.map((v, i) => v - paperColour[i]);
+      const k = Math.max(0, Math.min(1, p.reduce((sum, v, i) => sum + (v - paperColour[i]) * along[i], 0)
+        / along.reduce((sum, v) => sum + v * v, 0)));
+      return apart(p, paperColour.map((v, i) => v + k * along[i]));
+    };
+    const hx0 = Math.max(0, Math.floor(halo.box.x0)), hy0 = Math.max(0, Math.floor(halo.box.y0));
+    const hx1 = Math.min(glint.width, Math.ceil(halo.box.x1)), hy1 = Math.min(glint.height, Math.ceil(halo.box.y1));
+    const isInk = (x, y) => x >= 0 && y >= 0 && x < glint.width && y < glint.height && apart(glint.pixel(x, y), gold) <= 40;
+    const clearOfInk = (x, y) => {
+      let nearest = Infinity;
+      for (let dy = -4; dy <= 4; dy++)
+        for (let dx = -4; dx <= 4; dx++)
+          if (isInk(x + dx, y + dy)) nearest = Math.min(nearest, Math.max(Math.abs(dx), Math.abs(dy)));
+      return nearest >= 2 && nearest <= 4;
+    };
+    const haloPixels = [];
+    for (let y = hy0; y < hy1; y++)
+      for (let x = hx0; x < hx1; x++) {
+        const px = glint.pixel(x, y);
+        if (apart(px, paperColour) > 12 && clearOfInk(x, y)) haloPixels.push(px);
+      }
+    if (haloPixels.length < 12) throw new Error(`only ${haloPixels.length} halo pixel(s) around the "${middle.char}" under the pointer`);
+    const mean = (ink) => haloPixels.reduce((sum, px) => sum + offMix(px, ink), 0) / haloPixels.length;
+    const offGold = mean(gold), offVermilion = mean(halo.vermilion);
+    if (!(offGold < offVermilion))
+      throw new Error(`the ${haloPixels.length} halo pixels around the gold "${middle.char}" are ${offGold.toFixed(1)} from gold on paper `
+        + `and ${offVermilion.toFixed(1)} from vermilion on paper: the gold's halo is not gold`);
     await glide({ x: 20, y: 600 });
     await paper.waitForFunction((ids) => {
       const f = window.__lab.lastFrame();
@@ -1385,14 +1448,105 @@ try {
     if (!(opened.second.x >= rightEdge - 1e-6))
       throw new Error(`the second letter starts at ${opened.second.x} em, inside the versal, whose right edge is at ${rightEdge}`);
 
-    // (e) Plain leaves no dress at all
+    // (e) Plain keeps a little flourish: the gilt and the whisper, but
+    // never a versal
     await retype(paper, 'plain', dressed);
     const plain = await worn(paper);
-    if (plain.dress.length) throw new Error(`Plain dresses ${JSON.stringify(plain.dress.map((d) => [d.as, d.text]))}`);
-    const worn1 = plain.poses.find((p) => 'ink' in p || 'weight' in p || p.scale !== 1 || p.glow !== 0);
-    if (worn1) throw new Error(`in Plain "${worn1.char}" has ink ${worn1.ink}, weight ${worn1.weight}, scale ${worn1.scale}, glow ${worn1.glow}`);
-    if (/^dress: /m.test(plain.overlay)) throw new Error('the overlay lists dress in Plain');
+    const plainWears = JSON.stringify(plain.dress.map((d) => [d.as, d.text]));
+    if (plainWears !== '[["gilt","the one thing"],["whisper","trust me"]]') throw new Error(`Plain dresses ${plainWears}`);
+    const plainGilt = the(plain, 'gilt').poses.find((p) => p.ink !== 'gold' || p.tint !== 1);
+    if (plainGilt) throw new Error(`in Plain a letter of the gilt phrase has ink ${plainGilt.ink}, tint ${plainGilt.tint}`);
+    const plainLoud = the(plain, 'whisper').poses.find((p) => !(p.scale < 1) || p.ink !== 'muted');
+    if (plainLoud) throw new Error(`in Plain a letter of the whisper has scale ${plainLoud.scale}, ink ${plainLoud.ink}`);
+    const plainLine = 'dress: gilt "the one thing" · whisper "trust me"';
+    if (!plain.overlay.includes(plainLine)) throw new Error(`in Plain the overlay does not read '${plainLine}': ${plain.overlay}`);
+    await retype(paper, 'plain', fourteen);
+    const unopened = await worn(paper);
+    if (unopened.dress.some((d) => d.as === 'versal')) throw new Error(`Plain gives 14 words ${JSON.stringify(unopened.dress.map((d) => [d.as, d.text]))}`);
+    if (unopened.poses[0].scale !== 1) throw new Error(`in Plain the first of 14 words' letters is at scale ${unopened.poses[0].scale}`);
     await paper.close();
+
+    // (f) bareness is level 0's: nothing is dressed there in any style.
+    // Two words, on a fresh page each time, because a third finished word
+    // would take the lab to level 1; the dress is decided all the same, it
+    // is the frame that does not wear it.
+    const twoWords = '*gold* (hm)';
+    for (const style of ['plain', 'elegant', 'caffeinated', 'drunken', 'coarse']) {
+      const flat = await openDressed(0);
+      await retype(flat, style, twoWords);
+      const bare = await worn(flat);
+      if (bare.level !== 0) throw new Error(`"${twoWords}" in ${style} took the lab to level ${bare.level}`);
+      if (!bare.dress.length) throw new Error(`${style} decides no dress for "${twoWords}": nothing is being withheld`);
+      const dressedAt0 = bare.poses.find((p) => 'ink' in p || 'weight' in p || p.scale !== 1 || p.glow !== 0);
+      if (dressedAt0)
+        throw new Error(`at level 0 in ${style} "${dressedAt0.char}" has ink ${dressedAt0.ink}, weight ${dressedAt0.weight}, scale ${dressedAt0.scale}, glow ${dressedAt0.glow}`);
+      await flat.close();
+    }
+
+    // (g) in Auto the dress stays. A held clock, so the rhythm is exactly
+    // what is typed and 8 s is 8 s of the lab's own time at any frame rate.
+    const idle = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = idle;
+    await idle.clock.install();
+    const idleUrl = new URL(url);
+    idleUrl.searchParams.set('reveal', '1');
+    await open(idle, idleUrl.href);
+    await idle.bringToFront();
+    await idle.clock.pauseAt(await idle.evaluate(() => Date.now() + 1000));
+    // as in 'style auto': run past the frame pauseAt may have drawn ahead
+    const idleLead = await idle.evaluate(() => window.__lab.lastFrame()['t-ms'] - performance.now());
+    await idle.clock.runFor(Math.max(0, Math.ceil(idleLead)) + 100);
+    if ((await idle.locator('#style').inputValue()) !== 'auto') throw new Error('the picker does not start on Auto');
+    const typeAt = async (chars, ms) => {
+      for (const ch of chars) {
+        await idle.keyboard.type(ch);
+        await idle.clock.fastForward(ms);
+      }
+    };
+    // a frame at least ms later than the last one, one second at a time
+    const idleFor = async (ms) => {
+      const from = await idle.evaluate(() => window.__lab.lastFrame()['t-ms']);
+      for (let k = 0; k < Math.ceil(ms / 1000); k++) await idle.clock.fastForward(1000);
+      await idle.waitForFunction(([from, ms]) => window.__lab.lastFrame()['t-ms'] - from >= ms, [from, ms], { timeout: 10000 })
+        .catch(() => { throw new Error(`no frame was drawn ${ms} ms of the lab's time later`); });
+    };
+    const wearing = () => idle.evaluate(() => {
+      const lab = window.__lab;
+      const f = lab.lastFrame();
+      const byId = new Map(f.poses.map((p) => [p.id, p]));
+      return {
+        style: f.style,
+        dress: lab.dress().map((d) => ({
+          as: d.as,
+          ids: d['glyph-ids'],
+          inks: d['glyph-ids'].map((id) => [byId.get(id).ink ?? null, byId.get(id).tint ?? null]),
+          sizes: d['glyph-ids'].map((id) => byId.get(id).scale),
+        })),
+      };
+    });
+    const staysDressed = async (text, ms, reads, what) => {
+      await idle.fill('#type', '');
+      await typeAt(text, ms);
+      await idle.clock.fastForward(Math.max(0, 1000 - ms));
+      const soon = await wearing();
+      if (soon.style !== reads) throw new Error(`1 s after typing at ${ms} ms a key Auto reads ${soon.style}, not ${reads}`);
+      const kinds = soon.dress.map((d) => d.as).join(' ');
+      if (kinds !== what) throw new Error(`typed in Auto at ${ms} ms a key, "${text}" wears "${kinds}", not "${what}"`);
+      await idleFor(8000);
+      const later = await wearing();
+      if (later.style !== 'plain') throw new Error(`8 s after typing stopped Auto reads ${later.style}, not plain`);
+      if (JSON.stringify(later.dress) !== JSON.stringify(soon.dress))
+        throw new Error(`the dress changed while idle in Auto: ${JSON.stringify(soon.dress)} 1 s after typing, ${JSON.stringify(later.dress)} 8 s later`);
+      return soon;
+    };
+    // slow and steady reads Elegant: the gilt and the whisper stay
+    await staysDressed(dressed, 450, 'elegant', 'gilt whisper');
+    // Elegant and Plain dress that sentence alike, so also the dress only
+    // a lavish style gives: fast and steady reads Caffeinated, whose
+    // versal must outlast the lapse to Plain
+    const kept = await staysDressed(fourteen, 40, 'caffeinated', 'versal');
+    if (!(Math.abs(kept.dress[0].sizes[0] - 1.8) <= 0.02)) throw new Error(`the versal typed in Auto is at scale ${kept.dress[0].sizes[0]}`);
+    await idle.close();
 
     // (d) the same on the dark stage
     const dark = await openDressed(3);
@@ -1400,7 +1554,11 @@ try {
     await dark.close();
     done(`on paper ${onPaper.summary}; under the pointer the gold glows up to ${brightest.toFixed(2)}, each letter on the curve for its distance, `
       + `and 0.12 again with it away; Caffeinated's versal at scale ${opened.first.scale.toFixed(2)}, the next letter ${(opened.second.x - rightEdge).toFixed(3)} em `
-      + `past its right edge; Plain wears nothing; on the stage ${onStage.summary}`);
+      + `past its right edge; the ${haloPixels.length} halo pixels round the gold under the pointer are ${offGold.toFixed(1)} from gold on paper, `
+      + `${offVermilion.toFixed(1)} from vermilion; Plain gives gilt "the one thing" and whisper "trust me" and 14 words no versal; `
+      + `at level 0 nothing is dressed in any of the five styles; in Auto the gilt and whisper typed at 450 ms a key (Elegant) and `
+      + `the versal typed at 40 ms a key (Caffeinated) are the same 1 s after typing and 8 s later, when Auto reads Plain; `
+      + `on the stage ${onStage.summary}`);
   }
 
   // The lab on three.js's real WebGPU path. The browser above never gets

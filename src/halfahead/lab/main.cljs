@@ -13,12 +13,14 @@
   with ?stage=name (lab.stage; the grid floor by default). With ?specimen
   it draws lab.specimen's type specimen on every frame instead of the
   draft, and typing does nothing. Ctrl+Enter or the Read back button reads
-  the draft back at the viewer's Pace (lab.reading): while it plays the
-  shell hands the reading's cues and the head's ink to the frame, and
-  Escape, an edit or another reading ends it. It keeps the draft's dress
-  (lab.dress) for the frame too: placed afresh whenever the text or the
-  style in force changes, with when each was first seen, and where the
-  mouse is over the stage, which gold glints by. With ?webgl the renderer
+  the draft back at the viewer's Pace (lab.reading), in the style in force
+  as it starts: while it plays the shell hands the reading's cues, the
+  head's ink and that style to the frame, whatever Auto would make of the
+  rhythm meanwhile, and Escape, an edit or another reading ends it. It
+  keeps the draft's dress (lab.dress) for the frame too: decided by the
+  style in force when the text last changed or the writer picked a style,
+  so it stays while the writer is idle, with when each was first seen,
+  and where the mouse is over the stage, which gold glints by. With ?webgl the renderer
   starts on WebGL2 without trying WebGPU, for a browser whose WebGPU
   misbehaves."
   (:require [halfahead.lab.audio :as audio]
@@ -64,14 +66,15 @@
   ;; :moment-ctx, the last tick's {:draft :frame} that moments are counted
   ;; from; :last-moment, the newest of them, for the overlay;
   ;; :pace, the viewer's words a minute; :reading, the read-back playing, if
-  ;; any: {:plan (lab.reading's) :t0 :cues (its placed cues) :voiced-to (the
-  ;; time up to which its cues' sounds were played)};
-  ;; :dress, what the draft wears: {:for [text style] (what :placed was
-  ;; derived from) :placed :seen (both lab.dress's)}; :light-px, where the
+  ;; any: {:plan (lab.reading's) :style (the named style it was planned in
+  ;; and plays in) :t0 :cues (its placed cues) :voiced-to (the time up to
+  ;; which its cues' sounds were played)};
+  ;; :dress, what the draft wears: {:point (the style point that decided
+  ;; it) :placed :seen (both lab.dress's)}; :light-px, where the
   ;; mouse is in client pixels, nil when it is away or there is none
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
          :pace 250 :reading nil
-         :dress {:for nil :placed [] :seen {}} :light-px nil
+         :dress {:point nil :placed [] :seen {}} :light-px nil
          :sound? false :sound-log [] :sound-queue []
          :reveal {:start-level (start-level) :wands [] :reached nil}
          :pointer []
@@ -122,21 +125,36 @@
   (cond-> draft
     reading (update :cues into (:cues reading))))
 
-(defn- dressed
-  "state with the draft's dress brought up to t: placed afresh when the
-  text or the style in force (the choice, or what the rhythm suggests now)
-  has changed, so an edit, the picker and :auto changing its mind are all
-  covered here; and each dress's first sighting kept."
-  [{:keys [draft style-choice] :as s} t]
+(defn- style-at
+  "The named style in force at t: the one picked, or under :auto the one
+  the typing rhythm suggests then."
+  [{:keys [draft style-choice]} t]
+  (if (= :auto style-choice) (style/infer (:glyphs draft) t) style-choice))
+
+(defn- choice-in-force
+  "What the frame performs in: the style of the reading playing, if any,
+  so its gestures keep the lengths they were granted; else the picker's
+  choice."
+  [{:keys [reading style-choice]}]
+  (if reading (:style reading) style-choice))
+
+(defn- seen
+  "state with each dress's first sighting brought up to t."
+  [s t]
+  (update s :dress #(assoc % :seen (dress/seen (:seen %) (:placed %) t))))
+
+(defn- redressed
+  "state with the draft dressed by the style in force at t. Only an edit
+  and the writer's pick of a style come here: between them the dress
+  stays as it is, whatever :auto makes of the silence."
+  [{:keys [draft] :as s} t]
   (let [{:keys [text glyphs]} draft
-        style (if (= :auto style-choice) (style/infer glyphs t) style-choice)
-        s (if (= [text style] (get-in s [:dress :for]))
-            s
-            (update s :dress assoc
-                    :for [text style]
-                    :placed (dress/placed (:dress (score/from-text text (style/point style)))
-                                          glyphs)))]
-    (update s :dress #(assoc % :seen (dress/seen (:seen %) (:placed %) t)))))
+        point (style/point (style-at s t))]
+    (-> s
+        (update :dress assoc
+                :point point
+                :placed (dress/placed (:dress (score/from-text text point)) glyphs))
+        (seen t))))
 
 (defn- frame [r t reduced-motion?]
   (let [{:keys [draft reading light-px] :as s} @state]
@@ -145,7 +163,7 @@
                  :width-em (width-em)
                  :aspect (aspect)
                  :reduced-motion? reduced-motion?
-                 :style-choice (:style-choice s)
+                 :style-choice (choice-in-force s)
                  :reveal-opts (:reveal s)
                  :dress {:placed (get-in s [:dress :placed])
                          :seen (get-in s [:dress :seen])
@@ -161,7 +179,7 @@
   "s with the sounds of newly placed entries of a kind logged and queued."
   [s kind entries]
   (let [played (sound/sounds {:sound? (:sound? s)
-                              :style (sound/style-in-force (:style-choice s) (:last-frame s))}
+                              :style (sound/style-in-force (choice-in-force s) (:last-frame s))}
                              kind entries)]
     (-> s
         (update :sound-log sound/log played)
@@ -286,7 +304,7 @@
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
         reduced-motion? (.-matches motion-query)
-        _ (swap! state #(-> % (read-on t reduced-motion?) (directed t) (dressed t)))
+        _ (swap! state #(-> % (read-on t reduced-motion?) (directed t) (seen t)))
         _ (play-queued!)
         f (frame r t reduced-motion?)
         ;; counted only here, once a tick, so each moment is handed on once
@@ -347,26 +365,29 @@
                      (cond-> (assoc s :draft new :reading nil)
                        debug? (update :cue-log debug/cue-log placed t)
                        true (voiced :cue placed)
-                       true (directed t)))))
+                       true (directed t)
+                       true (redressed t)))))
     (play-queued!)))
 
 (defn- read-back!
-  "Read the draft back from now, as the style in force performs it and at
-  the viewer's pace, in place of any reading already playing. Nothing with
+  "Read the draft back from now, as the style in force now performs it
+  (kept for the whole reading) and at the viewer's pace, in place of any
+  reading already playing. Nothing with
   reduced motion (the text is already all there), on the specimen, or
   before there is a message to read."
   [^js motion-query]
   (when-not (or specimen? (.-matches motion-query))
     (let [t (now-ms)]
       (swap! state
-             (fn [{:keys [draft last-frame pace] :as s}]
-               (let [plan (when-let [named (:style last-frame)]
-                            ;; the tempo lab.pose plays a named style at is
-                            ;; its params', not its point's
-                            (reading/plan (:text draft) (style/point named)
-                                          (style/params named) {:wpm pace}))]
+             (fn [{:keys [draft pace] :as s}]
+               (let [named (style-at s t)
+                     ;; the tempo lab.pose plays a named style at is its
+                     ;; params', not its point's
+                     plan (reading/plan (:text draft) (style/point named)
+                                        (style/params named) {:wpm pace})]
                  (assoc s :reading (when plan
                                      {:plan plan
+                                      :style named
                                       :t0 t
                                       :cues (reading/cues plan (:glyphs draft) t)
                                       :voiced-to (dec t)}))))))))
@@ -437,7 +458,7 @@
   "Perform from now on in choice, keep the picker showing it, and give the
   textarea its focus back so typing carries on."
   [choice ^js picker ^js input]
-  (swap! state assoc :style-choice choice)
+  (swap! state #(-> % (assoc :style-choice choice) (redressed (now-ms))))
   (set! (.-value picker) (name choice))
   (.focus input))
 
