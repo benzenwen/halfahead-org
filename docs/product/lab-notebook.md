@@ -35,7 +35,7 @@ slow. In typed text the held syllable is elongation: "loooove".
 | H4 | An agent can write valid, varied scores from one page of reference | N prompts through the `claude` CLI; rate of schema-valid scores on the first try; spread of marks across moods | **Holds on 28 cases, one model, one run** (below) |
 | H5 | A style can be learned from about a dozen flicks | Simulate readers with hidden style points and noisy choices; error against number of flicks | **Holds for a careful chooser, fails for a noisy one** (below) |
 | H6 | Pacing by the reader's beat keeps every performance inside reading time and the 5 s cap | Properties over generated scores and paces from 100 to 800 words a minute | **Holds, and shows the cap starves slow readers** (below) |
-| H7 | Dress (versal, rubric, gilt) stays readable on paper and on the dark stage | Contrast of each ink against both backgrounds ≥ 4.5:1, computed; screenshots | **Holds for the inks** (below); dress itself not built yet |
+| H7 | Dress (versal, rubric, gilt) stays readable on paper and on the dark stage | Contrast of each ink against both backgrounds ≥ 4.5:1, computed; screenshots | **Holds** for the inks and for dress as drawn (below) |
 
 ## Results
 
@@ -224,4 +224,30 @@ What it found wrong with the page and the harness:
   call for them; a wider set of cases should.
 - "Wry" came back as the identical +0.30/−0.30 every time: consistent,
   but it suggests the agent maps the feeling's words to one fixed point.
+
+### Read-back and dress on screen (orders 0050 and 0052, 2026-11-17)
+
+Measured in the browser check, by data sampled on every frame, so
+nothing depends on frame rate:
+
+- **Read-back** (Elegant, 250 wpm): during the 2760 ms of stops every
+  sampled frame showed a lit prefix, at most one part-filled letter and
+  a dim suffix, with the boundary exactly at the reading head.
+  "loooove" stayed still until the head reached it, then lifted 0.14 em.
+  Four marks performed (swell, hush, nod, glow); the turn and the doubt
+  were below Elegant's threshold. A reading at 400 wpm took 4.4 s and at
+  150 wpm 5.4 s: paced past five seconds because it was asked for.
+- **Dress** (Elegant, on paper): "the one thing" drawn in exactly the
+  palette's gold (rgb 125, 90, 0), "(trust me)" at 0.85 of its size and
+  muted. Under the pointer the gold's glow rose to 0.62, each letter on
+  the curve for its distance, and fell back to 0.12 with the pointer
+  away. Caffeinated's raised initial stood at 1.8 times its size with
+  the next letter starting exactly at its right edge. Plain wore
+  nothing.
+
+Known and not fixed (choices Q30 to Q32, and `NEXT.md`): in Auto, dress
+disappears when the style falls back to Plain; the glint's halo is
+vermilion, so gold glints pink; in Auto a reading can outlast its grant.
+On paper the gold has to be dark to stay readable (5.6:1), so it reads as
+ochre until the pointer lights it; on the dark stage it reads as gold.
 
