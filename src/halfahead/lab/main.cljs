@@ -22,8 +22,12 @@
   so it stays while the writer is idle, with when each was first seen,
   and where the mouse is over the stage, which gold glints by. With ?webgl the renderer
   starts on WebGL2 without trying WebGPU, for a browser whose WebGPU
-  misbehaves."
-  (:require [halfahead.lab.audio :as audio]
+  misbehaves. With ?tour, or from the Tour button, it plays lab.tour's
+  script on a timer of its own through these same paths (the textarea's
+  input event, the picker, the wand, the read-back, the light), until the
+  script ends or the visitor touches a key or the page."
+  (:require [clojure.string :as str]
+            [halfahead.lab.audio :as audio]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.director :as director]
@@ -41,7 +45,8 @@
             [halfahead.lab.sound :as sound]
             [halfahead.lab.specimen :as specimen]
             [halfahead.lab.stage :as stage]
-            [halfahead.lab.style :as style]))
+            [halfahead.lab.style :as style]
+            [halfahead.lab.tour :as tour]))
 
 (defn- start-level
   "?reveal=N, 0 to 3: the reveal level the lab starts at; 0 when absent."
@@ -71,10 +76,19 @@
   ;; which its cues' sounds were played)};
   ;; :dress, what the draft wears: {:point (the style point that decided
   ;; it) :placed :seen (both lab.dress's)}; :light-px, where the
-  ;; mouse is in client pixels, nil when it is away or there is none
+  ;; mouse is in client pixels, nil when it is away or there is none;
+  ;; :tour, the tour playing, if any: {:segments (lab.tour's plan) :segment
+  ;; (the index of the one playing) :t0 (when its clock began) :done (the
+  ;; indexes of its steps that are over) :awaiting-read? (the segment is
+  ;; over and the next waits for the read-back) :scene :typing (the :type
+  ;; step under way: {:base (the text before it) :typed (keys so far)})
+  ;; :lit? (a :light step holds the light) :before (the visitor's {:style
+  ;; :pace}) :timer :on-touch}; :caption-timer, the timeout that will take
+  ;; the caption away
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
          :pace 250 :reading nil
          :dress {:point nil :placed [] :seen {}} :light-px nil
+         :tour nil :caption-timer nil
          :sound? false :sound-log [] :sound-queue []
          :reveal {:start-level (start-level) :wands [] :reached nil}
          :pointer []
@@ -351,6 +365,12 @@
              ;; the dress placed on the draft's glyphs, as lab.dress has it
              :dress #(clj->js (get-in @state [:dress :placed]))
              ;; an ink's colour as the 0-255 triple a screenshot shows
+             ;; the tour playing, as plain data; nil when none is
+             :tour #(when-let [{:keys [scene segment]} (:tour @state)]
+                      #js {:scene scene
+                           :caption (tour/caption tour/script scene)
+                           :segment segment
+                           :running true})
              :inkColour #(clj->js (mapv (fn [c] (js/Math.round (* 255 c)))
                                         (ink/colour (keyword %1) %2)))}))
 
@@ -413,13 +433,17 @@
   (set! (.-value (by-id "pace")) (str wpm))
   (set! (.-textContent (by-id "pace-value")) (str wpm)))
 
+(defn- set-pace!
+  "Readings from now on are at wpm words a minute, and the slider says so."
+  [wpm]
+  (swap! state assoc :pace wpm)
+  (show-pace! wpm))
+
 (defn- choose-pace!
-  "Readings from now on are at wpm words a minute, remembered on this
-  device."
+  "The viewer's own choice of pace: set, and remembered on this device."
   [wpm]
   (let [wpm (max slowest-pace (min fastest-pace wpm))]
-    (swap! state assoc :pace wpm)
-    (show-pace! wpm)
+    (set-pace! wpm)
     (remember-pace! wpm)))
 
 (defn- wand!
@@ -505,6 +529,152 @@
         "Enter" (do (.preventDefault e) (read-back! motion-query))
         nil))))
 
+;; --- the tour ----------------------------------------------------------------
+
+(def ^:private tour? (.has (js/URLSearchParams. js/location.search) "tour"))
+
+(def ^:private your-turn "Your turn.")
+(def ^:private your-turn-ms 2000)
+
+(def ^:private no-tour
+  "The tour is motion. Reduced motion is on, so here is the lab instead.")
+
+(defn- show-caption!
+  "The caption bar reads text, for good; with no text it is out of sight."
+  [text]
+  (js/clearTimeout (:caption-timer @state))
+  (set! (.-textContent (by-id "caption")) text)
+  (.toggle (.-classList (by-id "tour-bar")) "idle" (= "" text)))
+
+(defn- show-caption-for! [text ms]
+  (show-caption! text)
+  (swap! state assoc :caption-timer (js/setTimeout #(show-caption! "") ms)))
+
+(defn- enter!
+  "The text box holds text, by the input event a key press ends in, so the
+  draft, its cues, Auto's rhythm, the dress and the director follow as
+  they do for a person."
+  [^js input text input-type]
+  (set! (.-value input) text)
+  (.dispatchEvent input (js/InputEvent. "input" #js {:bubbles true :inputType input-type})))
+
+(defn- phrase-box
+  "[x0 y0 x1 y1] in client pixels around the letters of the draft's first
+  phrase as they were last drawn; nil while it is not on the page."
+  [r phrase]
+  (let [{:keys [draft last-frame]} @state]
+    (when-let [from (str/index-of (:text draft) phrase)]
+      (let [to (+ from (count phrase))
+            ids (:ids (reduce (fn [{:keys [at ids]} {:keys [id char]}]
+                                (let [end (+ at (count char))]
+                                  {:at end :ids (cond-> ids (and (<= from at) (<= end to)) (conj id))}))
+                              {:at 0 :ids #{}}
+                              (:glyphs draft)))
+            indexes (keep-indexed (fn [i p] (when (and (ids (:id p)) (not (:ghost? p))) i))
+                                  (:poses last-frame))]
+        (when (and (seq indexes) (< (reduce max indexes) (render/drawn r)))
+          (render/glyph-box r indexes))))))
+
+(defn- run-step!
+  "One step of the tour, through the path the visitor's own hand takes."
+  [{:keys [r picker input motion-query]} {:keys [step elapsed-ms over?]}]
+  (case (:do step)
+    :clear (enter! input "" "deleteContentBackward")
+    :type (let [{:keys [base typed]} (or (get-in @state [:tour :typing])
+                                         {:base (.-value input) :typed 0})
+                due (count (tour/keys-due step elapsed-ms))]
+            ;; a late tick still types key by key
+            (doseq [n (range (inc typed) (inc due))]
+              (enter! input (str base (subs (:text step) 0 n)) "insertText"))
+            (swap! state assoc-in [:tour :typing] (when-not over? {:base base :typed due})))
+    :style (choose-style! (:style step) picker input)
+    :reveal (dotimes [_ 3]
+              (when (< (level @state (now-ms)) (:level step)) (wand!)))
+    :read-back (do (set-pace! (:wpm step))
+                   (read-back! motion-query))
+    :light (let [[x0 y0 x1 y1] (phrase-box r (:over step))
+                 along (min 1 (/ elapsed-ms (:ms step)))]
+             (swap! state (fn [s]
+                            (-> s
+                                (assoc :light-px (when (and x0 (not over?))
+                                                   [(+ x0 (* along (- x1 x0))) (/ (+ y0 y1) 2)]))
+                                (assoc-in [:tour :lit?] (not over?))))))
+    (:wait :until-read) nil))
+
+(defn- stop-tour!
+  "The tour is over, by its script or by the visitor's hand: what is on
+  the page stays and is theirs, with the style and pace they had."
+  [{:keys [picker input]}]
+  (when-let [{:keys [timer on-touch before lit?]} (:tour @state)]
+    (js/clearInterval timer)
+    (.removeEventListener js/window "keydown" on-touch true)
+    (.removeEventListener js/window "pointerdown" on-touch true)
+    (swap! state #(cond-> (assoc % :tour nil)
+                    lit? (assoc :light-px nil)))
+    (choose-style! (:style before) picker input)
+    (set-pace! (:pace before))
+    (set! (.-hidden (by-id "tour-stop")) true)
+    (show-caption-for! your-turn your-turn-ms)))
+
+(defn- tour-tick!
+  "Play whatever of the tour is due now. It ends on a tick with nothing
+  left to play, so its last scene is on the page for at least one."
+  [ctx]
+  (when-let [{:keys [segments segment t0 done awaiting-read?]} (:tour @state)]
+    (let [last? (= (inc segment) (count segments))
+          steps (when-not awaiting-read? (tour/due (segments segment) (- (now-ms) t0) done))]
+      (cond
+        awaiting-read?
+        (when-not (:reading @state)
+          (if last?
+            (stop-tour! ctx)
+            (swap! state update :tour assoc
+                   :segment (inc segment) :t0 (now-ms) :done #{} :awaiting-read? false)))
+
+        (and (empty? steps) last? (= (count done) (count (segments segment))))
+        (stop-tour! ctx)
+
+        :else
+        (doseq [{:keys [index scene step over?] :as entry} steps]
+          (when (not= scene (get-in @state [:tour :scene]))
+            (swap! state assoc-in [:tour :scene] scene)
+            (show-caption! (tour/caption tour/script scene)))
+          (run-step! ctx entry)
+          (when over?
+            (swap! state update :tour
+                   #(cond-> (update % :done conj index)
+                      (= :until-read (:do step)) (assoc :awaiting-read? true)))))))))
+
+(defn- start-tour!
+  "Play the tour from its first scene; nothing on the specimen or while it
+  is already playing. With reduced motion there is no tour: the caption
+  says so until the visitor's next key or click."
+  [{:keys [^js motion-query] :as ctx}]
+  (cond
+    (or specimen? (:tour @state)) nil
+
+    (.-matches motion-query)
+    (do (show-caption! no-tour)
+        (doseq [kind ["keydown" "pointerdown"]]
+          (.addEventListener js/window kind
+                             #(when (= no-tour (.-textContent (by-id "caption"))) (show-caption! ""))
+                             #js {:once true :capture true})))
+
+    :else
+    (let [{:keys [style-choice pace]} @state
+          ;; any key, click or tap is the visitor taking over; the event
+          ;; goes on to do whatever it does
+          on-touch (fn [_] (stop-tour! ctx))]
+      (swap! state assoc :tour {:segments (tour/plan tour/script) :segment 0 :t0 (now-ms)
+                                :done #{} :awaiting-read? false :scene nil :typing nil :lit? false
+                                :before {:style style-choice :pace pace}
+                                :timer (js/setInterval #(tour-tick! ctx) 16)
+                                :on-touch on-touch})
+      (.addEventListener js/window "keydown" on-touch true)
+      (.addEventListener js/window "pointerdown" on-touch true)
+      (set! (.-hidden (by-id "tour-stop")) false)
+      (tour-tick! ctx))))
+
 (defn- probe-frame
   "The frame the renderer tries itself on before the first real one: one
   letter and the caret, so every pipeline the lab draws with is made
@@ -563,7 +733,14 @@
                    (do (edit! (.-value input))
                        (loop! r motion-query)))
                  (expose! r)
-                 (show-backend! r)))
+                 (show-backend! r)
+                 (let [ctx {:r r :picker picker :input input :motion-query motion-query}]
+                   ;; a click the tour's own listeners never see: they are
+                   ;; added after its pointerdown
+                   (.addEventListener (by-id "tour") "click" #(start-tour! ctx))
+                   ;; for a click with no pointer under it (a screen reader's)
+                   (.addEventListener (by-id "tour-stop") "click" #(stop-tour! ctx))
+                   (when tour? (start-tour! ctx)))))
         (.catch (fn [e]
                   (set! (.-textContent status)
                         (str "Couldn't start the 3D renderer: " (.-message ^js e)))

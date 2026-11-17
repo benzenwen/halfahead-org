@@ -1714,12 +1714,234 @@ try {
     done(`${proved}; not blank and silent: ${outcome}; ?webgl starts on WebGL2 without asking WebGPU for anything and draws "${word}" (${glPixels} inked px)`);
   }
 
+  // The tour (?tour): the lab types into its own text box, a caption a
+  // scene. Everything is waited for as data, never on the clock: a
+  // recorder in the page notes each change of the caption with what the
+  // lab was then, so even the 300 ms last scene cannot be missed.
+  begin('tour', null);
+  {
+    const captions = ['It starts like any chat box.', 'What matters can stay gold.',
+      'Hold a letter, and it holds the note.', 'Then the lights go down. Some words know what they are.',
+      'Ctrl+Enter reads it back, at your pace.', 'Same words. Another performer.',
+      'And when it deserves it: the whole stage.', 'Your turn.'];
+    const gilded = 'This is *the one thing* that matters (trust me).';
+    const tourUrl = (params) => {
+      const u = new URL(url);
+      for (const k of params) u.searchParams.set(k, '');
+      return u.href;
+    };
+    const page = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = page;
+    await page.addInitScript(() => {
+      // a pace of the visitor's own, to be found again after the tour
+      localStorage.setItem('halfahead.lab.pace', '300');
+      window.__tourLog = [];
+      document.addEventListener('DOMContentLoaded', () => {
+        const el = document.getElementById('caption');
+        new MutationObserver(() => {
+          const lab = window.__lab, f = lab?.lastFrame();
+          window.__tourLog.push({
+            t: performance.now(), caption: el.textContent, scene: lab?.tour()?.scene ?? null,
+            level: f?.reveal.level ?? null, lights: f?.reveal.lights ?? null,
+          });
+        }).observe(el, { childList: true, characterData: true, subtree: true });
+      });
+    });
+    const tourBackend = await open(page, tourUrl(['tour', 'debug']), { plain: true });
+    const log = () => page.evaluate(() => window.__tourLog);
+    const inScene = (n) => page.waitForFunction((n) => window.__tourLog.some((r) => r.scene === n), n, { timeout: 60000 })
+      .catch(() => { throw new Error(`the tour never reached scene ${n}`); });
+    // Waits for `pred` (a function or its source, run in the page on every
+    // frame) to return something,
+    // and returns it with the scene the tour was in at that moment.
+    const seen = async (what, pred, arg) => {
+      const handle = await page.waitForFunction(({ source, arg }) => {
+        const found = (0, eval)(`(${source})`)(arg);
+        return found ? { found, scene: window.__lab.tour()?.scene ?? null } : null;
+      }, { source: String(pred), arg }, { timeout: 60000 })
+        .catch(() => { throw new Error(`the tour never showed ${what}`); });
+      return handle.jsonValue();
+    };
+    const expectScene = (got, n, what) => {
+      if (got.scene !== n) throw new Error(`${what} was seen in scene ${got.scene}, not ${n}`);
+      return got.found;
+    };
+
+    // scene 1: any chat box, on paper
+    await inScene(1);
+    const paperLum = await backgroundLuminance(page);
+    const started = (await log())[0];
+    if (started.scene !== 1 || started.caption !== captions[0])
+      throw new Error(`the tour began with ${JSON.stringify(started)}`);
+    if (started.level !== 0) throw new Error(`scene 1 began at reveal level ${started.level}`);
+    if (!(paperLum > 0.8)) throw new Error(`in scene 1 the background has luminance ${paperLum.toFixed(3)}, not paper`);
+    if (!(await page.locator('#tour-stop').isVisible())) throw new Error('no Stop button shows during the tour');
+    if ((await page.locator('#caption').getAttribute('aria-live')) !== 'polite') throw new Error('the caption is not a polite live region');
+
+    // scene 2: the gilt phrase, and the tour's light crossing it. The glow
+    // is a function of where the light is, so the frame is checked against
+    // dress's curve with the light where its two brightest letters put it.
+    const lit = expectScene(await seen('the gold lit above 0.4', () => {
+      const lab = window.__lab, f = lab.lastFrame();
+      const gilt = lab.dress().find((d) => d.as === 'gilt');
+      if (!gilt) return null;
+      const poses = gilt['glyph-ids'].map((id) => f.poses.find((p) => p.id === id && !p['ghost?']));
+      if (poses.some((p) => !p) || !(Math.max(...poses.map((p) => p.glow)) > 0.4)) return null;
+      return { level: f.reveal.level, lights: f.reveal.lights, ink: poses.map((p) => p.ink),
+               poses: poses.map(({ char, x, y, glow }) => ({ char, x, y, glow })) };
+    }), 2, 'the lit gold');
+    await page.screenshot({ path: `${out}/tour-2.png` });
+    const giltText = lit.poses.map((p) => p.char).join('');
+    if (giltText !== 'the one thing') throw new Error(`in scene 2 the gilt is on "${giltText}"`);
+    if (lit.ink.some((i) => i !== 'gold')) throw new Error(`the gilt phrase's inks are ${lit.ink}`);
+    if (lit.level > 1 || lit.lights !== 0) throw new Error(`the gold was lit at level ${lit.level}, lights ${lit.lights}: not on paper`);
+    if (lit.poses.some((p) => p.y !== lit.poses[0].y)) throw new Error('the gilt phrase is not on one line');
+    const [first, second] = [...lit.poses].sort((a, b) => b.glow - a.glow);
+    const reach = (g) => -2.88 * Math.log((g - 0.12) / 0.5);
+    const lightX = (first.x ** 2 - second.x ** 2 - (reach(first.glow) - reach(second.glow))) / (2 * (first.x - second.x));
+    const off2 = reach(first.glow) - (first.x - lightX) ** 2;
+    if (!(off2 > -0.01 && off2 < 1)) throw new Error(`the light is ${Math.sqrt(Math.abs(off2)).toFixed(2)} em off the phrase's line`);
+    if (!(lightX > lit.poses[0].x - 1.5 && lightX < lit.poses[lit.poses.length - 1].x + 1.5))
+      throw new Error(`the light is at x ${lightX.toFixed(2)} em, away from the phrase`);
+    for (const p of lit.poses) {
+      const want = 0.12 + 0.5 * Math.exp(-((p.x - lightX) ** 2 + off2) / 2.88);
+      if (!(Math.abs(p.glow - want) <= 0.03))
+        throw new Error(`"${p.char}", ${Math.abs(p.x - lightX).toFixed(2)} em along from the light, glows ${p.glow}, not ${want.toFixed(3)}`);
+    }
+
+    // scene 3: the held note
+    expectScene(await seen('a swell cue in the overlay',
+      () => document.getElementById('debug').textContent.includes('loooove -> swell')), 3, 'the swell');
+
+    // scene 4: the lights go down
+    expectScene(await seen('reveal level 3', () => window.__lab.lastFrame().reveal.level >= 3), 4, 'level 3');
+
+    // scenes 5 and 6: the same words read back by two performers
+    const controls = () => ({
+      style: document.getElementById('style').value,
+      pace: document.getElementById('pace').value,
+      shown: document.getElementById('pace-value').textContent,
+    });
+    const reading = (after) => seen(`a read-back after ${after}`, `(after) => {
+      const r = window.__lab.reading();
+      return r && r.t0 > after ? { t0: r.t0, durationMs: r.durationMs, ...(${controls})() } : null; }`, after);
+    const checkReading = (r, style) => {
+      if (r.style !== style) throw new Error(`the reading plays with the picker on ${r.style}, not ${style}`);
+      if (r.pace !== '200' || r.shown !== '200') throw new Error(`the Pace slider shows ${r.pace} (${r.shown}) during the tour's reading`);
+    };
+    const elegant = expectScene(await reading(0), 5, 'the first reading');
+    checkReading(elegant, 'elegant');
+    // The still is taken at once: a software-rendered screenshot can take
+    // seconds, and the reading goes on under it. It counts only if the
+    // reading was still playing when it was done.
+    const shotFrom = Date.now();
+    await page.screenshot({ path: `${out}/tour-5.png` });
+    const still = await page.evaluate(() => window.__lab.reading()?.t0 ?? null);
+    if (still !== elegant.t0)
+      throw new Error(`the first reading (${elegant.durationMs} ms) was over before tour-5.png was taken, ${Date.now() - shotFrom} ms after it was asked for`);
+    await seen('the first reading over', () => window.__lab.reading() === null);
+    const caffeinated = expectScene(await reading(elegant.t0), 6, 'the second reading');
+    checkReading(caffeinated, 'caffeinated');
+    await seen('the second reading over', () => window.__lab.reading() === null);
+
+    // scene 7: the whole stage
+    await inScene(7);
+    const scene7 = (await log()).find((r) => r.scene === 7).t;
+    expectScene(await seen('a :card direction', (since) =>
+      window.__lab.directions().some((d) => d.shot === 'card' && d['at-ms'] >= since), scene7), 7, 'the card');
+
+    // the end: the keyboard is handed over
+    await inScene(8);
+    await page.waitForFunction(() => window.__lab.tour() === null, null, { timeout: 30000 })
+      .catch(() => { throw new Error('the tour never ended'); });
+    const ended = await page.evaluate(`(() => {
+      const input = document.getElementById('type');
+      return { value: input.value, focused: document.activeElement === input, ...(${controls})(),
+               stored: localStorage.getItem('halfahead.lab.pace'),
+               stop: !document.getElementById('tour-stop').hidden,
+               caption: document.getElementById('caption').textContent };
+    })()`);
+    if (ended.value !== '' || !ended.focused) throw new Error(`after the tour the textarea holds "${ended.value}", focused ${ended.focused}`);
+    if (ended.style !== 'auto') throw new Error(`after the tour the picker shows ${ended.style}, not the Auto it showed before`);
+    if (ended.pace !== '300' || ended.shown !== '300' || ended.stored !== '300')
+      throw new Error(`after the tour the pace is ${ended.pace} (${ended.shown}), stored ${ended.stored}; it was 300 before`);
+    if (ended.stop) throw new Error('the Stop button still shows after the tour');
+    if (ended.caption !== 'Your turn.') throw new Error(`as the tour ended the caption read "${ended.caption}"`);
+    await page.waitForFunction(() => document.getElementById('caption').textContent === '', null, { timeout: 10000 })
+      .catch(() => { throw new Error('"Your turn." never left the caption bar'); });
+    const records = await log();
+    const scenes = records.filter((r) => r.scene !== null);
+    const order = scenes.map((r) => r.scene).filter((n, i, all) => n !== all[i - 1]);
+    if (order.join() !== '1,2,3,4,5,6,7,8') throw new Error(`the scenes ran ${order}`);
+    const miscaptioned = scenes.find((r) => r.caption !== captions[r.scene - 1]);
+    if (miscaptioned) throw new Error(`scene ${miscaptioned.scene} was captioned "${miscaptioned.caption}"`);
+    const entered = (n) => scenes.find((r) => r.scene === n);
+    // the lights stay up until scene 4 takes them down
+    for (const n of [2, 3, 4])
+      if (entered(n).level > 1) throw new Error(`scene ${n} began at reveal level ${entered(n).level}: the lights went down early`);
+    const over = records.find((r) => r.scene === null && r.t > entered(8).t);
+    const seconds = (over.t - started.t) / 1000;
+    console.log(`tour: ${seconds.toFixed(1)} s end to end on ${tourBackend}`);
+    await page.close();
+
+    // Stopped by a key: started from the Tour button this time, with a
+    // style of the visitor's own to come back to.
+    const second2 = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = second2;
+    await open(second2, tourUrl(['debug']), { plain: true });
+    if ((await second2.evaluate(() => window.__lab.tour())) !== null) throw new Error('a tour started without ?tour');
+    if ((await second2.locator('#caption').textContent()) !== '') throw new Error('the caption bar is not empty before any tour');
+    await second2.selectOption('#style', 'drunken');
+    await second2.locator('#tour').click();
+    await second2.waitForFunction(() => window.__lab.tour()?.scene === 2 && document.getElementById('type').value.length >= 5,
+      null, { timeout: 60000 }).catch(() => { throw new Error('the tour from the button never typed in scene 2'); });
+    await second2.keyboard.press('Shift');
+    const stopped = await second2.evaluate(() => ({
+      tour: window.__lab.tour(), value: document.getElementById('type').value,
+      caption: document.getElementById('caption').textContent, style: document.getElementById('style').value,
+      stop: !document.getElementById('tour-stop').hidden,
+    }));
+    if (stopped.tour !== null) throw new Error('a key press did not stop the tour at once');
+    if (!stopped.value || !gilded.startsWith(stopped.value) || stopped.value === gilded)
+      throw new Error(`stopped in scene 2 the textarea holds "${stopped.value}"`);
+    if (stopped.caption !== 'Your turn.') throw new Error(`stopped, the caption reads "${stopped.caption}"`);
+    if (stopped.style !== 'drunken') throw new Error(`stopped, the picker shows ${stopped.style}, not the Drunken it showed before`);
+    if (stopped.stop) throw new Error('the Stop button still shows after a key stopped the tour');
+    // two frames on, the scripted typing has not carried on
+    const later = await nextFrame(second2);
+    if (later.value !== stopped.value) throw new Error(`after the stop the text went on to "${later.value}"`);
+    await second2.keyboard.type('x');
+    const appended = await second2.evaluate(() => document.getElementById('type').value);
+    if (appended !== stopped.value + 'x') throw new Error(`typing x after the stop gave "${appended}"`);
+    await second2.close();
+
+    // With reduced motion there is no tour, and the caption says why.
+    const still2 = track(await browser.newPage({ viewport: { width: 1000, height: 640 }, reducedMotion: 'reduce' }));
+    current = still2;
+    await open(still2, tourUrl(['tour']), { plain: true });
+    const calm = await still2.evaluate(() => ({
+      tour: window.__lab.tour(), value: document.getElementById('type').value,
+      caption: document.getElementById('caption').textContent,
+      stop: !document.getElementById('tour-stop').hidden,
+    }));
+    if (calm.tour !== null || calm.value !== '' || calm.stop) throw new Error(`with reduced motion: ${JSON.stringify(calm)}`);
+    if (calm.caption !== 'The tour is motion. Reduced motion is on, so here is the lab instead.')
+      throw new Error(`with reduced motion the caption reads "${calm.caption}"`);
+    await still2.close();
+    done(`on ${tourBackend}, scenes 1 to 8 in order with their captions in ${seconds.toFixed(1)} s end to end; level 0 on paper (luminance ${paperLum.toFixed(3)}); `
+      + `"${giltText}" gilt, its brightest letter glowing ${first.glow.toFixed(2)} on dress's curve with the light at x ${lightX.toFixed(2)} em, at level ${lit.level}; `
+      + `a swell in scene 3; level 3 in scene 4 (scenes 2, 3 and 4 began at levels ${[2, 3, 4].map((n) => entered(n).level).join(', ')}); `
+      + `read back in Elegant then Caffeinated at 200 wpm (${elegant.durationMs} and ${caffeinated.durationMs} ms); a card in scene 7; `
+      + `then an empty focused textarea, Auto and pace 300 as before; from the button, a key in scene 2 stopped it at once with "${stopped.value}" kept and x appended, Drunken restored; `
+      + `reduced motion: no tour, the caption says so`);
+  }
+
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark', 'webgpu',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark', 'webgpu', 'tour-2', 'tour-5',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;

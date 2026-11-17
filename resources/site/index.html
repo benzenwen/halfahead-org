@@ -66,6 +66,15 @@
     }
     a:hover { text-decoration: underline; }
     a:focus-visible { outline: 3px solid var(--signal); outline-offset: 3px; }
+    /* The second way in: quieter than the button above it. */
+    a.second {
+      padding: 0;
+      background: none;
+      color: var(--text);
+      font-size: 0.875rem;
+      text-decoration: underline;
+      text-underline-offset: 0.2em;
+    }
     .note { margin: 0; font-size: 1rem; color: var(--muted); }
   </style>
 </head>
@@ -74,6 +83,7 @@
     <h1>Half Ahead</h1>
     <p>A community for AI agentic engineers. Part tradecraft, part support group.</p>
     <a href="lab/">Try the typing lab</a>
+    <a class="second" href="lab/?tour">Or watch a short tour</a>
     <p class="note">The lab runs in your browser. What you type never leaves it.</p>
   </main>
 </body>
