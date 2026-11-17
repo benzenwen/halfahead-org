@@ -10,17 +10,21 @@
   stage), and the levels reached so far, so they never go down. Once a
   frame it asks lab.moments what happened since the last one and hands
   those moments, with the frame, to the stage behind the letters, chosen
-  with ?stage=name (lab.stage; the grid floor by default)."
+  with ?stage=name (lab.stage; the grid floor by default). With ?specimen
+  it draws lab.specimen's type specimen on every frame instead of the
+  draft, and typing does nothing."
   (:require [halfahead.lab.audio :as audio]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.director :as director]
             [halfahead.lab.draft :as draft]
+            [halfahead.lab.ink :as ink]
             [halfahead.lab.moments :as moments]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.render :as render]
             [halfahead.lab.reveal :as reveal]
             [halfahead.lab.sound :as sound]
+            [halfahead.lab.specimen :as specimen]
             [halfahead.lab.stage :as stage]))
 
 (defn- start-level
@@ -28,6 +32,16 @@
   []
   (let [n (js/parseInt (.get (js/URLSearchParams. js/location.search) "reveal") 10)]
     (if (js/isNaN n) 0 (max 0 (min 3 n)))))
+
+(def ^:private specimen?
+  "?specimen: the page shows the type specimen, not what is typed."
+  (.has (js/URLSearchParams. js/location.search) "specimen"))
+
+(def ^:private specimen-lights
+  "The specimen's house lights from ?reveal: paper (0) at level 0 or 1,
+  the dark stage (1) at 2 or 3 and when absent."
+  (let [n (js/parseInt (.get (js/URLSearchParams. js/location.search) "reveal") 10)]
+    (if (< n 2) 0 1)))
 
 (defonce ^:private state
   ;; :sound-log, the last sounds played, for tests and the console;
@@ -77,6 +91,10 @@
                :reduced-motion? reduced-motion?
                :style-choice (:style-choice @state)
                :reveal-opts (:reveal @state)}))
+
+(defn- specimen-opts [r]
+  {:advance #(render/advance r %) :width-em (width-em) :aspect (aspect)
+   :lights specimen-lights})
 
 (defn- voiced
   "s with the sounds of newly placed entries of a kind logged and queued."
@@ -155,6 +173,28 @@
     (when (not= v (.. root -dataset -lights))
       (set! (.. root -dataset -lights) v))))
 
+(defn- specimen-loop!
+  "The specimen, drawn afresh every frame so it follows the window's shape;
+  no draft, director, sound or moments."
+  [r]
+  (let [f (specimen/frame (specimen-opts r))]
+    (swap! state assoc :last-frame f)
+    (show-lights! (:reveal f))
+    (render/draw! r f [])
+    (when debug? (show-debug! r (now-ms) f))
+    (js/requestAnimationFrame #(specimen-loop! r))))
+
+(defn- sample-boxes
+  "The specimen's samples, each with the box its glyphs were drawn in, in
+  CSS pixels; nil off the specimen page."
+  [r]
+  (when specimen?
+    (let [index (into {} (map-indexed (fn [i p] [(:id p) i])) (:poses (:last-frame @state)))]
+      (clj->js
+       (for [{:keys [glyph-ids] :as s} (specimen/samples (specimen-opts r))
+             :let [[x0 y0 x1 y1] (render/glyph-box r (map index glyph-ids))]]
+         (assoc s :box {:x0 x0 :y0 y0 :x1 x1 :y1 y1}))))))
+
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
         _ (swap! state directed t)
@@ -186,7 +226,11 @@
              :soundLog #(clj->js (:sound-log @state))
              :stage (name (first chosen-stage))
              :stageState #(clj->js (render/stage-state r))
-             :bounds #(clj->js sound/bounds)}))
+             :bounds #(clj->js sound/bounds)
+             :specimen #(sample-boxes r)
+             ;; an ink's colour as the 0-255 triple a screenshot shows
+             :inkColour #(clj->js (mapv (fn [c] (js/Math.round (* 255 c)))
+                                        (ink/colour (keyword %1) %2)))}))
 
 (defn- edit! [text]
   (let [t (now-ms)]
@@ -283,10 +327,13 @@
         ;; read on every frame, so a change of the setting applies at once
         motion-query (js/window.matchMedia "(prefers-reduced-motion: reduce)")]
     (when debug? (.removeAttribute (by-id "debug") "hidden"))
-    (show-lights! {:lights (if (>= (get-in @state [:reveal :start-level]) 2) 1 0)})
+    (show-lights! {:lights (cond specimen? specimen-lights
+                                 (>= (get-in @state [:reveal :start-level]) 2) 1
+                                 :else 0)})
     (.addEventListener js/window "pointermove" on-pointer-move)
     (.focus input)
-    (.addEventListener input "input" on-input)
+    ;; the specimen is not the writer's text: typing changes nothing there
+    (when-not specimen? (.addEventListener input "input" on-input))
     (set! (.-value picker) (name (:style-choice @state)))
     (.addEventListener picker "change"
                        #(choose-style! (keyword (.-value picker)) picker input))
@@ -300,8 +347,10 @@
                        (pose/frame (draft/empty-draft) 0 {:width-em (width-em) :aspect (aspect)})
                        (second chosen-stage))
         (.then (fn [r]
-                 (edit! (.-value input))
-                 (loop! r motion-query)
+                 (if specimen?
+                   (specimen-loop! r)
+                   (do (edit! (.-value input))
+                       (loop! r motion-query)))
                  (expose! r)
                  (set! (.-textContent status) (str "Rendering with " (render/backend r)))))
         (.catch (fn [e]

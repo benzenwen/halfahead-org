@@ -4,13 +4,17 @@
   quads, seen from each frame's :camera, and decides nothing, not even
   where to look. WebGPU where the browser has it, WebGL2
   otherwise (three's WebGPURenderer picks), with one TSL material for both.
+  Everything a pose can vary (stretch, slant, weight, focus, fill, ink) is
+  a per-instance attribute of the one instanced mesh, so a frame of any
+  mix of them is still one draw call.
   The frame's :reveal sets the house lights: ink on paper with them up, the
   dark stage with them down. What stands behind the letters (a floor, a
   storm) is the stage's (lab.stage): the renderer hands it each frame and
   each of the frame's moments, and draws the scene it keeps."
   (:require ["@mapbox/tiny-sdf" :default TinySDF]
             ["three/tsl" :as tsl]
-            ["three/webgpu" :as three]))
+            ["three/webgpu" :as three]
+            [halfahead.lab.ink :as ink]))
 
 ;; --- glyph atlas -------------------------------------------------------------
 ;; One R8 texture of signed distance fields, packed in shelves. Characters
@@ -87,33 +91,72 @@
 
 ;; --- material ----------------------------------------------------------------
 
-(def ^:private ink "#efe6d6")
-(def ^:private page-ink "#1d1a16")
 (def ^:private vermilion "#ff7a55")
 (def ^:private ember "#ff8a3d")
 
+;; The field is 0.75 on the outline and changes by 1/12 per atlas pixel: it
+;; reaches 1 three pixels inside (about the middle of a stem) and is about
+;; 0.08 at the quad's border, 8 pixels outside. The edge may move only
+;; between those, or a bold letter is clipped square and a light one is gone.
+(def ^:private outline 0.75)
+(def ^:private bolder
+  "How far :weight +1 moves the edge out, in field units (2.6 atlas pixels):
+  black, with the counters of a and e still open."
+  0.22)
+(def ^:private lighter
+  "How far :weight -1 moves it in (1.3 pixels): thin strokes keep a core."
+  0.11)
+(def ^:private crisp
+  "Half the width of the edge's soft band at :blur 0."
+  0.06)
+(def ^:private soft
+  "What :blur 1 adds to that half width."
+  0.24)
+(def ^:private band-floor
+  "The band never starts below this, so the quad's border stays clear."
+  0.10)
+(def ^:private unfilled
+  "The alpha of the part of a letter that :fill has not reached."
+  0.35)
+(def ^:private fill-edge
+  "The width of the fill's soft boundary, in the quad's own 0..1 width."
+  0.08)
+
 (defn- glyph-material
-  "Alpha from the distance field with a smooth edge; glow as a wider, softer
-  halo from the same field, tinted vermilion; ghosts in ember orange; wobble
-  as a jelly sway of the quad's corners. ink-node is the ink's colour, a
-  uniform that follows the house lights."
-  [^js atlas-texture ^js atlas-size ^js ink-node]
+  "Alpha from the distance field with a smooth edge, which :weight moves and
+  :blur widens; :fill dims the quad right of it; the letter in its own ink
+  (glyphInk), ghosts in ember orange; glow as a wider, softer halo from the
+  same field, in vermilion; wobble as a jelly sway of the quad's corners."
+  [^js atlas-texture ^js atlas-size]
   (let [rect (tsl/attribute "glyphRect" "vec4")
         opacity (tsl/attribute "glyphOpacity" "float")
         glow (tsl/attribute "glyphGlow" "float")
         wobble (tsl/attribute "glyphWobble" "float")
         ghost (tsl/attribute "glyphGhost" "float")
+        ^js shape (tsl/attribute "glyphShape" "vec3")
+        ^js weight (.-x shape), ^js blur (.-y shape), ^js filled (.-z shape)
+        glyph-ink (tsl/attribute "glyphInk" "vec3")
         ^js uv (tsl/uv)
         ;; PlaneGeometry's v runs bottom-up; the atlas rows run top-down.
         texel (.div (.add (.-xy rect) (.mul (tsl/vec2 (.-x uv) (.oneMinus (.-y uv))) (.-zw rect)))
                     atlas-size)
         ^js atlas-node (tsl/texture atlas-texture texel)
         ^js d (.-r atlas-node)
-        edge 0.75
-        fill (tsl/smoothstep (- edge 0.06) (+ edge 0.06) d)
+        ^js edge (.sub (tsl/float outline) (.mul weight (tsl/select (.greaterThan weight 0.0) bolder lighter)))
+        ^js band (.add (.mul blur soft) crisp)
+        fill (tsl/smoothstep (tsl/max (.sub edge band) band-floor)
+                             (tsl/min (.add edge band) 1.0)
+                             d)
         halo (.mul (.mul (tsl/smoothstep 0.15 edge d) glow) 0.85)
-        base (tsl/mix ink-node (tsl/color ember) ghost)
-        rgb (tsl/mix (tsl/color vermilion) base fill)
+        ;; 0 over the inked part of the quad, 1 over the rest; at :fill 0 the
+        ;; boundary starts left of the quad and at 1 it ends right of it
+        ^js wipe (.sub (.mul filled (+ 1.0 fill-edge)) fill-edge)
+        dim (tsl/smoothstep wipe (.add wipe fill-edge) (.-x uv))
+        base (tsl/mix glyph-ink (tsl/color ember) ghost)
+        ;; the letter lies over its halo, so vermilion shows only where the
+        ;; halo does: a soft or coloured edge keeps the letter's own ink
+        rgb (tsl/mix (tsl/color vermilion) base
+                     (.div fill (tsl/max (tsl/max fill halo) 0.0001)))
         ^js g tsl/positionGeometry
         sway (tsl/vec3 (.mul (tsl/sin (.add (.mul tsl/time 11.0) (.mul (.-y g) 5.0))) 0.18)
                        (.mul (tsl/sin (.add (.mul tsl/time 9.0) (.mul (.-x g) 6.0))) 0.14)
@@ -123,14 +166,17 @@
     (set! (.-depthWrite m) false)
     (set! (.-side m) three/DoubleSide)
     (set! (.-colorNode m) (tsl/vec4 rgb 1.0))
-    (set! (.-opacityNode m) (.mul (tsl/max fill halo) opacity))
+    (set! (.-opacityNode m) (.mul (.mul (tsl/max fill halo) opacity)
+                                  (tsl/mix 1.0 unfilled dim)))
     (set! (.-positionNode m) (.add tsl/positionLocal (.mul (.mul sway wobble) (.length (.-xy g)))))
     {:material m :atlas-node atlas-node}))
 
 ;; --- instances ---------------------------------------------------------------
 
 (def ^:private per-instance
-  {"glyphRect" 4 "glyphOpacity" 1 "glyphGlow" 1 "glyphWobble" 1 "glyphGhost" 1})
+  {"glyphRect" 4 "glyphOpacity" 1 "glyphGlow" 1 "glyphWobble" 1 "glyphGhost" 1
+   ;; weight, blur, fill; and the letter's colour, in linear light
+   "glyphShape" 3 "glyphInk" 3})
 
 (defn- glyph-mesh [capacity ^js material]
   (let [^js geometry (three/PlaneGeometry. 1 1 6 6)]
@@ -225,6 +271,30 @@
           [tx ty] (project r (.applyMatrix4 (three/Vector3. -0.5 0.5 0) m))]
       (* (/ 180 js/Math.PI) (js/Math.atan2 (- tx bx) (- by ty))))))
 
+(defn- corners
+  "The four corners of each of the drawn glyphs indexes, as placed in the
+  last frame, in CSS pixels of the canvas with y down."
+  [r indexes]
+  (let [^js mesh @(:mesh r)
+        ^js m (three/Matrix4.)]
+    (doall
+     (for [i indexes
+           :let [_ (.getMatrixAt mesh i m)]
+           [cx cy] [[-0.5 -0.5] [0.5 -0.5] [-0.5 0.5] [0.5 0.5]]]
+       (project r (.applyMatrix4 (three/Vector3. cx cy 0) m))))))
+
+(defn glyph-box
+  "[x0 y0 x1 y1], the box in CSS pixels of the canvas (y down) around the
+  quads of the drawn glyphs indexes as placed in the last frame, stretch
+  and slant included; the shader's jelly sway is not."
+  [r indexes]
+  (let [n (.-count ^js @(:mesh r))]
+    (when-not (and (seq indexes) (every? #(and (integer? %) (< -1 % n)) indexes))
+      (throw (ex-info "No such glyphs" {:type :lab/no-such-glyph :indexes indexes :count n})))
+    (let [pts (corners r indexes)
+          xs (map first pts), ys (map second pts)]
+      [(apply min xs) (apply min ys) (apply max xs) (apply max ys)])))
+
 (defn block-centre
   "Where the last frame's text block lands on the canvas, in CSS pixels with
   y down, as #js {:x :y :aimX :aimY :width :height}. x and y are the centre
@@ -235,12 +305,7 @@
         {:keys [tx ty tz]} camera
         [w h] @(:viewport r)
         [ax ay] (project r (three/Vector3. tx ty tz))
-        ^js mesh @(:mesh r)
-        ^js m (three/Matrix4.)
-        pts (for [i live
-                  :let [_ (.getMatrixAt mesh i m)]
-                  [cx cy] [[-0.5 -0.5] [0.5 -0.5] [-0.5 0.5] [0.5 0.5]]]
-              (project r (.applyMatrix4 (three/Vector3. cx cy 0) m)))
+        pts (corners r live)
         mid (fn [vs] (/ (+ (apply min vs) (apply max vs)) 2))]
     #js {:x (if (seq pts) (mid (map first pts)) ax)
          :y (if (seq pts) (mid (map second pts)) ay)
@@ -269,17 +334,37 @@
   @(:drawn r))
 
 (def ^:private scratch (three/Object3D.))
+(def ^:private scratch-shape (three/Matrix4.))
+(def ^:private scratch-matrix (three/Matrix4.))
+(def ^:private scratch-colour (three/Color.))
 
-(def ^:private lights-up {:bg (three/Color. paper) :ink (three/Color. page-ink)})
-(def ^:private lights-down {:bg (three/Color. bg) :ink (three/Color. ink)})
+(def ^:private lights-up (three/Color. paper))
+(def ^:private lights-down (three/Color. bg))
+
+(defn- linear!
+  "scratch-colour set to the sRGB colour [r g b], in the linear light the
+  renderer works in."
+  ^js [[r g b]]
+  (.setRGB scratch-colour r g b three/SRGBColorSpace))
 
 (defn- light!
-  "Background, fog and ink for the frame's :reveal: paper and ink at
-  :lights 0, the dark stage at 1, in between as they go down."
-  [{:keys [^js scene ^js ink-node]} {:keys [lights] :or {lights 1}}]
-  (.lerpColors (.-background scene) (:bg lights-up) (:bg lights-down) lights)
+  "Background, fog and the :text ink (which the stage draws in) for the
+  frame's lights: paper and ink at 0, the dark stage at 1, in between as
+  they go down."
+  [{:keys [^js scene ^js ink-node]} lights]
+  (.lerpColors (.-background scene) lights-up lights-down lights)
   (.copy (.-color (.-fog scene)) (.-background scene))
-  (.lerpColors (.-value ink-node) (:ink lights-up) (:ink lights-down) lights))
+  (.copy (.-value ink-node) (linear! (ink/colour :text lights))))
+
+(defn- pose-colour
+  "The colour of a pose's letter: the :text ink, :tint of the way towards
+  the pose's own :ink (all the way when it names an ink and no :tint)."
+  [{:keys [tint] :as p} lights]
+  (let [text (ink/colour :text lights)]
+    (if-let [k (:ink p)]
+      (let [t (if (nil? tint) 1 tint)]
+        (mapv (fn [a b] (+ a (* t (- b a)))) text (ink/colour k lights)))
+      text)))
 
 (defn- stage!
   "The stage told of each moment, in order, then brought to the frame."
@@ -305,9 +390,13 @@
         attr (fn [k] (.-array (.getAttribute geometry k)))
         rects (attr "glyphRect"), opacity (attr "glyphOpacity"), glow (attr "glyphGlow")
         wobble (attr "glyphWobble"), ghost (attr "glyphGhost")
+        shape (attr "glyphShape"), inks (attr "glyphInk")
+        lights (get-in frame [:reveal :lights] 1)
+        ;; nearly every letter is in the :text ink: convert it once
+        text (.clone (linear! (ink/colour :text lights)))
         ^js o scratch]
     (fit-viewport! r canvas)
-    (light! r (:reveal frame))
+    (light! r lights)
     (view! r (:camera frame))
     (stage! r frame moments)
     (reset! (:last r) {:camera (:camera frame)
@@ -316,17 +405,29 @@
       (let [p (nth poses i)
             {:keys [rect size centre]} (glyph r (:char p))
             [rx ry rw rh] rect, [w h] size, [cx cy] centre
-            s (:scale p)]
+            s (:scale p)
+            qw (* s (:sx p 1) w), sy (* s (:sy p 1)), qh (* sy h)
+            k (:skew p 0)
+            ^js c (if (:ink p) (linear! (pose-colour p lights)) text)]
         (.set (.-position o) (+ (:x p) cx) (+ (:y p) cy) (:z p))
         (.set (.-rotation o) (:rx p) (:ry p) (:rz p))
-        (.set (.-scale o) (* s w) (* s h) 1)
         (.updateMatrix o)
-        (.setMatrixAt mesh i (.-matrix o))
+        ;; The unit quad stretched to the glyph's size, then sheared along x
+        ;; by its height above the glyph's baseline, which is sy * cy below
+        ;; the quad's centre; then placed and turned as before.
+        (.set scratch-shape
+              qw (* k qh) 0 (* k sy cy)
+              0  qh       0 0
+              0  0        1 0
+              0  0        0 1)
+        (.setMatrixAt mesh i (.multiplyMatrices scratch-matrix (.-matrix o) scratch-shape))
         (.set rects #js [rx ry rw rh] (* 4 i))
         (aset opacity i (:opacity p))
         (aset glow i (:glow p))
         (aset wobble i (:wobble p))
-        (aset ghost i (if (:ghost? p) 1 0))))
+        (aset ghost i (if (:ghost? p) 1 0))
+        (.set shape #js [(:weight p 0) (:blur p 0) (:fill p 1)] (* 3 i))
+        (.set inks #js [(.-r c) (.-g c) (.-b c)] (* 3 i))))
     (.set (.-value atlas-size) atlas-width (:height @atlas))
     (doseq [k (keys per-instance)]
       (aset (.getAttribute geometry k) "needsUpdate" true))
@@ -343,8 +444,8 @@
   [^js renderer ^js canvas stage]
   (let [atlas (atom (new-atlas))
         ^js atlas-size (tsl/uniform (three/Vector2. atlas-width (:height @atlas)))
-        ^js ink-node (tsl/uniform (three/Color. ink))
-        {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size ink-node)
+        ^js ink-node (tsl/uniform (three/Color.))
+        {:keys [material atlas-node]} (glyph-material (:texture @atlas) atlas-size)
         scene (three/Scene.)
         camera (three/PerspectiveCamera. 40 1 0.1 500)
         caret (three/Mesh. (three/PlaneGeometry. 0.06 1.1)

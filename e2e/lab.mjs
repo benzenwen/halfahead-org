@@ -68,28 +68,221 @@ async function open(page, at = url, { plain = false } = {}) {
   return page.evaluate(() => window.__lab.backend);
 }
 
-// The luminance (0 black to 1 white) of one pixel of the page as shown, at
-// the left edge half way down, where only the stage's background is drawn:
-// a screenshot of that pixel, decoded here, because reading a WebGPU canvas
-// back is unreliable. Any PNG filter leaves a lone pixel's bytes as they are.
-async function backgroundLuminance(page) {
-  const png = await page.screenshot({ clip: { x: 4, y: 320, width: 1, height: 1 } });
+// A screenshot's pixels: { width, height, pixel(x, y) -> [r, g, b] }, from
+// an 8-bit RGB or RGBA PNG that is not interlaced (what Chromium writes).
+// Screenshots are decoded here because reading a WebGPU canvas back is
+// unreliable.
+function decodePng(png) {
   const idat = [];
-  let colorType = null;
+  let width = 0, height = 0, colorType = null;
   for (let i = 8; i < png.length;) {
     const len = png.readUInt32BE(i);
     const type = png.toString('ascii', i + 4, i + 8);
     const data = png.subarray(i + 8, i + 8 + len);
     if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
       if (data[8] !== 8) throw new Error(`a screenshot PNG of bit depth ${data[8]}`);
       colorType = data[9];
+      if (data[12] !== 0) throw new Error('an interlaced screenshot PNG');
     }
     if (type === 'IDAT') idat.push(data);
     i += 12 + len;
   }
   if (colorType !== 2 && colorType !== 6) throw new Error(`a screenshot PNG of colour type ${colorType}`);
-  const [r, g, b] = inflateSync(Buffer.concat(idat)).subarray(1, 4);
+  const bpp = colorType === 6 ? 4 : 3;
+  const stride = width * bpp;
+  const raw = inflateSync(Buffer.concat(idat));
+  const px = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const from = y * (stride + 1) + 1;
+    const to = y * stride;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? px[to + i - bpp] : 0;
+      const b = y > 0 ? px[to - stride + i] : 0;
+      const c = i >= bpp && y > 0 ? px[to - stride + i - bpp] : 0;
+      let predicted = 0;
+      if (filter === 1) predicted = a;
+      else if (filter === 2) predicted = b;
+      else if (filter === 3) predicted = (a + b) >> 1;
+      else if (filter === 4) {
+        const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+        predicted = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      } else if (filter !== 0) throw new Error(`a screenshot PNG with filter ${filter}`);
+      px[to + i] = (raw[from + i] + predicted) & 255;
+    }
+  }
+  return { width, height, pixel: (x, y) => [px[y * stride + x * bpp], px[y * stride + x * bpp + 1], px[y * stride + x * bpp + 2]] };
+}
+
+// The luminance (0 black to 1 white) of one pixel of the page as shown, at
+// the left edge half way down, where only the stage's background is drawn.
+async function backgroundLuminance(page) {
+  const [r, g, b] = decodePng(await page.screenshot({ clip: { x: 4, y: 320, width: 1, height: 1 } })).pixel(0, 0);
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+// --- measuring a still ---------------------------------------------------------
+// How much ink each pixel of a box holds, 0 (background) to 1 (the ink's
+// colour): where the pixel lies on the line from bg to ink, in linear light,
+// because that is where the renderer blends. Colours are 0-255 sRGB triples.
+const toLinear = (v) => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+
+function inkMap(img, box, bg, ink) {
+  const x0 = Math.max(0, Math.floor(box.x0)), y0 = Math.max(0, Math.floor(box.y0));
+  const w = Math.min(img.width, Math.ceil(box.x1)) - x0, h = Math.min(img.height, Math.ceil(box.y1)) - y0;
+  if (!(w > 4 && h > 4)) throw new Error(`a sample's box is ${w} x ${h} px on a ${img.width} x ${img.height} screenshot`);
+  const from = bg.map(toLinear);
+  const along = ink.map((v, i) => toLinear(v) - from[i]);
+  const length2 = along.reduce((sum, v) => sum + v * v, 0);
+  const cov = new Float32Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = img.pixel(x0 + x, y0 + y);
+      const c = p.reduce((sum, v, i) => sum + (toLinear(v) - from[i]) * along[i], 0) / length2;
+      cov[y * w + x] = Math.max(0, Math.min(1, c));
+    }
+  return { x0, y0, w, h, cov };
+}
+
+// A pixel counts as inked above this: the dark stage's floor lines, far
+// fainter, pass behind the lower rows.
+const inked = 0.15;
+
+// The summed ink of the columns [xa, xb) and rows [ya, yb) of a map.
+function inkSum(m, xa = 0, xb = m.w, ya = 0, yb = m.h) {
+  let sum = 0;
+  for (let y = Math.floor(ya); y < Math.floor(yb); y++)
+    for (let x = Math.floor(xa); x < Math.floor(xb); x++) sum += m.cov[y * m.w + x];
+  return sum;
+}
+
+const softPixels = (m) => m.cov.reduce((n, c) => n + (c > inked && c < 0.85 ? 1 : 0), 0);
+
+// The width and height of the box around a map's pixels that are mostly ink.
+function inkedExtent(m) {
+  let xa = m.w, xb = -1, ya = m.h, yb = -1;
+  for (let y = 0; y < m.h; y++)
+    for (let x = 0; x < m.w; x++)
+      if (m.cov[y * m.w + x] > 0.5) { xa = Math.min(xa, x); xb = Math.max(xb, x); ya = Math.min(ya, y); yb = Math.max(yb, y); }
+  if (xb < 0) throw new Error('a sample with no pixel mostly ink');
+  return { width: xb - xa + 1, height: yb - ya + 1 };
+}
+
+// The ink-weighted mean x of the inked pixels in rows [ya, yb) of a map.
+function inkCentreX(m, ya, yb) {
+  let sum = 0, weight = 0;
+  for (let y = Math.floor(ya); y < Math.floor(yb); y++)
+    for (let x = 0; x < m.w; x++) {
+      const c = m.cov[y * m.w + x];
+      if (c > inked) { sum += c * (m.x0 + x); weight += c; }
+    }
+  if (!(weight > 0)) throw new Error('no ink in a third of a sample');
+  return sum / weight;
+}
+
+// How far right the ink in the top third of a map is of that in the bottom third.
+const lean = (m) => inkCentreX(m, 0, m.h / 3) - inkCentreX(m, 2 * m.h / 3, m.h);
+
+// The colour most pixels of the box share among those mostly ink.
+function commonInk(img, m) {
+  const counts = new Map();
+  for (let y = 0; y < m.h; y++)
+    for (let x = 0; x < m.w; x++)
+      if (m.cov[y * m.w + x] > 0.5) {
+        const key = img.pixel(m.x0 + x, m.y0 + y).join(',');
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+  if (!counts.size) throw new Error('a sample with no pixel mostly ink');
+  return [...counts].reduce((a, b) => (b[1] > a[1] ? b : a))[0].split(',').map(Number);
+}
+
+// The colour most pixels of a screenshot have: its background.
+function commonColour(img) {
+  const counts = new Map();
+  for (let y = 0; y < img.height; y += 3)
+    for (let x = 0; x < img.width; x += 3) {
+      const key = img.pixel(x, y).join(',');
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  return [...counts].reduce((a, b) => (b[1] > a[1] ? b : a))[0].split(',').map(Number);
+}
+
+// The specimen's still, measured: throws on the first channel that is not
+// drawn as the design says, and returns a summary for done().
+function measureSpecimen(img, samples, inkOf, lights) {
+  const bg = commonColour(img);
+  const expectedBg = lights === 1 ? [0x14, 0x12, 0x10] : [0xf6, 0xf1, 0xe7];
+  if (bg.some((v, i) => Math.abs(v - expectedBg[i]) > 4))
+    throw new Error(`the background is rgb(${bg}), not rgb(${expectedBg})`);
+  const row = (name) => {
+    const found = samples.filter((s) => s.row === name)
+      .map((s) => ({ ...s, map: inkMap(img, s.box, bg, inkOf(name === 'ink' ? s.value : 'text')) }));
+    if (!found.length) throw new Error(`no ${name} samples`);
+    return found;
+  };
+  const at = (found, pred, what) => {
+    const s = found.find((x) => pred(x.value));
+    if (!s) throw new Error(`no sample at ${what}`);
+    return s.map;
+  };
+  const is = (v) => (x) => x === v;
+  const fx = (n) => n.toFixed(0);
+
+  const weight = row('weight');
+  const areas = weight.map((s) => inkSum(s.map));
+  const [light, regular, bold] = [-1, 0, 1].map((v) => inkSum(at(weight, is(v), `weight ${v}`)));
+  if (!(regular >= 1.15 * light)) throw new Error(`weight 0 inks ${fx(regular)} px, not 15% more than weight -1's ${fx(light)}`);
+  if (!(bold >= 1.15 * regular)) throw new Error(`weight +1 inks ${fx(bold)} px, not 15% more than weight 0's ${fx(regular)}`);
+  if (!(light >= 0.25 * regular)) throw new Error(`weight -1 inks ${fx(light)} px of weight 0's ${fx(regular)}: the letter is all but gone`);
+  if (!areas.every((a, i) => i === 0 || a > areas[i - 1])) throw new Error(`the inked area does not grow with weight: ${areas.map(fx)}`);
+
+  const softs = row('blur').map((s) => softPixels(s.map));
+  if (!softs.every((n, i) => i === 0 || n > softs[i - 1])) throw new Error(`the soft pixels do not grow with blur: ${softs}`);
+
+  const skew = row('skew');
+  const upright = lean(at(skew, is(0), 'skew 0'));
+  const right = lean(at(skew, is(0.3), 'skew 0.3')) - upright;
+  const left = lean(at(skew, is(-0.3), 'skew -0.3')) - upright;
+  if (!(right > 1)) throw new Error(`at skew +0.3 the top third's ink is ${right.toFixed(1)} px right of the bottom third's (less the upright sample's)`);
+  if (!(left < -1)) throw new Error(`at skew -0.3 the top third's ink is ${left.toFixed(1)} px right of the bottom third's (less the upright sample's)`);
+
+  const stretch = row('stretch');
+  const rest = inkedExtent(at(stretch, (v) => v.sx === 1 && v.sy === 1, 'stretch rest'));
+  const wide = inkedExtent(at(stretch, (v) => v.sx > 1, 'sx 1.4'));
+  const tall = inkedExtent(at(stretch, (v) => v.sy > 1, 'sy 1.4'));
+  if (!(wide.width >= rest.width + 2)) throw new Error(`sx 1.4 is ${wide.width} px wide, at rest ${rest.width}`);
+  if (!(tall.height >= 1.2 * rest.height)) throw new Error(`sy 1.4 is ${tall.height} px tall, at rest ${rest.height}`);
+  if (!(Math.abs(wide.height - rest.height) <= 3)) throw new Error(`sx 1.4 changed the height: ${wide.height} px, at rest ${rest.height}`);
+  if (!(Math.abs(tall.width - rest.width) <= 3)) throw new Error(`sy 1.4 changed the width: ${tall.width} px, at rest ${rest.width}`);
+
+  const fill = row('fill');
+  const halves = (m) => [inkSum(m, 0, m.w / 2), inkSum(m, m.w / 2, m.w)];
+  const [halfL, halfR] = halves(at(fill, is(0.5), 'fill 0.5'));
+  if (!(halfL >= 2 * halfR)) throw new Error(`at fill 0.5 the left half inks ${fx(halfL)} px, not twice the right half's ${fx(halfR)}`);
+  const [dimL, dimR] = halves(at(fill, is(0), 'fill 0'));
+  const [fullL, fullR] = halves(at(fill, is(1), 'fill 1'));
+  const even = (a, b) => Math.abs(a - b) <= 0.15 * Math.max(a, b);
+  if (!even(dimL, dimR)) throw new Error(`fill 0 is not uniform: halves ${fx(dimL)} and ${fx(dimR)} px`);
+  if (!even(fullL, fullR)) throw new Error(`fill 1 is not uniform: halves ${fx(fullL)} and ${fx(fullR)} px`);
+  const dimShare = (dimL + dimR) / (fullL + fullR);
+  if (!(dimShare > 0.25 && dimShare < 0.45)) throw new Error(`fill 0 holds ${dimShare.toFixed(2)} of fill 1's ink, not about 0.35`);
+  const filled = fill.map((s) => inkSum(s.map));
+  if (!filled.every((a, i) => i === 0 || a > filled[i - 1])) throw new Error(`the ink does not grow with fill: ${filled.map(fx)}`);
+
+  const inks = row('ink');
+  if (inks.length !== 5) throw new Error(`${inks.length} inks in the specimen`);
+  const off = inks.map((s) => {
+    const want = inkOf(s.value), got = commonInk(img, s.map);
+    const worst = Math.max(...got.map((v, i) => Math.abs(v - want[i])));
+    if (!(worst <= 12)) throw new Error(`the ${s.value} sample is mostly rgb(${got}), not rgb(${want})`);
+    return worst;
+  });
+
+  return `weight ${areas.map(fx).join(' < ')} px of ink; blur ${softs.join(' < ')} soft px; `
+    + `skew ${left.toFixed(1)} / +${right.toFixed(1)} px; stretch ${rest.width}x${rest.height} -> sx ${wide.width}x${wide.height}, sy ${tall.width}x${tall.height}; `
+    + `fill 0.5 ${(halfL / halfR).toFixed(1)}:1, fill 0 at ${dimShare.toFixed(2)} of full; inks within ${Math.max(...off)}/255`;
 }
 
 // The reveal level of the frame drawn now, waiting up to 5 s for it to reach
@@ -796,12 +989,73 @@ try {
   done(`every live pose at scale 1 right after typing; camera target on the current line on every frame `
     + `(worst ${lag} em); aim within ${aim.toFixed(2)} px of the centre`);
 
+  // Its console errors are kept; a software-rendered page left running would
+  // starve the specimen's.
+  await context.close();
+
+  // The channels, each at fixed values on the type specimen, measured in the
+  // two stills the foreman is shown: no motion, so no timing.
+  begin('specimen', null);
+  {
+    const lines = [];
+    for (const [name, lights] of [['dark', 1], ['paper', 0]]) {
+      const specimen = track(await browser.newPage({ viewport: { width: 1280, height: 900 } }));
+      current = specimen;
+      const specimenUrl = new URL(url);
+      specimenUrl.searchParams.set('specimen', '');
+      if (lights === 0) specimenUrl.searchParams.set('reveal', '0');
+      await open(specimen, specimenUrl.href, { plain: true });
+      await specimen.waitForFunction(() => window.__lab.specimen()?.length, null, { timeout: 10000 });
+      const twoFrames = () => specimen.evaluate(() => new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve(JSON.stringify(window.__lab.lastFrame()))))));
+      const before = await twoFrames();
+      await specimen.keyboard.type('typed ', { delay: 20 });
+      if ((await twoFrames()) !== before) throw new Error('typing changed the specimen');
+      const shown = await specimen.evaluate(() => {
+        const lab = window.__lab;
+        const f = lab.lastFrame();
+        const inks = {};
+        for (const k of ['text', 'signal', 'gold', 'cool', 'muted']) inks[k] = lab.inkColour(k, f.reveal.lights);
+        return { samples: lab.specimen(), inks, lights: f.reveal.lights, drawn: lab.drawn(),
+                 page: document.documentElement.dataset.lights };
+      });
+      if (shown.lights !== lights || shown.page !== (lights === 1 ? 'down' : 'up'))
+        throw new Error(`${specimenUrl.search} shows lights ${shown.lights}, the page "${shown.page}"`);
+      const img = decodePng(await specimen.screenshot({ path: `${out}/specimen-${name}.png` }));
+      lines.push(`${name}: ${shown.samples.length} samples, ${shown.drawn} glyphs; `
+        + measureSpecimen(img, shown.samples, (k) => shown.inks[k], lights));
+      await specimen.close();
+    }
+
+    // H3 (docs/product/lab-notebook.md): the mean frame time with a 200
+    // character paragraph at rest on the ordinary page. Reported only:
+    // headless numbers are for comparing one run with another.
+    const timed = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = timed;
+    const timedUrl = new URL(url);
+    timedUrl.searchParams.set('debug', '');
+    const timedBackend = await open(timed, timedUrl.href);
+    const paragraph = 'the quick brown fox jumps over the lazy dog and '.repeat(5).slice(0, 200);
+    await timed.keyboard.type(paragraph, { delay: 10 });
+    // every cue and shot over (5 s at most), then a full second of frames
+    await timed.waitForTimeout(6500);
+    const timing = await timed.evaluate(() => ({
+      overlay: document.getElementById('debug').textContent,
+      live: window.__lab.liveText().length,
+      drawn: window.__lab.drawn(),
+    }));
+    const mean = /mean ([\d.]+) ms/.exec(timing.overlay)?.[1];
+    if (timing.live !== 200 || !mean) throw new Error(`${timing.live} characters live; overlay "${timing.overlay}"`);
+    await timed.close();
+    done(`${lines.join(' | ')} | H3: mean frame time ${mean} ms with ${timing.drawn} glyphs at rest on ${timedBackend}`);
+  }
+
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
