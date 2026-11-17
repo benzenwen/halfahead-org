@@ -5,6 +5,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [halfahead.lab.pace :as pace]
+            [halfahead.lab.pose :as pose]
             [halfahead.lab.reading :as reading]
             [halfahead.lab.style :as style]
             [halfahead.schema :as schema]))
@@ -16,6 +17,10 @@
 
 (def ^:private plain (style/point :plain))
 (def ^:private elegant (style/point :elegant))
+
+;; what lab.pose plays each with
+(def ^:private plainly (style/params :plain))
+(def ^:private elegantly (style/params :elegant))
 
 (defn- glyphs-of
   "One glyph per character of chars (strings, so an emoji may be one glyph
@@ -40,20 +45,21 @@
 ;; --- natural-ms --------------------------------------------------------------
 
 (deftest a-gesture-lasts-its-patch-times-the-styles-tempo
-  (is (== 3120 (reading/natural-ms plain 7 :swell)) "2400 ms and a stagger over 7 letters")
-  (is (close-to? (* 3120 (:tempo (style/from-point elegant)))
-                 (reading/natural-ms elegant 7 :swell)))
-  (is (close-to? 4243.2 (reading/natural-ms elegant 7 :swell)))
-  (is (< (reading/natural-ms plain 1 :swell) (reading/natural-ms plain 7 :swell))
+  (is (== 3120 (reading/natural-ms plainly 7 :swell)) "2400 ms and a stagger over 7 letters")
+  (is (== 4680 (reading/natural-ms elegantly 7 :swell))
+      "Elegant plays at its params' tempo, 1.5, not its point's 1.36")
+  (is (== 4244 (reading/natural-ms (style/from-point elegant) 7 :swell))
+      "a point's own tempo, 4243.2 ms, rounded up so the grant covers it")
+  (is (< (reading/natural-ms plainly 1 :swell) (reading/natural-ms plainly 7 :swell))
       "one letter has no stagger")
-  (is (< (reading/natural-ms (assoc plain :energy 1.0) 7 :swell)
-         (reading/natural-ms plain 7 :swell))
+  (is (< (reading/natural-ms (style/from-point (assoc plain :energy 1.0)) 7 :swell)
+         (reading/natural-ms plainly 7 :swell))
       "an energetic style is quicker"))
 
 ;; --- plan --------------------------------------------------------------------
 
 (deftest plain-performs-no-mark-of-the-sentence
-  (let [{:keys [score performing] r :reading} (reading/plan sentence plain {:wpm 250})]
+  (let [{:keys [score performing] r :reading} (reading/plan sentence plain plainly {:wpm 250})]
     (is (schema/valid? :ha/score score))
     (is (schema/valid? :ha/reading r))
     (is (= sentence (:text score)))
@@ -66,7 +72,7 @@
     (is (= 2592 (:duration-ms r)))))
 
 (deftest elegant-performs-four-marks-of-the-sentence
-  (let [{:keys [score performing] r :reading} (reading/plan sentence elegant {:wpm 250})]
+  (let [{:keys [score performing] r :reading} (reading/plan sentence elegant elegantly {:wpm 250})]
     (is (schema/valid? :ha/score score))
     (is (schema/valid? :ha/reading r))
     (is (= [[[2 9] :hold] [[16 24] :aside] [[42 49] :land] [[47 49] :stress]]
@@ -77,31 +83,31 @@
             {:mark 2 :effect :nod :intensity 0.7}
             {:mark 3 :effect :glow :intensity 0.6}]
            performing))
-    (is (= [{:mark 0 :at-ms 240 :ms 4243}
-            {:mark 1 :at-ms 888 :ms 2040}
-            {:mark 2 :at-ms 2160 :ms 1088}
-            {:mark 3 :at-ms 2400 :ms 1394}]
+    (is (= [{:mark 0 :at-ms 240 :ms 4680}
+            {:mark 1 :at-ms 888 :ms 2250}
+            {:mark 2 :at-ms 2160 :ms 1200}
+            {:mark 3 :at-ms 2400 :ms 1538}]
            (:entries r))
-        "each as the head reaches it, for its natural length")
+        "each as the head reaches it, for its natural length at Elegant's tempo, 1.5")
     (is (= {:span [2 9] :at-ms 240 :ms 408} (get-in r [:stops 1])) "held: 1.7 beats")
-    (is (= 4483 (:duration-ms r)))
+    (is (= 4920 (:duration-ms r)))
     (is (== 240 (:beat-ms r)))))
 
 (deftest a-slow-reader-is-paced-too
-  (let [r (:reading (reading/plan sentence elegant {:wpm 150}))]
+  (let [r (:reading (reading/plan sentence elegant elegantly {:wpm 150}))]
     (is (= 9 (count (:stops r))) "the read-back's cap is 30 s, not 5")
     (is (< 5000 (:duration-ms r)))))
 
 (deftest text-that-is-not-a-message-has-no-plan
-  (is (nil? (reading/plan "" elegant {:wpm 250})))
-  (is (nil? (reading/plan nil elegant {:wpm 250})))
-  (is (nil? (reading/plan (apply str (repeat 4001 "a")) elegant {:wpm 250}))))
+  (is (nil? (reading/plan "" elegant elegantly {:wpm 250})))
+  (is (nil? (reading/plan nil elegant elegantly {:wpm 250})))
+  (is (nil? (reading/plan (apply str (repeat 4001 "a")) elegant elegantly {:wpm 250}))))
 
 ;; --- cues --------------------------------------------------------------------
 
 (deftest cues-are-placed-on-the-glyphs-of-each-mark
   (let [glyphs (glyphs-of sentence)
-        cues (reading/cues (reading/plan sentence elegant {:wpm 250}) glyphs 1000)]
+        cues (reading/cues (reading/plan sentence elegant elegantly {:wpm 250}) glyphs 1000)]
     (is (every? #(schema/valid? :ha/placed-cue %) cues))
     (is (= [{:glyph-ids (mapv id-at (range 2 9))
              :cue {:word "loooove" :effect :swell :intensity 0.7 :source :score}
@@ -117,8 +123,8 @@
              :at-ms 3400}]
            cues)
         "unhurried, so none has a :tempo")
-    (is (= [] (reading/cues (reading/plan sentence plain {:wpm 250}) glyphs 1000)))
-    (is (= [] (reading/cues (reading/plan sentence elegant {:wpm 250}) [] 1000))
+    (is (= [] (reading/cues (reading/plan sentence plain plainly {:wpm 250}) glyphs 1000)))
+    (is (= [] (reading/cues (reading/plan sentence elegant elegantly {:wpm 250}) [] 1000))
         "a mark with no glyph is no cue")))
 
 (def ^:private long-text
@@ -127,7 +133,7 @@
 
 (deftest a-late-swell-is-hurried
   (let [glyphs (glyphs-of long-text)
-        {r :reading :as plan} (reading/plan long-text elegant {:wpm 150})
+        {r :reading :as plan} (reading/plan long-text elegant elegantly {:wpm 150})
         [{:keys [at-ms ms]} :as entries] (:entries r)
         [cue :as cues] (reading/cues plan glyphs 500)]
     (is (= 66 (count (:stops r))))
@@ -137,14 +143,14 @@
     (is (schema/valid? :ha/placed-cue cue))
     (is (= :swell (get-in cue [:cue :effect])))
     (is (= 26500 (:at-ms cue)))
-    (is (= (/ 4000 4243.0) (:tempo cue)))
+    (is (= (/ 4000 4680.0) (:tempo cue)))
     (is (< 0.4 (:tempo cue) 1))
     (is (= (mapv id-at (range 390 397)) (:glyph-ids cue)))))
 
 (deftest a-cues-word-is-at-most-64-units
   (let [text (str "(" (apply str (repeat 70 "a")) ") ok")
         ;; lavish, so the aside performs whatever its amount
-        plan (reading/plan text (assoc plain :flourish 1.0) {:wpm 250})
+        plan (reading/plan text (assoc plain :flourish 1.0) plainly {:wpm 250})
         cues (reading/cues plan (glyphs-of text) 0)
         aside (first (filter #(= 70 (count (:glyph-ids %))) cues))]
     (is (some? aside))
@@ -155,7 +161,7 @@
 
 (deftest ink-fills-as-the-head-passes
   (let [glyphs (glyphs-of sentence)
-        plan (reading/plan sentence elegant {:wpm 250})
+        plan (reading/plan sentence elegant elegantly {:wpm 250})
         fills #(reading/fills plan glyphs 1000 %)]
     (testing "none before the reading or once the head has crossed"
       (is (nil? (fills 999)))
@@ -186,7 +192,7 @@
 
 (deftest highlights-are-not-dimmed
   (let [text (str/join " " (repeat 200 "plain"))
-        plan (reading/plan text elegant {:wpm 250})]
+        plan (reading/plan text elegant elegantly {:wpm 250})]
     (is (= [] (:stops (:reading plan))) "too long to pace even in 30 s")
     (is (nil? (reading/fills plan (glyphs-of text) 0 0)))
     (is (nil? (reading/fills plan (glyphs-of text) 0 100)))))
@@ -194,7 +200,7 @@
 (deftest offsets-count-utf-16-units
   (let [text "I 🚀 loooove it"
         glyphs (glyphs-of ["I" " " "🚀" " " "l" "o" "o" "o" "o" "v" "e" " " "i" "t"])
-        plan (reading/plan text elegant {:wpm 250})
+        plan (reading/plan text elegant elegantly {:wpm 250})
         [swell :as cues] (reading/cues plan glyphs 0)]
     (is (= [[0 1] [2 4] [5 12] [13 15]] (mapv :span (:stops (:reading plan)))))
     (is (= 1 (count cues)))
@@ -228,7 +234,7 @@
                  style (gen/elements style/styles)
                  share (gen/choose 0 999)]
     (let [glyphs (split-glyphs text)
-          {r :reading :as plan} (reading/plan text (style/point style) {:wpm wpm})
+          {r :reading :as plan} (reading/plan text (style/point style) (style/params style) {:wpm wpm})
           total (let [{:keys [at-ms ms]} (peek (:stops r))] (+ at-ms ms))
           t (+ 7000 (* total (/ share 1000.0)))
           fills (reading/fills plan glyphs 7000 t)
@@ -248,13 +254,50 @@
 
 (deftest a-reading-is-over-when-its-stops-and-cues-are
   (let [glyphs (glyphs-of sentence)
-        elegantly (reading/plan sentence elegant {:wpm 250})
-        plainly (reading/plan sentence plain {:wpm 250})]
-    (is (not (reading/over? elegantly glyphs 1000 1000)))
-    (is (not (reading/over? elegantly glyphs 1000 3760)) "the head has crossed; the swell plays on")
-    (is (not (reading/over? elegantly glyphs 1000 5482)))
-    (is (reading/over? elegantly glyphs 1000 5483) "240 + 4243 ms in")
-    (is (not (reading/over? plainly glyphs 1000 3591)))
-    (is (reading/over? plainly glyphs 1000 3592) "no cues: when the stops end")
-    (is (reading/over? (reading/plan (str/join " " (repeat 200 "plain")) plain {:wpm 250}) [] 0 0)
+        in-elegant (reading/plan sentence elegant elegantly {:wpm 250})
+        in-plain (reading/plan sentence plain plainly {:wpm 250})]
+    (is (not (reading/over? in-elegant glyphs 1000 1000)))
+    (is (not (reading/over? in-elegant glyphs 1000 3760)) "the head has crossed; the swell plays on")
+    (is (not (reading/over? in-elegant glyphs 1000 5919)))
+    (is (reading/over? in-elegant glyphs 1000 5920) "240 + 4680 ms in")
+    (is (not (reading/over? in-plain glyphs 1000 3591)))
+    (is (reading/over? in-plain glyphs 1000 3592) "no cues: when the stops end")
+    (is (reading/over? (reading/plan (str/join " " (repeat 200 "plain")) plain plainly {:wpm 250}) [] 0 0)
         "highlights with nothing to perform are over at once")))
+
+;; --- the tempo in force (a fix to order 0050) ---------------------------------
+
+(defn- frame-of
+  "The frame at t of the sentence's glyphs, long since born, with cues, in
+  a named style on the full stage."
+  [glyphs cues style t]
+  (pose/frame {:text sentence :glyphs glyphs :ghosts [] :cues (vec cues) :next-id 1000}
+              t {:style-choice style}))
+
+(deftest cues-end-within-the-reading
+  (doseq [named style/styles
+          wpm [150 250 400]]
+    (testing (str named " at " wpm " wpm")
+      (let [glyphs (glyphs-of sentence)
+            t0 20000
+            {r :reading :as plan} (reading/plan sentence (style/point named) (style/params named)
+                                                {:wpm wpm})
+            cues (reading/cues plan glyphs t0)
+            end (+ t0 (reduce max
+                              (let [{:keys [at-ms ms]} (peek (:stops r))] (+ at-ms ms))
+                              (map #(+ (:at-ms %) (:ms %)) (:entries r))))
+            still #(frame-of glyphs [] named %)]
+        (is (= (count (:entries r)) (count cues)) "every mark performed has its glyphs")
+        (when (#{:elegant :caffeinated :drunken :coarse} named)
+          (is (seq cues) "a style with flourish performs something"))
+        (is (not (reading/over? plan glyphs t0 (dec end))))
+        (is (reading/over? plan glyphs t0 end))
+        (is (= (still end) (frame-of glyphs cues named end))
+            "when the reading is over and its cues are withdrawn, every letter is at rest")
+        (doseq [[{:keys [ms]} {:keys [at-ms] :as cue}] (map vector (:entries r) cues)]
+          (is (<= (+ at-ms ms) end) "the cue's grant ends within the reading")
+          (is (= (still (+ at-ms ms)) (frame-of glyphs [cue] named (+ at-ms ms)))
+              (str (get-in cue [:cue :effect]) " has ended, by lab.pose's own timing, when its grant has"))
+          (is (some #(not= (still %) (frame-of glyphs [cue] named %))
+                    (map #(+ at-ms (* ms %)) [0.25 0.5 0.75]))
+              (str (get-in cue [:cue :effect]) " moves a letter while it plays")))))))

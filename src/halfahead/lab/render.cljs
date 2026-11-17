@@ -318,6 +318,25 @@
   (let [[px py] (project r (three/Vector3. x y z))]
     #js {:x px :y py}))
 
+(defn plane-point
+  "Where the client point (client-x, client-y), as a pointer event gives
+  it, lies on the text plane (z 0) as the last frame's camera saw it:
+  {:x :y} in em, or nil when the point is off the canvas, nothing has been
+  drawn yet, or the camera does not look at the plane there."
+  [{:keys [^js camera ^js canvas viewport]} client-x client-y]
+  (when @viewport
+    (let [^js box (.getBoundingClientRect canvas)
+          u (/ (- client-x (.-left box)) (max 1 (.-width box)))
+          v (/ (- client-y (.-top box)) (max 1 (.-height box)))]
+      (when (and (<= 0 u 1) (<= 0 v 1))
+        (let [^js eye (.-position camera)
+              ^js far (.unproject (three/Vector3. (dec (* 2 u)) (- 1 (* 2 v)) 0.5) camera)
+              dz (- (.-z far) (.-z eye))
+              k (when-not (zero? dz) (/ (- (.-z eye)) dz))]
+          (when (and k (pos? k))
+            {:x (+ (.-x eye) (* k (- (.-x far) (.-x eye))))
+             :y (+ (.-y eye) (* k (- (.-y far) (.-y eye))))}))))))
+
 (defn backend
   "\"WebGPU\" or \"WebGL2\", whichever this renderer is using."
   [r]

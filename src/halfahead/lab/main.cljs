@@ -15,12 +15,16 @@
   draft, and typing does nothing. Ctrl+Enter or the Read back button reads
   the draft back at the viewer's Pace (lab.reading): while it plays the
   shell hands the reading's cues and the head's ink to the frame, and
-  Escape, an edit or another reading ends it."
+  Escape, an edit or another reading ends it. It keeps the draft's dress
+  (lab.dress) for the frame too: placed afresh whenever the text or the
+  style in force changes, with when each was first seen, and where the
+  mouse is over the stage, which gold glints by."
   (:require [halfahead.lab.audio :as audio]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.director :as director]
             [halfahead.lab.draft :as draft]
+            [halfahead.lab.dress :as dress]
             [halfahead.lab.ink :as ink]
             [halfahead.lab.moments :as moments]
             [halfahead.lab.pace :as pace]
@@ -28,6 +32,7 @@
             [halfahead.lab.reading :as reading]
             [halfahead.lab.render :as render]
             [halfahead.lab.reveal :as reveal]
+            [halfahead.lab.score :as score]
             [halfahead.lab.sound :as sound]
             [halfahead.lab.specimen :as specimen]
             [halfahead.lab.stage :as stage]
@@ -57,9 +62,13 @@
   ;; from; :last-moment, the newest of them, for the overlay;
   ;; :pace, the viewer's words a minute; :reading, the read-back playing, if
   ;; any: {:plan (lab.reading's) :t0 :cues (its placed cues) :voiced-to (the
-  ;; time up to which its cues' sounds were played)}
+  ;; time up to which its cues' sounds were played)};
+  ;; :dress, what the draft wears: {:for [text style] (what :placed was
+  ;; derived from) :placed :seen (both lab.dress's)}; :light-px, where the
+  ;; mouse is in client pixels, nil when it is away or there is none
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
          :pace 250 :reading nil
+         :dress {:for nil :placed [] :seen {}} :light-px nil
          :sound? false :sound-log [] :sound-queue []
          :reveal {:start-level (start-level) :wands [] :reached nil}
          :pointer []
@@ -106,8 +115,24 @@
   (cond-> draft
     reading (update :cues into (:cues reading))))
 
+(defn- dressed
+  "state with the draft's dress brought up to t: placed afresh when the
+  text or the style in force (the choice, or what the rhythm suggests now)
+  has changed, so an edit, the picker and :auto changing its mind are all
+  covered here; and each dress's first sighting kept."
+  [{:keys [draft style-choice] :as s} t]
+  (let [{:keys [text glyphs]} draft
+        style (if (= :auto style-choice) (style/infer glyphs t) style-choice)
+        s (if (= [text style] (get-in s [:dress :for]))
+            s
+            (update s :dress assoc
+                    :for [text style]
+                    :placed (dress/placed (:dress (score/from-text text (style/point style)))
+                                          glyphs)))]
+    (update s :dress #(assoc % :seen (dress/seen (:seen %) (:placed %) t)))))
+
 (defn- frame [r t reduced-motion?]
-  (let [{:keys [draft reading] :as s} @state]
+  (let [{:keys [draft reading light-px] :as s} @state]
     (pose/frame (draft/prune (performed-draft s) t) t
                 {:advance #(render/advance r %)
                  :width-em (width-em)
@@ -115,6 +140,9 @@
                  :reduced-motion? reduced-motion?
                  :style-choice (:style-choice s)
                  :reveal-opts (:reveal s)
+                 :dress {:placed (get-in s [:dress :placed])
+                         :seen (get-in s [:dress :seen])
+                         :light (when-let [[x y] light-px] (render/plane-point r x y))}
                  :fills (when reading
                           (reading/fills (:plan reading) (:glyphs draft) (:t0 reading) t))})))
 
@@ -162,7 +190,8 @@
          "none")))
 
 (defn- show-debug! [r t f]
-  (let [{:keys [stats cue-log direction-log style-choice sound? last-moment reading]}
+  (let [{:keys [stats cue-log direction-log style-choice sound? last-moment reading draft]
+         worn :dress}
         (swap! state #(-> %
                           (update :stats debug/record t)
                           (update :cue-log debug/cue-log [] t)
@@ -177,6 +206,8 @@
                       (str "reveal level " level " · lights " (.toFixed lights 2)))
                "\n" (moment-line last-moment)
                "\n" (if sound? "sound on" "sound off")
+               (when-let [line (debug/dress-text (:placed worn) (:glyphs draft))]
+                 (str "\n" line))
                (when reading
                  (str "\n" (debug/reading-text (:reading (:plan reading))
                                                (map :cue (:cues reading)))))))))
@@ -248,7 +279,7 @@
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
         reduced-motion? (.-matches motion-query)
-        _ (swap! state #(-> % (read-on t reduced-motion?) (directed t)))
+        _ (swap! state #(-> % (read-on t reduced-motion?) (directed t) (dressed t)))
         _ (play-queued!)
         f (frame r t reduced-motion?)
         ;; counted only here, once a tick, so each moment is handed on once
@@ -288,6 +319,8 @@
                                 :headAt (fn [at] (pace/head rd (- at t0)))}))
              :bounds #(clj->js sound/bounds)
              :specimen #(sample-boxes r)
+             ;; the dress placed on the draft's glyphs, as lab.dress has it
+             :dress #(clj->js (get-in @state [:dress :placed]))
              ;; an ink's colour as the 0-255 triple a screenshot shows
              :inkColour #(clj->js (mapv (fn [c] (js/Math.round (* 255 c)))
                                         (ink/colour (keyword %1) %2)))}))
@@ -316,9 +349,11 @@
     (let [t (now-ms)]
       (swap! state
              (fn [{:keys [draft last-frame pace] :as s}]
-               (let [plan (when last-frame
-                            (reading/plan (:text draft) (style/as-point (:style last-frame))
-                                          {:wpm pace}))]
+               (let [plan (when-let [named (:style last-frame)]
+                            ;; the tempo lab.pose plays a named style at is
+                            ;; its params', not its point's
+                            (reading/plan (:text draft) (style/point named)
+                                          (style/params named) {:wpm pace}))]
                  (assoc s :reading (when plan
                                      {:plan plan
                                       :t0 t
@@ -371,9 +406,11 @@
 
 (defn- on-pointer-move
   "A quick sweep of the mouse over the stage is a wand; the samples start
-  afresh after one, so one sweep is one wand."
+  afresh after one, so one sweep is one wand. Where the mouse is is also
+  the light gold glints by; a finger or a pen is no light."
   [^js e]
   (when (= "mouse" (.-pointerType e))
+    (swap! state assoc :light-px [(.-clientX e) (.-clientY e)])
     ;; when the pointer moved, not when a busy frame let the handler run
     (let [t (.-timeStamp e)
           samples (into [] (filter #(< (- t (:t %)) flick-window-ms))
@@ -448,6 +485,9 @@
                                  (>= (get-in @state [:reveal :start-level]) 2) 1
                                  :else 0)})
     (.addEventListener js/window "pointermove" on-pointer-move)
+    ;; the mouse has left the page: the gold goes back to its own glow
+    (.addEventListener js/document.documentElement "mouseleave"
+                       #(swap! state assoc :light-px nil))
     (.focus input)
     ;; the specimen is not the writer's text: typing changes nothing there
     (when-not specimen? (.addEventListener input "input" on-input))

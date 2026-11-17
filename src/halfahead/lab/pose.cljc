@@ -24,8 +24,14 @@
   and the letters peel off the page; at 3 shots and the crawl too. Each
   birth, cue and shot is performed at the level in force when it happened,
   so reaching a level never jerks a letter already moving; what a level
-  adds (the peel, the crawl) is eased in and settled within 900 ms of it."
+  adds (the peel, the crawl) is eased in and settled within 900 ms of it.
+  From level 1 a frame may be given the draft's dress (lab.dress): what
+  its letters wear at rest. Dress changes the resting place and look that
+  every motion above starts from and returns to, so all of it holds with
+  dress: a sized letter takes the room it needs in the layout, and cues
+  and shots perform on top of the dressed rest."
   (:require [clojure.string :as str]
+            [halfahead.lab.dress :as dress]
             [halfahead.lab.gestures :as gestures]
             [halfahead.lab.reveal :as reveal]
             [halfahead.lab.style :as style]
@@ -71,15 +77,13 @@
        (partition-by (fn [[i c]] (if (str/blank? c) [:space i] :word)))
        (map #(mapv first %))))
 
-(defn layout
-  "One {:x :y} per char, left-aligned from x 0. A newline starts the next
-  line; a word that would cross width-em moves whole to the next line, and
-  a word wider than width-em breaks wherever it must. Line n has
-  y = -1.35 n. advance is a fn char -> em width."
-  [chars advance width-em]
-  (let [chars (vec chars)
-        width (double width-em)
-        adv #(double (advance (nth chars %)))]
+(defn- layout-widths
+  "layout, given the em width of each char (widths, a vector) in place of
+  a fn of the char: a dressed letter may be wider or narrower than its
+  character is."
+  [chars widths width-em]
+  (let [width (double width-em)
+        adv #(double (nth widths %))]
     (loop [toks (tokens chars), x 0.0, n 0, out (transient (vec (repeat (count chars) nil)))]
       (if-let [[i0 :as tok] (first toks)]
         (let [c (nth chars i0)]
@@ -107,15 +111,24 @@
               (recur (rest toks) x n out))))
         (persistent! out)))))
 
+(defn layout
+  "One {:x :y} per char, left-aligned from x 0. A newline starts the next
+  line; a word that would cross width-em moves whole to the next line, and
+  a word wider than width-em breaks wherever it must. Line n has
+  y = -1.35 n. advance is a fn char -> em width."
+  [chars advance width-em]
+  (let [chars (vec chars)]
+    (layout-widths chars (mapv advance chars) width-em)))
+
 (defn- end-position
-  "Where the next character would go: after the last char, or at the start
-  of the next line when the text ends with a newline."
-  [chars positions advance]
+  "Where the next character would go: after the last char (widths gives
+  how wide each is), or at the start of the next line when the text ends
+  with a newline."
+  [chars positions widths]
   (if-let [{:keys [x y]} (peek positions)]
-    (let [c (peek chars)]
-      (if (= "\n" c)
-        {:x 0.0 :y (- y line-height)}
-        {:x (+ x (double (advance c))) :y y}))
+    (if (= "\n" (peek chars))
+      {:x 0.0 :y (- y line-height)}
+      {:x (+ x (double (peek widths))) :y y})
     {:x 0.0 :y 0.0}))
 
 ;; --- motion ------------------------------------------------------------------
@@ -351,9 +364,10 @@
         (update :glow #(clamp 0.0 1.0 %))
         (update :wobble #(clamp 0.0 1.0 %))
         off-rest
-        ;; a tint mixes towards the letter's ink, and nothing gives a
-        ;; letter an ink yet
-        (dissoc :tint))))
+        ;; a tint mixes towards the letter's ink, which only dress gives
+        (as-> p (if (:ink p)
+                  (update p :tint #(clamp 0.0 1.0 %))
+                  (dissoc p :tint))))))
 
 (def ^:private ember-ms 600)
 
@@ -369,6 +383,65 @@
          :x x :y (+ y (* 1.5 p)) :z (if (< level 2) 0.0 (* 0.3 p))
          :rx 0.0 :ry 0.0 :rz (if (zero? level) 0.0 (* (if (even? id) 1.0 -1.0) tau p))
          :scale (- 1.0 (* 0.4 p)) :opacity (- 1.0 p) :glow (* 0.5 (- 1.0 p)) :wobble 0.0}))))
+
+;; --- dress -------------------------------------------------------------------
+;; Dress is applied to the letter at rest, before any motion, so everything
+;; that moves a letter starts from and returns to its dressed pose.
+
+(def ^:private dress-ease-ms 500)
+
+(defn- wearing
+  "[[placed-dress w] ...]: how far in each placed dress is at t, 0 to 1,
+  easing over 500 ms from when it was first seen; all the way with reduced
+  motion, and for dress nobody has kept a time for."
+  [{:keys [placed seen]} t reduced-motion?]
+  (mapv (fn [{:keys [as glyph-ids] :as d}]
+          (let [since (get seen [as (first glyph-ids)])]
+            [d (if (or reduced-motion? (nil? since))
+                 1.0
+                 (smoothstep (clamp 0.0 1.0 (/ (- t since) dress-ease-ms))))]))
+        placed))
+
+(defn- eased-sizes
+  "{glyph-id size} at this instant: each sized dress w of the way from 1
+  to its size, a glyph in two taking the one further from 1."
+  [worn glyphs]
+  (reduce (fn [m [d w]]
+            (reduce-kv (fn [m id size]
+                         (let [s (+ 1.0 (* w (- size 1.0)))]
+                           (if (> (abs (- s 1.0)) (abs (- (get m id 1.0) 1.0)))
+                             (assoc m id s)
+                             m)))
+                       m
+                       (dress/sizes [d] glyphs)))
+          {}
+          worn))
+
+(defn- sized
+  "pose scaled to size and kept on its baseline at its left edge, given
+  that a glyph scales about the middle of its advance and 0.35 em above
+  its baseline (as a :card assumes)."
+  [pose size advance]
+  (-> pose
+      (assoc :scale size)
+      (update :x + (* 0.5 (- size 1.0) advance))
+      (update :y + (* 0.35 (- size 1.0)))))
+
+(defn- dressed
+  "bases with each glyph's size and the look of every dress it wears."
+  [bases worn sizes advance light]
+  (let [looks-of (reduce (fn [m [{:keys [as glyph-ids]} w]]
+                           (reduce #(update %1 %2 (fnil conj []) [(dress/looks as) w])
+                                   m glyph-ids))
+                         {}
+                         worn)]
+    (mapv (fn [{:keys [id char] :as base}]
+            (reduce (fn [p [look w]] (dress/at-rest p look w light))
+                    (if-let [size (sizes id)]
+                      (sized base size (double (advance char)))
+                      base)
+                    (looks-of id)))
+          bases)))
 
 ;; --- camera ------------------------------------------------------------------
 
@@ -644,11 +717,19 @@
   order, then one ember per ghost younger than 600 ms, the caret and the
   camera, the :style in force at t, and the :reveal level and house
   lights. opts: {:advance fn :width-em n :aspect n :reduced-motion? b
-  :style-choice c :reveal-opts r :fills m}, aspect being the viewport's
-  width over its height, c a :ha/style-choice (default :plain), r the opts
-  for lab.reveal (default {:start-level 3}, the full stage) and m a map
-  glyph-id -> how much of the glyph a reading head has inked (see
-  lab.reading; absent or nil when nothing is being read). Births, cues and
+  :style-choice c :reveal-opts r :fills m :dress d}, aspect being the
+  viewport's width over its height, c a :ha/style-choice (default :plain),
+  r the opts for lab.reveal (default {:start-level 3}, the full stage), m
+  a map glyph-id -> how much of the glyph a reading head has inked (see
+  lab.reading; absent or nil when nothing is being read) and d the
+  draft's dress, {:placed [...] :seen {...} :light {:x :y} or nil} as
+  lab.dress places and remembers it, the light being where the pointer is
+  on the text plane, in em. From level 1 each dress eases in over 500 ms
+  from when it was first seen: a sized letter's advance is multiplied by
+  its size, so the layout, the wrapping and the caret make room for it,
+  and it is scaled on its baseline from its left edge; inks, weights and
+  the glint are those of lab.dress/at-rest. At level 0, and with no
+  :dress, frames are exactly as without it. Births, cues and
   shots are performed at the level in force when they happened (see the
   namespace doc); on reaching level 2 by use or a wand every letter then
   present peels up 0.6 em off the page and back over 700 ms; the camera
@@ -658,24 +739,32 @@
   The draft's :directions are performed as shots (a :card takes the
   phrase centre stage, a :push or :pull moves the camera), each over by
   4500 ms after its :at-ms. With reduced motion every live pose is its
-  (possibly receded) resting place, there are no embers, shots or fills, and the
+  (possibly receded, fully dressed) resting place, there are no embers, shots or fills, and the
   camera is on the current line without easing; levels still advance, but
   the lights are at the level's value at once and nothing peels."
   [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice reveal-opts fills]
+               draft-dress :dress
                :or {advance default-advance width-em 40 aspect 1.6
                     style-choice :plain reveal-opts {:start-level 3}}}]
   (let [{:keys [glyphs ghosts cues directions]} draft
         chars (mapv :char glyphs)
-        positions (layout chars advance width-em)
-        end (end-position chars positions advance)
         t (double t-ms)
         {:keys [level lights reached]} (reveal/state draft t reveal-opts)
+        worn (when (and draft-dress (>= level 1)) (wearing draft-dress t reduced-motion?))
+        sizes (if worn (eased-sizes worn glyphs) {})
+        widths (mapv (fn [{:keys [id char]}]
+                       (let [a (advance char)]
+                         (if-let [size (sizes id)] (* size a) a)))
+                     glyphs)
+        positions (layout-widths chars widths width-em)
+        end (end-position chars positions widths)
         lights (if reduced-motion? (if (>= level 2) 1.0 0.0) lights)
         level-when #(reveal/level-at reached reveal-opts %)
         start-level (level-when ##-Inf)
         current (line-progress glyphs (mapv line-of positions) t reduced-motion?)
         crawl (crawl-weight level (reached 3) (>= start-level 3) reduced-motion? t)
-        bases (mapv #(base-pose current crawl %1 %2) glyphs positions)
+        bases (cond-> (mapv #(base-pose current crawl %1 %2) glyphs positions)
+                worn (dressed worn sizes advance (:light draft-dress)))
         live (if reduced-motion?
                bases
                (let [cue-style (style-of style-choice glyphs)

@@ -353,9 +353,9 @@ within 0 to 1) and `:fill` (how much is inked, 1, within 0 to 1) reach the
 frame, each present in a pose only while it is away from rest, so a frame
 without them is the frame it always was. The reference renderer draws
 them (see Channels), so `:bloom`, `:slam`, `:hush`, `:lean`, `:shiver` and
-`:draw` show in full. A `:tint` is still dropped by `lab.pose`: nothing
-gives a letter an ink yet (dress is a later order), though the renderer
-would draw one.
+`:draw` show in full. A `:tint` a patch gives is kept (within 0 to 1) only
+on a letter that dress has given an `:ink` (see Dress); on any other it is
+dropped, there being no ink to move towards.
 
 ## Channels
 
@@ -509,8 +509,13 @@ and each mark's gesture begins as the reading head reaches it.
 - **Gestures.** Each performed mark's gesture (`marks/gesture-for`) is a
   cue on the mark's letters at the stop of the first word it touches,
   `:source :score`. It is given its natural length (`reading/natural-ms`:
-  the patch's time over the letters times the style point's tempo) or what
-  is left before the cap; given less, the cue carries a `:tempo` below 1
+  the patch's time over the letters times the tempo `lab.pose` will play
+  it at, in whole ms rounded up) or what is left before the cap. That
+  tempo is the named style's own (`style/params`; Elegant's is 1.5), not
+  its style point's (`style/from-point` gives 1.36 there): the point
+  chooses the gestures and the dress, the params time them, and `plan`
+  takes both, so no cue outlasts its grant and none is withdrawn while a
+  letter is still off rest; given less, the cue carries a `:tempo` below 1
   and `lab.pose` plays the same motion faster, stagger included; given
   less than 0.4 of it, it is not played at all.
 - **Highlights.** A message too long to pace is not dimmed and has no
@@ -538,12 +543,69 @@ and each mark's gesture begins as the reading head reaches it.
   With reduced motion Ctrl+Enter and the button do nothing (the text is
   already all there), and `:fills` is ignored by `pose/frame`.
 
-`halfahead.lab.reading` is the pure part: `plan` (text, style point, pace
--> the score, its reading and what performs), `cues`, `fills` and `over?`.
+`halfahead.lab.reading` is the pure part: `plan` (text, style point, the
+motion params in force, pace -> the score, its reading and what performs), `cues`, `fills` and `over?`.
 `window.__lab.reading()` is null, or the reading playing as data: `t0`,
 `durationMs`, `beatMs`, `stops`, `entries`, `performing` and
 `headAt(t)`, the head's place (in UTF-16 units of the text) at a time on
 the lab's clock.
+
+## Dress
+
+Gestures return to rest. **Dress** is what a mark leaves behind on its
+letters, the way bold does (docs/product/score.md, "Dress"). On the paper
+page (reveal level 1) a dressed draft looks like a page from a manuscript:
+a raised initial, a red-letter phrase, a word in gold, a whispered aside.
+
+| dress | at rest (`dress/looks`) | when the rules give it (`marks/dress-for`) |
+|---|---|---|
+| `:versal` | 1.8 times the size, on the baseline | the first letter of a message of 12 words or more that opens with a letter, flourish 0.6 or more |
+| `:gilt` | the gold ink, with a glint | the strongest stress of amount 0.7 or more (`*starred*`, CAPITALS), flourish 0.3 or more, warmth 0.5 or more |
+| `:rubric` | the signal ink | that same stress in a cool style (warmth under 0.5) |
+| `:strong` | weight +0.55 | every other stress of 0.7 or more |
+| `:whisper` | 0.85 times the size, the muted ink, weight −0.2 | an aside (in parentheses), flourish 0.2 or more |
+
+So Plain (flourish 0) leaves nothing, Elegant gilds and whispers, Coarse
+(warmth 0.15) rubricates, and Caffeinated and Drunken open a long message
+with a versal. A span is dressed once and a message wears at most 8.
+
+- **Where it comes from.** After every edit, and when the style in force
+  changes (the picker, or Auto changing its mind), the draft's dress is
+  `(score/from-text text point)`'s `:dress` for that style's point, placed
+  on the glyphs whose characters lie in each span (`dress/placed`; offsets
+  in UTF-16 units, as a reading's). The shell derives it in the frame
+  loop and hands it to `pose/frame` as `:dress {:placed :seen :light}`.
+- **Presentation, never text.** Dress adds, drops and changes no
+  character: the live poses still spell the draft, the textarea is still
+  what assistive technology reads, and a message's text is the same with
+  or without it.
+- **Easing in.** `dress/seen` remembers when each dress was first seen
+  (keyed by what it is and its first glyph), the only memory dress needs;
+  the look comes in over 500 ms on a smoothstep from then, size included,
+  and at once with reduced motion.
+- **Room.** A sized letter's advance is multiplied by its size, so the
+  layout makes room: nothing overlaps, lines wrap where they should and
+  the caret follows. The letter is scaled from its left edge on the
+  baseline. No dropped (multi-line) initials yet.
+- **On top of the dressed rest.** Dress is applied to the letter at rest,
+  before any motion, so births, cues, shots and read-backs start from and
+  return to the dressed pose, and sideways motion stays within half an em
+  of the dressed place. Inked poses carry `:ink` and `:tint` (how far from
+  the text ink towards it; see The palette).
+- **The glint.** Gold is alive without moving. A gilt letter glows 0.12
+  by itself; with the mouse over the stage, the pointer is projected onto
+  the text plane (`render/plane-point`) and each gilt letter's `:glow` is
+  0.12 + 0.5 e^(−d² / (2 × 1.2²)), d the distance in em from the pointer
+  to the letter: 0.62 under it, back to about 0.12 four em away. It
+  follows the pointer only; there is no shimmer in time, so it is kept
+  with reduced motion. A finger or a pen is no light, and when the mouse
+  leaves the page the gold is back at 0.12.
+- **Levels.** Dress shows from reveal level 1. At level 0, the familiar
+  chat box, frames are exactly as without it.
+
+`halfahead.lab.dress` is the pure part: `looks`, `placed`, `seen`, `sizes`
+and `at-rest`. `window.__lab.dress()` returns the placed dress as plain
+data (`[{as, "glyph-ids"}]`).
 
 ## Sound
 
@@ -619,7 +681,8 @@ camera target x 9.00 · y -5.40 · z 0.00
 reveal level 3 · lights 1.00
 stage grid · moment cue quake 1.0 at 12.345 s
 sound off
-reading paced · 4483 ms · beat 240 ms
+dress: gilt "the one thing" · whisper "trust me"
+reading paced · 4920 ms · beat 240 ms
 loooove -> swell 0.7 (reading)
 ```
 
@@ -642,6 +705,8 @@ loooove -> swell 0.7 (reading)
 - **stage**: the stage behind the letters and the newest moment it was
   given (`moment none` before the first); see Writing a stage.
 - **sound**: whether Sound is on.
+- **dress**: only when the draft wears any (see Dress): each dress and
+  the text it is on (its first 16 characters), in draft order.
 - **reading**: only while a read-back plays (see Reading back): `paced`
   when the head stops on every word or `highlights` when the message is
   too long, how long the reading lasts, its beat, then one line for each
@@ -751,13 +816,26 @@ head reaches it and one does after; once `reading()` is null no pose has a
 `:fill`, and 5.5 s later every letter is at rest; the reading is shorter
 at pace 400 than at 150 (started with the button); Escape leaves no fill
 in the next frame; `reading.png` is taken about 40% through a reading at
-150. All along it asserts on
+150. Then the dress step: on `/lab/?debug&reveal=1` (paper) in Elegant it
+types "This is \*the one thing\* that matters (trust me)." and waits for
+the frames to stop changing: `dress()` is a gilt on "the one thing" whose
+letters have ink gold and tint 1 and a whisper on "trust me" whose letters
+are smaller than 1 and muted, the overlay lists both, and the most common
+inked colour in the gold phrase's box is within 12/255 of
+`inkColour('gold', 0)` (`dress-paper.png`). The mouse is moved, slowly
+enough not to be a wand, onto the phrase's middle letter: every gilt
+letter's `:glow` matches the glint's curve at its own distance within
+0.03 (`dress-glint.png`), and all are back within 0.02 of 0.12 with the
+mouse in a corner. In Caffeinated a sentence of 14 words has a first
+letter at scale 1.8 and a second starting at or beyond its scaled right
+edge; in Plain nothing is dressed. The same data and colour checks pass
+on the dark stage (`?reveal=3`, `dress-dark.png`). All along it asserts on
 `window.__lab`; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
-`out/lab/`, with `specimen-dark.png`, `specimen-paper.png` and `reading.png`, and stops the server it started. It is not part of
+`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png` and `dress-dark.png`, and stops the server it started. It is not part of
 `bb test`.
 
 The status line names the backend. `halfahead.lab.render` asks three.js's
@@ -777,6 +855,6 @@ where the frame's camera target lands, and the viewport size, in CSS
 pixels),
 `project(x, y, z)` (where a point in em landed on the canvas, in CSS
 pixels), `advance(c)` (a character's advance in em), `soundLog()` and
-`bounds()` (see Sound), `reading()` (see Reading back), `specimen()` and `inkColour(ink, lights)` (see The
+`bounds()` (see Sound), `reading()` (see Reading back), `dress()` (see Dress), `specimen()` and `inkColour(ink, lights)` (see The
 specimen page; `specimen()` is null on the ordinary page) for tests and for anyone poking at
 it from the console.
