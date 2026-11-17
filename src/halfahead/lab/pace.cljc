@@ -3,13 +3,13 @@
   paced by the music, a message by the eye. A reading lays a score out in
   time for one reader, in beats of that reader's pace: a reading head
   stops on each word, a :hold stretches its stay, a mark performs when the
-  head reaches it, and nothing lasts beyond the 5 s cap. Spans are in
-  UTF-16 units. Pure, the same on both hosts."
+  head reaches it, and nothing lasts beyond the cap (5 s unless a reader
+  asked for the reading). Spans are in UTF-16 units. Pure, the same on both hosts."
   (:require [halfahead.schema :as schema]))
 
-;; The head may take this long to cross a message. The last second of the
-;; 5 s cap is left for the gesture of a mark on the last word.
-(def ^:private paced-budget-ms 4000)
+;; The head may take the cap less this long to cross a message: the last
+;; second is left for the gesture of a mark on the last word.
+(def ^:private tail-ms 1000)
 
 ;; A message too long to pace shows only this many marks, this far apart:
 ;; restraint is what makes skimming work.
@@ -77,22 +77,22 @@
 
 (defn- entry
   "A mark's entry at at-ms, cut short where it would pass the cap."
-  [natural-ms i at-ms]
-  {:mark i :at-ms at-ms :ms (min (natural-ms i) (- schema/max-performance-ms at-ms))})
+  [natural-ms cap i at-ms]
+  {:mark i :at-ms at-ms :ms (min (natural-ms i) (- cap at-ms))})
 
 (defn- end-ms [{:keys [at-ms ms]}] (+ at-ms ms))
 
 (defn- paced
   "Every word gets its stop, and every mark performs when the head reaches
   the first word it touches, unless it would be squeezed too far."
-  [marks natural-ms beat ws edges]
+  [marks natural-ms cap beat ws edges]
   (let [entries (for [i (range (count marks))
                       :let [at (some (fn [[word at]]
                                        (when (touches? (:span (marks i)) word) at))
                                      (map vector ws edges))]
                       :when (and at (<= (* least-share (natural-ms i))
-                                        (- schema/max-performance-ms at)))]
-                  (entry natural-ms i at))]
+                                        (- cap at)))]
+                  (entry natural-ms cap i at))]
     {:duration-ms (reduce max (peek edges) (map end-ms entries))
      :beat-ms beat
      :stops (mapv (fn [word at end] {:span word :at-ms at :ms (- end at)})
@@ -102,12 +102,12 @@
 (defn- highlights
   "The message is too long to hold a reader: it appears at once, and only
   its strongest marks perform, in reading order."
-  [marks natural-ms beat]
+  [marks natural-ms cap beat]
   (let [entries (->> (range (count marks))
                      (sort-by (fn [i] [(- (:amount (marks i))) i]))
                      (take highlight-count)
                      sort
-                     (map-indexed (fn [n i] (entry natural-ms i (* n highlight-gap-ms))))
+                     (map-indexed (fn [n i] (entry natural-ms cap i (* n highlight-gap-ms))))
                      vec)]
     {:duration-ms (reduce max 0 (map end-ms entries))
      :beat-ms beat
@@ -116,31 +116,37 @@
 
 (defn reading
   "A :ha/reading of a normalized score for a reader at this :ha/pace.
-  opts: {:ms-of (fn [mark] ms)}, how long each mark's gesture lasts when
-  unhurried (default 1500 for every mark).
+  opts: {:ms-of (fn [mark] ms) :cap-ms n}: how long each mark's gesture
+  lasts when unhurried (default 1500 for every mark), and the cap, the
+  longest the reading may last (default 5000, the rule for a performance
+  that starts by itself; one a reader asked for and can stop may pass up
+  to 30000).
 
   The head stays on each word for 1 beat; 1.3 for a word longer than 8
   units; plus 0.5 when the word ends with . ! ? … and 0.25 with , ; :; all
   multiplied by (1 + amount) for the strongest :hold touching the word.
 
-  When the head crosses the text within 4000 ms the reading is paced:
+  When the head crosses the text within the cap less 1000 ms the reading
+  is paced:
   :stops holds every word, contiguous from 0, and each mark has an entry
   at the stop of the first word it touches, given its natural length or
-  what is left before the 5 s cap; a mark given less than 0.4 of its
+  what is left before the cap; a mark given less than 0.4 of its
   natural length is left out. Otherwise :stops is empty and the four
   strongest marks (the earlier on a tie) enter in reading order, 400 ms
   apart. :entries are ordered by :at-ms, then mark index; :duration-ms is
   when the last stop or entry ends."
   ([score pace] (reading score pace {}))
-  ([{:keys [text marks]} pace {:keys [ms-of] :or {ms-of (constantly default-natural-ms)}}]
+  ([{:keys [text marks]} pace {:keys [ms-of cap-ms]
+                               :or {ms-of (constantly default-natural-ms)
+                                    cap-ms schema/max-performance-ms}}]
    (let [marks (vec marks)
          natural-ms (fn [i] (max 0 (round (ms-of (marks i)))))
          beat (beat-ms pace)
          ws (words text)
          edges (edges text marks beat ws)]
-     (if (<= (peek edges) paced-budget-ms)
-       (paced marks natural-ms beat ws edges)
-       (highlights marks natural-ms beat)))))
+     (if (<= (peek edges) (- cap-ms tail-ms))
+       (paced marks natural-ms cap-ms beat ws edges)
+       (highlights marks natural-ms cap-ms beat)))))
 
 (defn head
   "Where the reading head is at t-ms: a fractional index into the text, in

@@ -12,7 +12,10 @@
   those moments, with the frame, to the stage behind the letters, chosen
   with ?stage=name (lab.stage; the grid floor by default). With ?specimen
   it draws lab.specimen's type specimen on every frame instead of the
-  draft, and typing does nothing."
+  draft, and typing does nothing. Ctrl+Enter or the Read back button reads
+  the draft back at the viewer's Pace (lab.reading): while it plays the
+  shell hands the reading's cues and the head's ink to the frame, and
+  Escape, an edit or another reading ends it."
   (:require [halfahead.lab.audio :as audio]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
@@ -20,12 +23,15 @@
             [halfahead.lab.draft :as draft]
             [halfahead.lab.ink :as ink]
             [halfahead.lab.moments :as moments]
+            [halfahead.lab.pace :as pace]
             [halfahead.lab.pose :as pose]
+            [halfahead.lab.reading :as reading]
             [halfahead.lab.render :as render]
             [halfahead.lab.reveal :as reveal]
             [halfahead.lab.sound :as sound]
             [halfahead.lab.specimen :as specimen]
-            [halfahead.lab.stage :as stage]))
+            [halfahead.lab.stage :as stage]
+            [halfahead.lab.style :as style]))
 
 (defn- start-level
   "?reveal=N, 0 to 3: the reveal level the lab starts at; 0 when absent."
@@ -48,8 +54,12 @@
   ;; :sound-queue, those not yet handed to the speaker;
   ;; :reveal, lab.reveal's opts; :pointer, the last moments of mouse motion;
   ;; :moment-ctx, the last tick's {:draft :frame} that moments are counted
-  ;; from; :last-moment, the newest of them, for the overlay
+  ;; from; :last-moment, the newest of them, for the overlay;
+  ;; :pace, the viewer's words a minute; :reading, the read-back playing, if
+  ;; any: {:plan (lab.reading's) :t0 :cues (its placed cues) :voiced-to (the
+  ;; time up to which its cues' sounds were played)}
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
+         :pace 250 :reading nil
          :sound? false :sound-log [] :sound-queue []
          :reveal {:start-level (start-level) :wands [] :reached nil}
          :pointer []
@@ -61,6 +71,12 @@
 
 ;; Only this viewer's choice of Sound, on this device; never sent anywhere.
 (def ^:private sound-key "halfahead.lab.sound")
+
+;; Likewise this viewer's reading pace.
+(def ^:private pace-key "halfahead.lab.pace")
+(def ^:private slowest-pace 150)
+(def ^:private fastest-pace 450)
+(def ^:private usual-pace 250)
 
 (def ^:private style-keys
   "Ctrl+1..6, in the picker's order."
@@ -83,14 +99,24 @@
 
 (defn- aspect [] (/ (max 1 js/window.innerWidth) (max 1 js/window.innerHeight)))
 
+(defn- performed-draft
+  "The draft as it is performed: with the cues of the reading playing, if
+  any, after its own. The state's draft is never changed by a reading."
+  [{:keys [draft reading]}]
+  (cond-> draft
+    reading (update :cues into (:cues reading))))
+
 (defn- frame [r t reduced-motion?]
-  (pose/frame (draft/prune (:draft @state) t) t
-              {:advance #(render/advance r %)
-               :width-em (width-em)
-               :aspect (aspect)
-               :reduced-motion? reduced-motion?
-               :style-choice (:style-choice @state)
-               :reveal-opts (:reveal @state)}))
+  (let [{:keys [draft reading] :as s} @state]
+    (pose/frame (draft/prune (performed-draft s) t) t
+                {:advance #(render/advance r %)
+                 :width-em (width-em)
+                 :aspect (aspect)
+                 :reduced-motion? reduced-motion?
+                 :style-choice (:style-choice s)
+                 :reveal-opts (:reveal s)
+                 :fills (when reading
+                          (reading/fills (:plan reading) (:glyphs draft) (:t0 reading) t))})))
 
 (defn- specimen-opts [r]
   {:advance #(render/advance r %) :width-em (width-em) :aspect (aspect)
@@ -113,9 +139,11 @@
     (run! #(audio/play! (:sound %)) (:sound-queue old))))
 
 (defn- revealed
-  "state with the levels reached by t, never fewer than before."
+  "state with the levels reached by t, never fewer than before. A
+  reading's cues are use like any other, so a level they reach is kept
+  when the reading ends."
   [s t]
-  (assoc-in s [:reveal :reached] (reveal/levels (:draft s) t (:reveal s))))
+  (assoc-in s [:reveal :reached] (reveal/levels (performed-draft s) t (:reveal s))))
 
 (defn- level [s t] (reveal/level-at (get-in s [:reveal :reached]) (:reveal s) t))
 
@@ -134,7 +162,7 @@
          "none")))
 
 (defn- show-debug! [r t f]
-  (let [{:keys [stats cue-log direction-log style-choice sound? last-moment]}
+  (let [{:keys [stats cue-log direction-log style-choice sound? last-moment reading]}
         (swap! state #(-> %
                           (update :stats debug/record t)
                           (update :cue-log debug/cue-log [] t)
@@ -148,7 +176,10 @@
                "\n" (let [{:keys [level lights]} (:reveal f)]
                       (str "reveal level " level " · lights " (.toFixed lights 2)))
                "\n" (moment-line last-moment)
-               "\n" (if sound? "sound on" "sound off")))))
+               "\n" (if sound? "sound on" "sound off")
+               (when reading
+                 (str "\n" (debug/reading-text (:reading (:plan reading))
+                                               (map :cue (:cues reading)))))))))
 
 (defn- directed
   "state with its levels brought up to t and, from level 2, the director
@@ -195,11 +226,30 @@
              :let [[x0 y0 x1 y1] (render/glyph-box r (map index glyph-ids))]]
          (assoc s :box {:x0 x0 :y0 y0 :x1 x1 :y1 y1}))))))
 
+(defn- read-on
+  "state with the reading playing, if any, brought up to t: ended once it
+  is over or motion is reduced, and the sounds of the cues that began
+  since the last tick logged and queued."
+  [{:keys [draft reading] :as s} t reduced-motion?]
+  (cond
+    (nil? reading) s
+
+    (or reduced-motion? (reading/over? (:plan reading) (:glyphs draft) (:t0 reading) t))
+    (assoc s :reading nil)
+
+    :else
+    (let [begun (for [{:keys [cue at-ms]} (:cues reading)
+                      :when (and (< (:voiced-to reading) at-ms) (<= at-ms t))]
+                  (assoc cue :at-ms at-ms))]
+      (-> s
+          (assoc-in [:reading :voiced-to] t)
+          (voiced :cue begun)))))
+
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
-        _ (swap! state directed t)
-        _ (play-queued!)
         reduced-motion? (.-matches motion-query)
+        _ (swap! state #(-> % (read-on t reduced-motion?) (directed t)))
+        _ (play-queued!)
         f (frame r t reduced-motion?)
         ;; counted only here, once a tick, so each moment is handed on once
         ctx {:draft (:draft @state) :frame f}
@@ -226,6 +276,16 @@
              :soundLog #(clj->js (:sound-log @state))
              :stage (name (first chosen-stage))
              :stageState #(clj->js (render/stage-state r))
+             ;; the read-back playing, times on the lab's clock; nil if none
+             :reading #(when-let [{:keys [plan t0]} (:reading @state)]
+                         (let [{:keys [duration-ms beat-ms stops entries] :as rd} (:reading plan)]
+                           #js {:t0 t0
+                                :durationMs duration-ms
+                                :beatMs beat-ms
+                                :stops (clj->js stops)
+                                :entries (clj->js entries)
+                                :performing (clj->js (:performing plan))
+                                :headAt (fn [at] (pace/head rd (- at t0)))}))
              :bounds #(clj->js sound/bounds)
              :specimen #(sample-boxes r)
              ;; an ink's colour as the 0-255 triple a screenshot shows
@@ -239,11 +299,61 @@
                    (let [new (-> (draft/edit old text t cues/word-cue)
                                  (assoc :directions (:directions old [])))
                          placed (when (or debug? (:sound? s)) (debug/new-cues old new))]
-                     (cond-> (assoc s :draft new)
+                     ;; a reading is of the text as it was: an edit ends it
+                     (cond-> (assoc s :draft new :reading nil)
                        debug? (update :cue-log debug/cue-log placed t)
                        true (voiced :cue placed)
                        true (directed t)))))
     (play-queued!)))
+
+(defn- read-back!
+  "Read the draft back from now, as the style in force performs it and at
+  the viewer's pace, in place of any reading already playing. Nothing with
+  reduced motion (the text is already all there), on the specimen, or
+  before there is a message to read."
+  [^js motion-query]
+  (when-not (or specimen? (.-matches motion-query))
+    (let [t (now-ms)]
+      (swap! state
+             (fn [{:keys [draft last-frame pace] :as s}]
+               (let [plan (when last-frame
+                            (reading/plan (:text draft) (style/as-point (:style last-frame))
+                                          {:wpm pace}))]
+                 (assoc s :reading (when plan
+                                     {:plan plan
+                                      :t0 t
+                                      :cues (reading/cues plan (:glyphs draft) t)
+                                      :voiced-to (dec t)}))))))))
+
+(defn- stop-reading!
+  "End the reading playing, if any: everything is lit at once."
+  []
+  (swap! state assoc :reading nil))
+
+(defn- remembered-pace
+  "The pace this viewer chose here before, kept within the slider's range;
+  the usual one when storage is empty, blocked or throws."
+  []
+  (let [n (try (js/parseInt (.getItem js/localStorage pace-key) 10)
+               (catch :default _ js/NaN))]
+    (if (js/isNaN n) usual-pace (max slowest-pace (min fastest-pace n)))))
+
+(defn- remember-pace! [wpm]
+  (try (.setItem js/localStorage pace-key (str wpm))
+       (catch :default _ nil)))
+
+(defn- show-pace! [wpm]
+  (set! (.-value (by-id "pace")) (str wpm))
+  (set! (.-textContent (by-id "pace-value")) (str wpm)))
+
+(defn- choose-pace!
+  "Readings from now on are at wpm words a minute, remembered on this
+  device."
+  [wpm]
+  (let [wpm (max slowest-pace (min fastest-pace wpm))]
+    (swap! state assoc :pace wpm)
+    (show-pace! wpm)
+    (remember-pace! wpm)))
 
 (defn- wand!
   "The writer's wand: one level more, from now."
@@ -310,14 +420,21 @@
   [_]
   (when (:sound? @state) (audio/unlock!)))
 
-(defn- on-ctrl-key [picker input ^js e]
-  (when (and (.-ctrlKey e) (not (.-altKey e)) (not (.-metaKey e)))
+(defn- on-key [picker input motion-query ^js e]
+  (cond
+    ;; left to do whatever else it does: stopping a reading takes nothing
+    ;; from the key
+    (= "Escape" (.-key e))
+    (stop-reading!)
+
+    (and (.-ctrlKey e) (not (.-altKey e)) (not (.-metaKey e)))
     (if-let [choice (style-keys (.-key e))]
       (do (.preventDefault e)
           (choose-style! choice picker input))
-      (when (= "." (.-key e))
-        (.preventDefault e)
-        (wand!)))))
+      (case (.-key e)
+        "." (do (.preventDefault e) (wand!))
+        "Enter" (do (.preventDefault e) (read-back! motion-query))
+        nil))))
 
 (defn init! []
   (let [^js input (by-id "type")
@@ -337,7 +454,13 @@
     (set! (.-value picker) (name (:style-choice @state)))
     (.addEventListener picker "change"
                        #(choose-style! (keyword (.-value picker)) picker input))
-    (.addEventListener js/window "keydown" #(on-ctrl-key picker input %))
+    (.addEventListener js/window "keydown" #(on-key picker input motion-query %))
+    (.addEventListener (by-id "read") "click"
+                       (fn [_] (read-back! motion-query) (.focus input)))
+    (swap! state assoc :pace (remembered-pace))
+    (show-pace! (:pace @state))
+    (.addEventListener (by-id "pace") "input"
+                       #(choose-pace! (js/parseInt (.. % -target -value) 10)))
     (swap! state assoc :sound? (remembered-sound?))
     (set! (.-checked sound-box) (:sound? @state))
     (.addEventListener sound-box "change" #(choose-sound! (.-checked sound-box) input))

@@ -208,3 +208,26 @@
       (is (= "WebGL2 · 3 glyphs · style elegant" (backend-line :elegant :elegant))))
     (testing "a style inferred from the rhythm says so"
       (is (= "WebGL2 · 3 glyphs · style drunken (auto)" (backend-line :drunken :auto))))))
+
+;; --- a read-back --------------------------------------------------------------
+
+(deftest the-overlay-says-what-a-reading-performs
+  (is (= (str "reading paced · 4483 ms · beat 240 ms\n"
+              "loooove -> swell 0.7 (reading)\n"
+              "honestly -> hush 0.6 (reading)")
+         (debug/reading-text {:duration-ms 4483 :beat-ms 240.0
+                              :stops [{:span [0 1] :at-ms 0 :ms 240}]
+                              :entries [{:mark 0 :at-ms 240 :ms 4243}
+                                        {:mark 1 :at-ms 888 :ms 2040}]}
+                             [{:word "loooove" :effect :swell :intensity 0.7 :source :score}
+                              {:word "honestly" :effect :hush :intensity 0.6 :source :score}])))
+  (testing "a reading with no stops shows highlights; the beat is in whole ms"
+    (is (= "reading highlights · 2700 ms · beat 133 ms\nwow -> slam 1.0 (reading)"
+           (debug/reading-text {:duration-ms 2700 :beat-ms (/ 60000.0 450) :stops []
+                                :entries [{:mark 0 :at-ms 0 :ms 2700}]}
+                               [{:word "wow" :effect :slam :intensity 1}]))))
+  (testing "a style that performs nothing has the one line"
+    (is (= "reading paced · 2592 ms · beat 240 ms"
+           (debug/reading-text {:duration-ms 2592 :beat-ms 240.0
+                                :stops [{:span [0 1] :at-ms 0 :ms 240}] :entries []}
+                               [])))))

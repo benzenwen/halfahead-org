@@ -7,8 +7,8 @@
   style (plain births take 400 ms, ghosts 600 ms, and a cue as long as its
   gesture's patch plays, at most 2400 ms plus a 900 ms stagger, see
   lab.gestures; a style stretches or squeezes births and cues by its tempo,
-  at most 1.5, see lab.style), and within 5000 ms of a direction (see
-  lab.director) for its shot. Apart from
+  at most 1.5, see lab.style, and a cue's own :tempo only hurries it), and
+  within 5000 ms of a direction (see lab.director) for its shot. Apart from
   a :card, which takes a phrase out of the line on purpose, no letter ever
   strays more than half an em sideways from its place, so a word's motion
   stays out of its neighbours' room: effects that gather or scatter use
@@ -217,10 +217,12 @@
 (defn- cue-deltas
   "id -> [delta ...] for every glyph a cue is moving at time t: the cue's
   gesture played by lab.synth, each cue performed in the style style-of
-  gives for its firing time, which also stretches the stagger."
+  gives for its firing time, which also stretches the stagger. A cue's
+  own :tempo multiplies the style's, for the stagger, the duration and the
+  progress alike, so a hurried gesture is the same motion played faster."
   [cues t style-of]
   (reduce
-   (fn [acc {:keys [glyph-ids cue at-ms]}]
+   (fn [acc {:keys [glyph-ids cue at-ms] hurry :tempo}]
      (let [since (- t (double at-ms))
            {:keys [effect intensity]} cue
            patch (gestures/patch effect)
@@ -228,9 +230,11 @@
            total (synth/total-ms patch n)]
        ;; the slowest tempo first: finding the style in force (for :auto, a
        ;; reading of the rhythm) is only worth it for a cue that may be live
+       ;; (a cue's own :tempo is at most 1, so it only ends sooner)
        (if (or (neg? since) (>= since (* slowest-tempo total)))
          acc
-         (let [{:keys [tempo] :as ps} (style/params (style-of at-ms))
+         (let [{:keys [tempo] :as ps} (cond-> (style/params (style-of at-ms))
+                                        hurry (update :tempo * hurry))
                ms (:ms patch)
                dur (* ms tempo)]
            (reduce
@@ -624,14 +628,27 @@
     (or started-there? reduced-motion?) 1.0
     :else (smoothstep (clamp 0.0 1.0 (/ (- t t3) crawl-ease-ms)))))
 
+(defn- inked
+  "live with the reading head's ink: each pose whose glyph fills gives
+  less than 1 gets that :fill, times any a cue gave it."
+  [live fills]
+  (mapv (fn [{:keys [id] :as pose}]
+          (let [v (get fills id 1.0)]
+            (if (< v 1)
+              (assoc pose :fill (* v (:fill pose 1.0)))
+              pose)))
+        live))
+
 (defn frame
   "The :ha/glyph-frame for draft at t-ms: one live pose per glyph, in
   order, then one ember per ghost younger than 600 ms, the caret and the
   camera, the :style in force at t, and the :reveal level and house
   lights. opts: {:advance fn :width-em n :aspect n :reduced-motion? b
-  :style-choice c :reveal-opts r}, aspect being the viewport's width over
-  its height, c a :ha/style-choice (default :plain) and r the opts for
-  lab.reveal (default {:start-level 3}, the full stage). Births, cues and
+  :style-choice c :reveal-opts r :fills m}, aspect being the viewport's
+  width over its height, c a :ha/style-choice (default :plain), r the opts
+  for lab.reveal (default {:start-level 3}, the full stage) and m a map
+  glyph-id -> how much of the glyph a reading head has inked (see
+  lab.reading; absent or nil when nothing is being read). Births, cues and
   shots are performed at the level in force when they happened (see the
   namespace doc); on reaching level 2 by use or a wand every letter then
   present peels up 0.6 em off the page and back over 700 ms; the camera
@@ -641,10 +658,10 @@
   The draft's :directions are performed as shots (a :card takes the
   phrase centre stage, a :push or :pull moves the camera), each over by
   4500 ms after its :at-ms. With reduced motion every live pose is its
-  (possibly receded) resting place, there are no embers or shots, and the
+  (possibly receded) resting place, there are no embers, shots or fills, and the
   camera is on the current line without easing; levels still advance, but
   the lights are at the level's value at once and nothing peels."
-  [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice reveal-opts]
+  [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice reveal-opts fills]
                :or {advance default-advance width-em 40 aspect 1.6
                     style-choice :plain reveal-opts {:start-level 3}}}]
   (let [{:keys [glyphs ghosts cues directions]} draft
@@ -683,7 +700,8 @@
         staged (assoc draft :directions (filterv #(>= (level-when (:at-ms %)) 3) directions))
         [live cam] (if reduced-motion?
                      [live cam]
-                     (perform-shot live cam staged positions t {:advance advance :width-em width-em}))]
+                     (perform-shot live cam staged positions t {:advance advance :width-em width-em}))
+        live (if (and fills (not reduced-motion?)) (inked live fills) live)]
     {:t-ms t-ms
      :poses (into live embers)
      :caret end

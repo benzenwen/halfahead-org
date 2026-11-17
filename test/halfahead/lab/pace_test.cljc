@@ -334,3 +334,111 @@
                (== end (pace/head r (end-ms (peek stops))))
                (every? (fn [{[from _] :span :keys [at-ms]}] (== from (pace/head r at-ms)))
                        stops)))))))
+
+;; --- the cap (a read-back a reader asked for may pass a longer one) ----------
+
+(deftest the-acceptance-sentence-is-paced-at-150-with-a-30-s-cap
+  (let [s (score/from-text sentence lavish)
+        r (pace/reading s {:wpm 150} {:cap-ms 30000})]
+    (is (schema/valid? :ha/reading r))
+    (is (= (pace/words sentence) (mapv :span (:stops r))) "every word has its stop")
+    (is (= [0 400 1080 1480 2200 2600 3000 3600 4000] (mapv :at-ms (:stops r))))
+    (is (= 4600 (end-ms (peek (:stops r)))))
+    (is (= (count (:marks s)) (count (:entries r))))
+    (is (every? #(= 1500 (:ms %)) (:entries r)) "nothing is hurried")
+    (is (= 5500 (:duration-ms r)))))
+
+(deftest the-default-cap-is-5000
+  (let [s (score/from-text sentence lavish)]
+    (doseq [wpm [150 250]
+            opts [{} {:ms-of (constantly 4000)}]]
+      (is (= (pace/reading s {:wpm wpm} opts)
+             (pace/reading s {:wpm wpm} (assoc opts :cap-ms 5000)))))))
+
+(defspec the-default-cap-is-5000-for-any-score 200
+  (prop/for-all [s gen-score
+                 p gen-pace
+                 ms-of gen-ms-of]
+    (= (pace/reading s p {:ms-of ms-of})
+       (pace/reading s p {:ms-of ms-of :cap-ms 5000}))))
+
+(def ^:private gen-cap (gen/choose 5000 30000))
+
+(def ^:private gen-long-ms-of
+  "Natural lengths long enough to meet a 30 s cap."
+  (gen/fmap (fn [[base per]] (fn [m] (+ base (* per (:amount m)))))
+            (gen/tuple (gen/choose 0 20000) (gen/choose 0 20000))))
+
+(defspec a-reading-is-valid-and-within-any-cap 300
+  (prop/for-all [s gen-score
+                 p gen-pace
+                 ms-of gen-long-ms-of
+                 cap gen-cap]
+    (let [opts {:ms-of ms-of :cap-ms cap}
+          {:keys [duration-ms beat-ms stops entries] :as r} (pace/reading s p opts)]
+      (and (schema/valid? :ha/reading r)
+           (= r (pace/reading s p opts))
+           (== beat-ms (pace/beat-ms p))
+           (<= duration-ms cap)
+           (every? #(<= (end-ms %) cap) entries)
+           (= duration-ms (reduce max 0 (map end-ms (concat stops entries))))))))
+
+(defspec a-reading-is-paced-when-its-stops-leave-a-second-of-any-cap 300
+  (prop/for-all [s gen-score
+                 p gen-pace
+                 cap gen-cap]
+    (let [{:keys [stops entries]} (pace/reading s p {:cap-ms cap})
+          ;; a cap no text of 80 words reaches gives the stops themselves
+          unbounded (:stops (pace/reading s p {:cap-ms 10000000}))
+          crossing (end-ms (peek unbounded))]
+      (if (<= crossing (- cap 1000))
+        (and (= unbounded stops)
+             (= (pace/words (:text s)) (mapv :span stops))
+             (zero? (:at-ms (first stops)))
+             (every? (fn [[a b]] (= (end-ms a) (:at-ms b))) (partition 2 1 stops))
+             (every? (fn [{:keys [mark at-ms]}]
+                       (let [[from to] (:span ((:marks s) mark))]
+                         (= at-ms (:at-ms (first (filter (fn [{[a b] :span}]
+                                                           (and (< from b) (< a to)))
+                                                         stops))))))
+                     entries))
+        (and (empty? stops)
+             (<= (count entries) 4)
+             (= (take (count entries) [0 400 800 1200]) (map :at-ms entries)))))))
+
+(defspec entries-are-in-order-and-never-squeezed-too-far-under-any-cap 300
+  (prop/for-all [s gen-score
+                 p gen-pace
+                 ms-of gen-long-ms-of
+                 cap gen-cap]
+    (let [{:keys [stops entries]} (pace/reading s p {:ms-of ms-of :cap-ms cap})
+          ks (map (juxt :at-ms :mark) entries)
+          natural #(Math/round (double (ms-of ((:marks s) (:mark %)))))]
+      (and (= ks (sort ks))
+           (apply distinct? -1 (map :mark entries))
+           (every? #(< % (count (:marks s))) (map :mark entries))
+           (every? #(<= (:ms %) (natural %)) entries)
+           ;; a paced mark is given its natural length, or what the cap
+           ;; leaves when that is at least 0.4 of it
+           (or (empty? stops)
+               (every? #(and (= (:ms %) (min (natural %) (- cap (:at-ms %))))
+                             (<= (* 0.4 (natural %)) (:ms %)))
+                       entries))))))
+
+(defspec the-head-only-moves-forward-under-any-cap 300
+  (prop/for-all [s gen-score
+                 p gen-pace
+                 cap gen-cap
+                 ts (gen/vector (gen/choose -100 31000) 1 12)]
+    (let [{:keys [stops] :as r} (pace/reading s p {:cap-ms cap})
+          at (map #(pace/head r %) (sort ts))]
+      (if (empty? stops)
+        (every? nil? at)
+        (let [ws (pace/words (:text s))
+              start (first (first ws))
+              end (second (peek ws))]
+          (and (apply <= start (concat at [end]))
+               (== start (pace/head r 0))
+               (== end (pace/head r (end-ms (peek stops))))
+               (every? (fn [{[from _] :span :keys [at-ms]}] (== from (pace/head r at-ms)))
+                       stops)))))))
