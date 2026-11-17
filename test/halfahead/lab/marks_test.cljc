@@ -67,8 +67,41 @@
       "the amount stops at 1")
   (is (= [] (marks/read "too good")) "two in a row is spelling")
   (is (= [] (marks/read "1000 --- ~~~")) "only letters count")
-  (is (= [{:span [0 3] :kind :hold :amount 0.6 :warmth 0.3}] (marks/read "哈哈哈"))
+  (is (= [] (marks/read "哈哈哈")) "a word of one letter is not drawn out")
+  (is (= [{:span [0 4] :kind :hold :amount 0.6 :warmth 0.3}] (marks/read "好哈哈哈"))
       "a letter need not have a case"))
+
+(deftest a-word-of-one-letter-is-not-held
+  (doseq [text ["www" "WWW" "III" "XXX" "zzz" "ooo!" "zzz😴" "www🎉" "'www'"
+                "‘III’" "zzz-" "www2"]]
+    (is (= [] (read-kind :hold text)) text))
+  (doseq [text ["sooo" "nooo" "sooo😴" "III's" "XXX-rated"]]
+    (is (= [{:span [0 (count text)] :kind :hold :amount 0.6 :warmth 0.3}]
+           (read-kind :hold text))
+        text))
+  (doseq [text ["WWW" "III" "XXX"]]
+    (is (= [{:span [0 3] :kind :stress :amount 0.8 :energy 0.7}] (marks/read text))
+        "capitals still stress")))
+
+(deftest urls-paths-and-addresses-are-not-held
+  (doseq [text ["www.example.com" "see http://sooo.com now" "mail a@booo.com"
+                "/usr/looool/x"]]
+    (is (= [] (read-kind :hold text)) text))
+  (doseq [[text word] [["nooo." "nooo"] ["nooo: yes" "nooo"] ["sooo...good" "sooo"]]]
+    (is (= [{:span (span-of text word) :kind :hold :amount 0.6 :warmth 0.3}]
+           (read-kind :hold text))
+        "punctuation at the word's edge is not an address"))
+  (is (= [] (read-kind :hold "nooo:D"))
+      "known miss: an emoticon glued to the word reads as an address"))
+
+(deftest combining-marks-inside-a-hold
+  (let [o "o\u0301"]
+    (is (= [{:span [0 7] :kind :hold :amount 0.6 :warmth 0.3}]
+           (marks/read (str "s" o o o))))
+    (is (= [{:span [0 5] :kind :hold :amount 0.6 :warmth 0.3}]
+           (marks/read (str "so" o "o")))
+        "an accent on one of them does not break the run")
+    (is (= [] (marks/read (str o o o))) "one letter, however accented")))
 
 (deftest capitals-stress
   (is (= [{:span [3 6] :kind :stress :amount 0.8 :energy 0.7}]
@@ -156,6 +189,28 @@
   (is (= [] (marks/read "Ship it.")) "a lone sentence is not a landing")
   (is (= [] (marks/read "It works. Now we ship it.")) "four words is a sentence"))
 
+(deftest an-ellipsis-does-not-land
+  (is (= [{:span [10 12] :kind :hold :amount 0.5 :energy -0.4}]
+         (marks/read "It works. So... yes.")))
+  (let [text "one. two...\nthree"]
+    (is (= [] (read-kind :land text)))
+    (is (= [{:span (span-of text "two") :kind :hold :amount 0.5 :energy -0.4}]
+           (read-kind :hold text))))
+  (doseq [text ["Ok. I don't know... maybe" "It works. Done..." "It works. Done…"
+                "It works. Done….\"" "It works. Done...)" "It works. sooo...good"
+                "Ok. Really...?"]]
+    (is (= [] (read-kind :land text)) text))
+  (let [text "So...? Yes."]
+    (is (= [{:span (span-of text "Yes") :kind :land :amount 0.7}] (read-kind :land text))
+        "'?' after an ellipsis ends the sentence"))
+  (let [text "Hmm... ok. Ship it."]
+    (is (= [{:span (span-of text "Ship it") :kind :land :amount 0.7}]
+           (read-kind :land text))
+        "an ellipsis in an earlier sentence does not matter"))
+  (is (= [{:span [10 17] :kind :land :amount 0.7}] (marks/read "It works. Ship it.")))
+  (is (= [] (read-kind :build "one, two... three, four"))
+      "a list still stops at an ellipsis"))
+
 (deftest comma-lists-build
   (is (= [{:span [0 24] :kind :build :amount 0.6}]
          (marks/read "bigger, faster, stranger")))
@@ -188,9 +243,9 @@
       "an emoji is not a word: the last word before it is stressed")
   (let [text "🎉🎉 cafe\u0301… maybe"]
     (is (= [{:span (span-of text "cafe\u0301") :kind :hold :amount 0.5 :energy -0.4}
-            {:span (span-of text "maybe") :kind :doubt :amount 0.5}
-            {:span (span-of text "maybe") :kind :land :amount 0.7}]
-           (marks/read text)))
+            {:span (span-of text "maybe") :kind :doubt :amount 0.5}]
+           (marks/read text))
+        "trailing off into 'maybe' is not a landing")
     (is (= [5 10] (span-of text "cafe\u0301")))))
 
 ;; A run of emoji, dashes or symbols is not a word, and does not hold a
@@ -328,11 +383,11 @@
       (is (= :quake (effect-at :plain (m :hold :amount 0.1 :gesture :quake))))
       (is (= :quake (effect-at crisp-lively (m :stress :warmth 0.9 :gesture :quake)))))
     (testing "intensity"
-      (is (close-to? 0.42 (:intensity (marks/gesture-for (lavish 0.5 0.5) (m :hold)))))
-      (is (close-to? 0.6 (:intensity (marks/gesture-for (lavish 1.0 0.5) (m :hold)))))
-      (is (close-to? 0.24 (:intensity (marks/gesture-for (lavish 0.0 0.5) (m :hold)))))
+      (doseq [energy [0.5 1.0 0.0]]
+        (is (= 0.6 (:intensity (marks/gesture-for (lavish energy 0.5) (m :hold))))
+            "the amount, whatever the energy"))
       (is (= 1.0 (:intensity (marks/gesture-for (lavish 1.0 0.5) (m :hold :amount 1.0)))))
-      (is (= 0.1 (:intensity (marks/gesture-for (lavish 0.0 0.5) (m :hold :amount 0.2)))))
+      (is (= 0.2 (:intensity (marks/gesture-for (lavish 0.0 0.5) (m :hold :amount 0.2)))))
       (is (= 0.1 (:intensity (marks/gesture-for :plain (m :hold :amount 0.0 :gesture :pop))))))
     (testing "what read finds, as the named styles perform it"
       (let [ms (marks/read "I loooove this (honestly). But maybe not. Ship it!")]
@@ -341,7 +396,25 @@
         (is (= [:swell :hush :rewind :wobble :slam :slam]
                (mapv #(effect-at :caffeinated %) ms)))
         (is (= [:swell :hush nil nil :nod :glow]
-               (mapv #(effect-at :elegant %) ms)))))))
+               (mapv #(effect-at :elegant %) ms)))
+        (is (= [0.7 0.6 0.7 0.6]
+               (keep #(:intensity (marks/gesture-for :elegant %)) ms))
+            "elegant plays them at their amounts")))))
+
+(deftest calm-styles-keep-their-strength
+  (let [held {:span [0 7] :kind :hold :amount 0.7}]
+    (is (= {:effect :swell :intensity 0.7}
+           (marks/gesture-for (style/point :elegant) held)))
+    (is (= 0.7 (:intensity (marks/gesture-for (style/point :caffeinated) held))))))
+
+(deftest a-mark-on-the-threshold-performs
+  (let [at (fn [flourish amount]
+             (marks/gesture-for {:energy 0.5 :flourish flourish :softness 0.5 :warmth 0.5}
+                                {:span [0 3] :kind :hold :amount amount}))]
+    (is (some? (at 0.6 0.42)) "0.9 - 0.8 * 0.6 computes to 0.42000000000000004")
+    (is (some? (at 0.7 0.34)) "0.9 - 0.8 * 0.7 computes to 0.3400000000000001")
+    (is (nil? (at 0.6 0.419)) "the slack is not a loosening")
+    (is (nil? (at 0.7 0.339)))))
 
 ;; --- dress-for ---------------------------------------------------------------
 
@@ -494,6 +567,26 @@
                     (<= 0.1 (:intensity g))))
            (or (nil? (:gesture mark))
                (= (:gesture mark) (:effect g)))))))
+
+(defspec intensity-is-the-amount-clamped 300
+  (prop/for-all [point gen-point
+                 energy gen-unit
+                 mark gen-mark]
+    (let [g (marks/gesture-for point mark)
+          other (marks/gesture-for (assoc point :energy energy) mark)]
+      (and (or (nil? g)
+               (= (max 0.1 (min 1.0 (:amount mark))) (:intensity g)))
+           (= (:intensity g) (:intensity other))))))
+
+;; The threshold at flourish f/100 is the decimal 0.9 - 0.8 f/100, here
+;; computed exactly in thousandths before it becomes a double.
+(defspec threshold-grid-performs 400
+  (prop/for-all [f (gen/choose 0 100)]
+    (let [point {:energy 0.5 :flourish (/ f 100.0) :softness 0.5 :warmth 0.5}
+          held (fn [thousandths]
+                 {:span [0 3] :kind :hold :amount (/ thousandths 1000.0)})]
+      (and (some? (marks/gesture-for point (held (- 900 (* 8 f)))))
+           (nil? (marks/gesture-for point (held (- 899 (* 8 f)))))))))
 
 (defspec flourish-is-monotone 300
   (prop/for-all [point gen-point
