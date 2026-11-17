@@ -1,7 +1,7 @@
 (ns halfahead.lab.debug
   "The numbers behind the lab's ?debug overlay: frame timing over the last
-  second, the cues and directions an edit just placed, and short logs of
-  recent ones, so a screen recording read frame by frame ties what was
+  second, the cues and directions an edit just placed, short logs of
+  recent ones, and the dress the draft wears, so a screen recording read frame by frame ties what was
   felt to what the code did. Pure: the shell passes the clock in as now-ms. Display only;
   nothing here is logged or stored anywhere."
   (:require [clojure.string :as str]))
@@ -155,3 +155,13 @@
                   (map (fn [{:keys [word effect intensity]}]
                          (str word " -> " (name effect) " " (fixed intensity 1) " (reading)")))
                   cues)))
+
+(defn dress-text
+  "The overlay's line for the dress placed on glyphs (lab.dress/placed):
+  each dress and the text it is on, cut like a directed phrase; nil when
+  the draft wears none."
+  [placed glyphs]
+  (when (seq placed)
+    (str "dress: "
+         (str/join " · " (map #(str (name (:as %)) " \"" (phrase-text {:glyphs glyphs} %) "\"")
+                              placed)))))

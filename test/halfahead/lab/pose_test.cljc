@@ -5,6 +5,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [halfahead.lab.director :as director]
+            [halfahead.lab.dress :as dress]
             [halfahead.lab.gestures :as gestures]
             [halfahead.lab.pose :as pose]
             [halfahead.lab.reveal :as reveal]
@@ -884,3 +885,226 @@
            (if (< v 1)
              (every? #(<= 0.0 (:fill % 1.0) v) (live moving))
              (= moving (pose/frame draft dt opts)))))))
+
+;; --- dress -------------------------------------------------------------------
+
+(defn- worn
+  "Frame opts' :dress for spans of dress on draft's text, every dress
+  first seen at since."
+  ([draft dress since] (worn draft dress since nil))
+  ([draft dress since light]
+   (let [placed (dress/placed dress (:glyphs draft))]
+     {:placed placed :seen (dress/seen {} placed since) :light light})))
+
+;; long since born, so only dress moves anything
+(def ^:private hello (draft-of "Hello world" 0 []))
+
+(deftest a-versal-takes-its-room
+  (let [bare (pose/frame hello 9000 {})
+        f (pose/frame hello 9000 {:dress (worn hello [{:span [0 1] :as :versal}] 0)})
+        [h e] (live f)]
+    (is (schema/valid? :ha/glyph-frame f))
+    (is (close? 1.8 (:scale h)))
+    (is (close? (* 0.5 0.8 0.6) (:x h)) "scaled about its middle, so moved right to keep its left edge at 0")
+    (is (close? (* 0.35 0.8) (:y h)) "and up, to stay on the baseline")
+    (is (close? (* 1.8 0.6) (:x e)) "the second letter starts at the first's scaled right edge")
+    (is (<= (+ (- (:x h) (* 0.5 0.8 0.6)) (* 1.8 0.6)) (+ (:x e) 1e-9)) "so they do not overlap")
+    (is (close? (+ (:x (:caret bare)) (* 0.8 0.6)) (:x (:caret f)))
+        "the line is wider by 0.8 of the versal's advance, and the caret follows")
+    (is (= (map #(dissoc % :x) (rest (live bare))) (map #(dissoc % :x) (rest (live f))))
+        "the others are only moved along")
+    (is (every? #(close? (* 0.8 0.6) %) (map - (map :x (rest (live f))) (map :x (rest (live bare))))))))
+
+(deftest a-versal-on-the-last-letter-moves-the-caret
+  (let [d (draft-of "ab" 0 [])
+        f (pose/frame d 9000 {:dress (worn d [{:span [1 2] :as :versal}] 0)})]
+    (is (close? (+ 0.6 (* 1.8 0.6)) (:x (:caret f))))))
+
+(deftest lines-wrap-around-a-versal
+  (let [d (draft-of "aaaa bbbb" 0 [])
+        opts {:width-em 5.5}
+        ys #(mapv :y (live %))]
+    (is (every? zero? (ys (pose/frame d 9000 opts))) "9 letters of 0.6 em fit in 5.5 em")
+    (let [f (pose/frame d 9000 (assoc opts :dress (worn d [{:span [0 1] :as :versal}] 0)))]
+      (is (= [-1.35 -1.35 -1.35 -1.35] (subvec (ys f) 5)) "0.48 em more and the second word wraps")
+      (is (zero? (:x (nth (live f) 5))))
+      (is (= {:x 2.4 :y -1.35} (:caret f))))))
+
+(deftest a-whisper-narrows-its-span
+  (let [bare (live (pose/frame hello 9000 {}))
+        f (live (pose/frame hello 9000 {:dress (worn hello [{:span [6 11] :as :whisper}] 0)}))
+        left (fn [{:keys [x scale]}] (- x (* 0.5 (- scale 1.0) 0.6)))
+        ;; from the left edge of w to the right edge of d
+        span (fn [ps] (- (+ (left (ps 10)) (* (:scale (ps 10)) 0.6)) (left (ps 6))))]
+    (is (= (subvec bare 0 6) (subvec f 0 6)) "what comes before is untouched")
+    (is (close? 3.0 (span bare)) "five letters of 0.6 em")
+    (is (close? (* 0.85 3.0) (span f)))
+    (is (close? (:x (bare 6)) (left (f 6))) "it starts where it did")
+    (doseq [p (subvec f 6)]
+      (is (= :muted (:ink p)))
+      (is (== 1 (:tint p)))
+      (is (close? 0.85 (:scale p)))
+      (is (close? -0.2 (:weight p)))
+      (is (close? (* 0.35 -0.15) (:y p)) "lowered onto the baseline"))))
+
+(deftest rubric-gilt-and-strong-leave-the-layout-alone
+  (let [bare (live (pose/frame hello 9000 {}))]
+    (doseq [[as wears] {:rubric {:ink :signal :tint 1.0}
+                        :strong {:weight 0.55}
+                        :gilt {:ink :gold :tint 1.0 :glow 0.12}}]
+      (let [f (live (pose/frame hello 9000 {:dress (worn hello [{:span [6 11] :as as}] 0)}))]
+        (is (= (subvec bare 0 6) (subvec f 0 6)) (name as))
+        (is (= (mapv #(merge % wears) (subvec bare 6)) (subvec f 6)) (name as))))))
+
+(def ^:private three-dress
+  [{:span [0 1] :as :versal} {:span [1 5] :as :gilt} {:span [6 11] :as :whisper}])
+
+(deftest dress-eases-in-over-half-a-second
+  (let [at (fn [t opts] (pose/frame hello t (assoc opts :dress (worn hello three-dress 9000))))
+        bare (pose/frame hello 9000 {})]
+    (testing "when first seen nothing shows yet"
+      (let [f (at 9000 {})]
+        (is (= (live bare) (mapv #(dissoc % :ink :tint) (live f))))
+        (is (every? zero? (keep :tint (live f))))
+        (is (= (:caret bare) (:caret f)))))
+    (testing "half way: smoothstep(0.5) is 0.5"
+      (let [[h e _ _ _ _ w] (live (at 9250 {}))]
+        (is (close? 1.4 (:scale h)))
+        (is (close? (* 1.4 0.6) (:x e)))
+        (is (= :gold (:ink e)))
+        (is (close? 0.5 (:tint e)))
+        (is (close? 0.06 (:glow e)))
+        (is (close? 0.925 (:scale w)))
+        (is (close? -0.1 (:weight w)))))
+    (testing "a quarter of the way it has eased, not stepped"
+      (is (close? (+ 1.0 (* 0.8 (* 0.25 0.25 (- 3.0 0.5)))) (:scale (first (live (at 9125 {})))))))
+    (testing "from 500 ms on it is all there and still"
+      (let [full (at 9500 {})]
+        (is (close? 1.8 (:scale (first (live full)))))
+        (is (== 1 (:tint (second (live full)))))
+        (is (= (live full) (live (at 9501 {})) (live (at 60000 {}))))))
+    (testing "with reduced motion it is all there at once"
+      (is (= (live (at 9500 {})) (live (at 9000 {:reduced-motion? true})))))
+    (testing "dress nobody kept a time for is all there too"
+      (is (= (live (at 9500 {}))
+             (live (pose/frame hello 9000 {:dress (dissoc (worn hello three-dress 0) :seen)})))))))
+
+(deftest level-0-ignores-dress
+  (let [opts {:reveal-opts {:start-level 0}}
+        f (pose/frame hello 9000 opts)]
+    (is (= 0 (:level (:reveal f))))
+    (is (= f (pose/frame hello 9000 (assoc opts :dress (worn hello three-dress 0 {:x 1.0 :y 0.0})))))
+    (is (not= f (pose/frame hello 9000 {:reveal-opts {:start-level 1}
+                                        :dress (worn hello three-dress 0)}))
+        "level 1 does not")))
+
+(defspec level-0-frames-are-as-before-with-dress 200
+  (prop/for-all [[draft opts t] gen-flat-case]
+    (= (pose/frame draft t opts)
+       (pose/frame draft t (assoc opts :dress (worn draft [{:span [0 1] :as :versal}
+                                                           {:span [0 40] :as :gilt}
+                                                           {:span [1 9] :as :whisper}]
+                                                    0 {:x 1.0 :y 0.0}))))))
+
+(defspec no-dress-is-as-before 200
+  (prop/for-all [[draft opts t] gen-case]
+    (let [f (pose/frame draft t opts)]
+      (and (= f (pose/frame draft t (assoc opts :dress nil)))
+           (= f (pose/frame draft t (assoc opts :dress {:placed [] :seen {} :light {:x 1.0 :y 0.0}})))))))
+
+(deftest a-cue-performs-on-top-of-the-dressed-rest
+  (let [text "gold"
+        d (cue-on text :quake 1.0 9000)
+        opts {:dress (worn d [{:span [0 4] :as :gilt}] 0)}
+        still (live (pose/frame (assoc d :cues []) 9200 opts))
+        mid (live (pose/frame d 9200 opts))
+        after (live (pose/frame d 15000 opts))]
+    (is (not= still mid) "the cue moves the dressed letters")
+    (is (every? #(= :gold (:ink %)) mid) "in their gold")
+    (is (every? #(== 1 (:tint %)) mid))
+    (is (every? (fn [[m s]] (<= (abs (- (:x m) (:x s))) (+ 0.5 1e-9))) (map vector mid still)))
+    (is (= still after) "and they come back to the dressed rest exactly")
+    (is (every? #(close? 0.12 (:glow %)) after))))
+
+(deftest a-cue-on-a-versal-stays-near-its-dressed-place
+  (let [d (cue-on "Wow" :skitter 1.0 9000)
+        opts {:dress (worn d [{:span [0 1] :as :versal}] 0)}
+        still (live (pose/frame (assoc d :cues []) 9000 opts))]
+    (doseq [t (range 9000 12000 37)]
+      (let [ps (live (pose/frame d t opts))]
+        (is (every? (fn [[m s]] (<= (abs (- (:x m) (:x s))) (+ 0.5 1e-9))) (map vector ps still)))))
+    (is (= still (live (pose/frame d 15000 opts))))))
+
+(deftest gold-catches-the-light
+  (let [gilt [{:span [0 5] :as :gilt}]
+        glows (fn [light] (mapv :glow (live (pose/frame hello 9000 {:dress (worn hello gilt 0 light)}))))]
+    (is (every? #(close? 0.12 %) (subvec (glows nil) 0 5)) "no pointer: the gold's own glow")
+    (is (every? zero? (subvec (glows {:x 1.2 :y 0.0}) 5)) "only the gold glows")
+    (let [lit (glows {:x 1.2 :y 0.0})]
+      (is (close? 0.62 (lit 2)) "the light is on the third letter")
+      (is (close? (+ 0.12 (* 0.5 (Math/exp (/ (- (* 1.2 1.2)) 2.88)))) (lit 0)))
+      (is (> (lit 2) (lit 1) (lit 0)))
+      (is (close? (lit 1) (lit 3))))
+    (is (every? #(< (abs (- % 0.12)) 1e-6) (subvec (glows {:x 9.0 :y 6.0}) 0 5)) "far away: 0.12 again")
+    (is (close? 0.62 (nth (mapv :glow (live (pose/frame hello 9000 {:reduced-motion? true
+                                                                     :dress (worn hello gilt 0 {:x 1.2 :y 0.0})})))
+                          2))
+        "the glint is light, not motion: reduced motion keeps it")))
+
+(def ^:private gen-dressed-case
+  "A draft with up to 8 dress over it (as a score may hold), opts at
+  levels 1 to 3, a time, when the dress was seen, and a light or none."
+  (gen/fmap
+   (fn [[[draft opts t] start dress since light]]
+     [draft (assoc opts :reveal-opts {:start-level start}) t
+      (worn draft dress since light)])
+   (gen/tuple gen-case
+              (gen/choose 1 3)
+              (gen/vector (gen/fmap (fn [[from len as]] {:span [from (+ from len)] :as as})
+                                    (gen/tuple (gen/choose 0 45) (gen/choose 1 12)
+                                               (gen/elements (keys dress/looks))))
+                          0 8)
+              (gen/choose -1000 3500)
+              (gen/one-of [(gen/return nil)
+                           (gen/hash-map :x (gen/double* {:min -5 :max 45 :NaN? false :infinite? false})
+                                         :y (gen/double* {:min -20 :max 5 :NaN? false :infinite? false}))]))))
+
+(defn- edges
+  "[left right line] of a live pose at rest: a letter is scaled about the
+  middle of its advance."
+  [{:keys [x y scale char]} advance]
+  (let [a (double (advance char))
+        left (- x (* 0.5 (- scale 1.0) a))]
+    [left (+ left (* scale a)) (line-number (- y (* 0.35 (- scale 1.0))))]))
+
+(defspec dressed-frames-hold 300
+  (prop/for-all [[draft opts t wearing] gen-dressed-case
+                 reduced? gen/boolean]
+    (let [opts (assoc opts :dress wearing)
+          advance (:advance opts)
+          f (pose/frame draft t (assoc opts :reduced-motion? reduced?))
+          ;; past every birth, cue, level and ease
+          late (+ 9000 (max (latest draft) (level-latest draft opts)))
+          rested (live (pose/frame draft late opts))
+          ;; the dress all there, so the dressed place does not move
+          settled (assoc-in opts [:dress :seen] {})
+          moving (live (pose/frame draft t settled))
+          places (live (pose/frame draft t (assoc settled :reduced-motion? true)))]
+      (and (schema/valid? :ha/glyph-frame f)
+           (= (:text draft) (str/join (map :char (live f))))
+           (= (map :id (:glyphs draft)) (map :id (live f)))
+           (= (:text draft) (str/join (map :char rested)))
+           ;; at rest no letter overlaps the next on its line
+           (every? (fn [[[_ right line] [left _ line']]]
+                     (or (not= line line') (<= right (+ left 1e-9))))
+                   (partition 2 1 (map #(edges % advance) rested)))
+           ;; and it is still: the same a second later, and with reduced motion
+           (= rested (live (pose/frame draft (+ late 1000) opts)))
+           (= rested (live (pose/frame draft late (assoc opts :reduced-motion? true))))
+           ;; sideways motion stays within half an em of the dressed place
+           (every? (fn [[m p]] (<= (abs (- (:x m) (:x p))) (+ 0.5 1e-9)))
+                   (map vector moving places))
+           ;; dress is presentation: the inks are the palette's, on the
+           ;; dressed glyphs only
+           (let [dressed-ids (set (mapcat :glyph-ids (:placed wearing)))]
+             (every? #(or (nil? (:ink %)) (dressed-ids (:id %))) (live f)))))))

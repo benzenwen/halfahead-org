@@ -231,3 +231,28 @@
            (debug/reading-text {:duration-ms 2592 :beat-ms 240.0
                                 :stops [{:span [0 1] :at-ms 0 :ms 240}] :entries []}
                                [])))))
+
+;; --- dress -------------------------------------------------------------------
+
+(defn- glyphs-of [chars]
+  (vec (map-indexed (fn [i c] {:id (+ 10 i) :char (str c) :born-ms 0}) chars)))
+
+(deftest dress-text-names-each-dress-and-its-words
+  (let [text "This is *the one thing* that matters (trust me)."
+        glyphs (glyphs-of text)
+        ids (fn [word] (let [i (str/index-of text word)]
+                         (mapv #(+ 10 %) (range i (+ i (count word))))))]
+    (is (= "dress: gilt \"the one thing\" · whisper \"trust me\""
+           (debug/dress-text [{:as :gilt :glyph-ids (ids "the one thing")}
+                              {:as :whisper :glyph-ids (ids "trust me")}]
+                             glyphs)))
+    (is (= "dress: versal \"T\"" (debug/dress-text [{:as :versal :glyph-ids [10]}] glyphs)))
+    (is (= "dress: strong \"This is *the one…\""
+           (debug/dress-text [{:as :strong :glyph-ids (ids text)}] glyphs))
+        "a long phrase is cut to 16 characters"))
+  (testing "an emoji is one glyph"
+    (is (= "dress: rubric \"🚀 go\""
+           (debug/dress-text [{:as :rubric :glyph-ids [10 11 12 13]}] (glyphs-of ["🚀" " " "g" "o"])))))
+  (testing "no dress, no line"
+    (is (nil? (debug/dress-text [] (glyphs-of "plain"))))
+    (is (nil? (debug/dress-text nil [])))))

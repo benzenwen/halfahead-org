@@ -1080,7 +1080,7 @@ try {
     await page.evaluate(() => {
       const samples = [];
       window.__read = { samples };
-      const offRest = ['sx', 'sy', 'skew', 'weight', 'blur', 'fill'];
+      const offRest = ['sx', 'sy', 'skew', 'blur', 'fill'];
       let place = null, restSince = null;
       const sample = () => {
         const lab = window.__lab;
@@ -1089,11 +1089,14 @@ try {
         if (f && (!last || last.t !== f['t-ms'])) {
           const t = f['t-ms'];
           const live = f.poses.filter((p) => !p['ghost?']);
-          // where every letter stands: at rest it stops changing
-          const here = JSON.stringify(live.map((p) => [p.x, p.y]));
+          // where every letter stands and how it looks: at rest it stops
+          // changing. Elegant dresses the aside (smaller, lighter), so size,
+          // glow and weight rest wherever the dress puts them; the channels
+          // only motion uses rest at their own values.
+          const here = JSON.stringify(live.map((p) => [p.x, p.y, p.scale, p.glow, p.weight ?? 0]));
           const restful = live.length === f.poses.length && here === place && live.every((p) =>
-            p.scale === 1 && p.z === 0 && p.rx === 0 && p.ry === 0 && p.rz === 0
-            && p.opacity === 1 && p.glow === 0 && p.wobble === 0 && !offRest.some((k) => k in p));
+            p.z === 0 && p.rx === 0 && p.ry === 0 && p.rz === 0
+            && p.opacity === 1 && p.wobble === 0 && !offRest.some((k) => k in p));
           restSince = restful ? (restSince ?? last.t) : null;
           place = here;
           const r = lab.reading();
@@ -1228,12 +1231,182 @@ try {
     await page.close();
   }
 
+  begin('dress', null);
+  {
+    // Elegant (warm, some flourish) gilds the starred phrase and whispers
+    // the aside; it is too spare for a versal.
+    const dressed = 'This is *the one thing* that matters (trust me).';
+    // Caffeinated is lavish enough to open a message of 12 words or more
+    // with a versal.
+    const fourteen = 'Now we can ship the new build before lunch and have time for tea';
+    const openDressed = async (level) => {
+      const page = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+      current = page;
+      const dressUrl = new URL(url);
+      dressUrl.searchParams.set('debug', '');
+      dressUrl.searchParams.set('reveal', String(level));
+      await open(page, dressUrl.href);
+      return page;
+    };
+    // Wait on the data, not a clock: the frame spells `text`, has no ghost,
+    // and its poses have not changed for 700 ms of the lab's own time (a
+    // dress eases in over 500 ms, changing every frame as it does).
+    const atRest = (page, text) => page.waitForFunction((text) => {
+      const f = window.__lab.lastFrame();
+      const here = JSON.stringify(f.poses);
+      const w = (window.__still ??= {});
+      if (here !== w.here) { w.here = here; w.since = f['t-ms']; }
+      return f.poses.map((p) => p.char).join('') === text && f.poses.every((p) => !p['ghost?'])
+        && f['t-ms'] - w.since >= 700;
+    }, text, { timeout: 45000 })
+      .catch(() => { throw new Error(`the letters of "${text}" did not come to rest in 45 s`); });
+    const retype = async (page, style, text) => {
+      await page.selectOption('#style', style);
+      await page.fill('#type', '');
+      await page.keyboard.type(text, { delay: 30 });
+      await atRest(page, text);
+    };
+    // The frame and its dress as data: each placed dress with its poses and
+    // where its first and last letters were drawn.
+    const worn = (page) => page.evaluate(() => {
+      const lab = window.__lab;
+      const f = lab.lastFrame();
+      const byId = new Map(f.poses.filter((p) => !p['ghost?']).map((p) => [p.id, p]));
+      return {
+        level: f.reveal.level,
+        lights: f.reveal.lights,
+        poses: f.poses,
+        overlay: document.getElementById('debug').textContent,
+        gold: lab.inkColour('gold', f.reveal.lights),
+        dress: lab.dress().map((d) => {
+          const poses = d['glyph-ids'].map((id) => byId.get(id));
+          const first = poses[0], last = poses[poses.length - 1];
+          const top = lab.project(first.x, first.y + 0.9, 0);
+          const bottom = lab.project(last.x + lab.advance(last.char), last.y - 0.3, 0);
+          return { as: d.as, text: poses.map((p) => p.char).join(''), poses,
+                   box: { x0: top.x, y0: top.y, x1: bottom.x, y1: bottom.y } };
+        }),
+      };
+    });
+    const the = (state, as) => {
+      const found = state.dress.filter((d) => d.as === as);
+      if (found.length !== 1) throw new Error(`${found.length} ${as} in ${JSON.stringify(state.dress.map((d) => [d.as, d.text]))}`);
+      return found[0];
+    };
+    // (a) and (d): the gilt phrase and the whispered aside, by data and by
+    // the still's own pixels.
+    const checkDressed = async (page, lights, shot) => {
+      await retype(page, 'elegant', dressed);
+      await page.waitForTimeout(1000);
+      const state = await worn(page);
+      if (state.lights !== lights) throw new Error(`the house lights are at ${state.lights}, not ${lights}`);
+      const gilt = the(state, 'gilt'), whisper = the(state, 'whisper');
+      if (state.dress.length !== 2) throw new Error(`Elegant dresses ${JSON.stringify(state.dress.map((d) => [d.as, d.text]))}`);
+      if (gilt.text !== 'the one thing') throw new Error(`the gilt is on "${gilt.text}"`);
+      if (whisper.text !== 'trust me') throw new Error(`the whisper is on "${whisper.text}"`);
+      const ungilded = gilt.poses.find((p) => p.ink !== 'gold' || p.tint !== 1);
+      if (ungilded) throw new Error(`a letter of the gilt phrase has ink ${ungilded.ink}, tint ${ungilded.tint}`);
+      const loud = whisper.poses.find((p) => !(p.scale < 1) || p.ink !== 'muted');
+      if (loud) throw new Error(`a letter of the whisper has scale ${loud.scale}, ink ${loud.ink}`);
+      const bare = state.poses.find((p) => !gilt.poses.concat(whisper.poses).some((q) => q.id === p.id)
+        && ('ink' in p || p.scale !== 1));
+      if (bare) throw new Error(`"${bare.char}", outside any dress, has ink ${bare.ink}, scale ${bare.scale}`);
+      const line = 'dress: gilt "the one thing" · whisper "trust me"';
+      if (!state.overlay.includes(line)) throw new Error(`the overlay does not read '${line}': ${state.overlay}`);
+      const img = decodePng(await page.screenshot({ path: `${out}/${shot}.png` }));
+      const most = commonInk(img, inkMap(img, gilt.box, commonColour(img), state.gold));
+      const worst = Math.max(...most.map((v, i) => Math.abs(v - state.gold[i])));
+      if (!(worst <= 12)) throw new Error(`the gold phrase is mostly rgb(${most}), not lab.ink's gold rgb(${state.gold})`);
+      return { state, gilt, summary: `gilt "${gilt.text}" drawn rgb(${most}) (gold is rgb(${state.gold})), whisper "${whisper.text}" at scale ${whisper.poses[0].scale}` };
+    };
+
+    const paper = await openDressed(1);
+    const onPaper = await checkDressed(paper, 0, 'dress-paper');
+    if (onPaper.state.level !== 1) throw new Error(`the paper page is at reveal level ${onPaper.state.level}`);
+
+    // (b) the gold catches the pointer. The mouse goes there slowly: a
+    // quick sweep is a wand. The glow is a function of where the pointer
+    // is, so each letter is checked against the curve at its own distance.
+    let pointer = { x: 20, y: 600 };
+    const glide = async (to) => {
+      const from = pointer;
+      const n = Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / 30);
+      for (let k = 1; k <= n; k++) {
+        await paper.mouse.move(from.x + (to.x - from.x) * k / n, from.y + (to.y - from.y) * k / n);
+        await paper.waitForTimeout(40);
+      }
+      pointer = to;
+    };
+    const giltIds = onPaper.gilt.poses.map((p) => p.id);
+    const middle = onPaper.gilt.poses[Math.floor(giltIds.length / 2)];
+    const glows = () => paper.evaluate((ids) => {
+      const f = window.__lab.lastFrame();
+      return { level: f.reveal.level, glows: ids.map((id) => f.poses.find((p) => p.id === id).glow) };
+    }, giltIds);
+    await paper.mouse.move(pointer.x, pointer.y);
+    const unlit = await glows();
+    if (unlit.glows.some((g) => Math.abs(g - 0.12) > 0.02)) throw new Error(`with the pointer far away the gold glows ${unlit.glows}`);
+    await glide(await paper.evaluate((p) => {
+      const at = window.__lab.project(p.x, p.y, 0);
+      return { x: at.x, y: at.y };
+    }, middle));
+    await paper.waitForFunction((id) => window.__lab.lastFrame().poses.find((p) => p.id === id).glow > 0.4, middle.id, { timeout: 10000 })
+      .catch(() => { throw new Error('the letter under the pointer never glowed above 0.4'); });
+    const lit = await glows();
+    if (lit.level !== 1) throw new Error(`pointing at the gold took the reveal to level ${lit.level}: it was read as a wand`);
+    onPaper.gilt.poses.forEach((p, i) => {
+      const d2 = (p.x - middle.x) ** 2 + (p.y - middle.y) ** 2;
+      const want = 0.12 + 0.5 * Math.exp(-d2 / 2.88);
+      if (!(Math.abs(lit.glows[i] - want) <= 0.03))
+        throw new Error(`"${p.char}", ${Math.sqrt(d2).toFixed(2)} em from the pointer, glows ${lit.glows[i]}, not ${want.toFixed(3)}`);
+    });
+    const brightest = Math.max(...lit.glows);
+    await paper.screenshot({ path: `${out}/dress-glint.png` });
+    await glide({ x: 20, y: 600 });
+    await paper.waitForFunction((ids) => {
+      const f = window.__lab.lastFrame();
+      return ids.every((id) => Math.abs(f.poses.find((p) => p.id === id).glow - 0.12) <= 0.02);
+    }, giltIds, { timeout: 10000 })
+      .catch(() => { throw new Error('with the pointer moved away the gold did not go back to about 0.12'); });
+
+    // (c) a versal takes its room
+    await retype(paper, 'caffeinated', fourteen);
+    const opened = await paper.evaluate(() => {
+      const lab = window.__lab;
+      const [first, second] = lab.lastFrame().poses;
+      return { first, second, advance: lab.advance(first.char), dress: lab.dress() };
+    });
+    if (!opened.dress.some((d) => d.as === 'versal' && d['glyph-ids'].length === 1 && d['glyph-ids'][0] === opened.first.id))
+      throw new Error(`Caffeinated gives 14 words ${JSON.stringify(opened.dress)}: no versal on the first letter`);
+    if (!(Math.abs(opened.first.scale - 1.8) <= 0.02)) throw new Error(`the versal's scale is ${opened.first.scale}`);
+    const rightEdge = opened.first.x - 0.4 * opened.advance + 1.8 * opened.advance;
+    if (!(opened.second.x >= rightEdge - 1e-6))
+      throw new Error(`the second letter starts at ${opened.second.x} em, inside the versal, whose right edge is at ${rightEdge}`);
+
+    // (e) Plain leaves no dress at all
+    await retype(paper, 'plain', dressed);
+    const plain = await worn(paper);
+    if (plain.dress.length) throw new Error(`Plain dresses ${JSON.stringify(plain.dress.map((d) => [d.as, d.text]))}`);
+    const worn1 = plain.poses.find((p) => 'ink' in p || 'weight' in p || p.scale !== 1 || p.glow !== 0);
+    if (worn1) throw new Error(`in Plain "${worn1.char}" has ink ${worn1.ink}, weight ${worn1.weight}, scale ${worn1.scale}, glow ${worn1.glow}`);
+    if (/^dress: /m.test(plain.overlay)) throw new Error('the overlay lists dress in Plain');
+    await paper.close();
+
+    // (d) the same on the dark stage
+    const dark = await openDressed(3);
+    const onStage = await checkDressed(dark, 1, 'dress-dark');
+    await dark.close();
+    done(`on paper ${onPaper.summary}; under the pointer the gold glows up to ${brightest.toFixed(2)}, each letter on the curve for its distance, `
+      + `and 0.12 again with it away; Caffeinated's versal at scale ${opened.first.scale.toFixed(2)}, the next letter ${(opened.second.x - rightEdge).toFixed(3)} em `
+      + `past its right edge; Plain wears nothing; on the stage ${onStage.summary}`);
+  }
+
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
