@@ -110,6 +110,15 @@ docs/SCHEMA.md, and the reasons behind both in DECISIONS.md.
   phase. Keep the curve a pure function of time and assert that each
   sampled frame matches it at that frame's t (0039 shipped a peak check
   that failed at 4 fps; 0041 fixed it this way).
+- A check counts only for the path it ran on. The lab falls back from
+  WebGPU to WebGL2, and for a day every check ran on the fallback while
+  WebGPU drew nothing (0049; fixed by hand, guarded by 0057). A browser
+  check says which backend it ended on, and the path people get has a
+  check of its own: `bb lab:e2e`'s `webgpu` step inspects the pipelines
+  three.js really creates.
+- What the environment "cannot do" is a claim until it is measured. "No
+  WebGPU in headless Chromium" was repeated for twelve days and was
+  false. Write down the command and its output, or call it hearsay.
 - `bb test` runs offline: the Babashka suite over `test/**/*_test.clj[c]`,
   then every `.cljc` test again under node (so the shared core is proven
   on both hosts), then a compile of the app. Tests of shared code are

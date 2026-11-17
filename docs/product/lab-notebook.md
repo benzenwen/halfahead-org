@@ -251,3 +251,24 @@ vermilion, so gold glints pink; in Auto a reading can outlast its grant.
 On paper the gold has to be dark to stay readable (5.6:1), so it reads as
 ochre until the pointer lights it; on the dark stage it reads as gold.
 
+### The WebGPU blank page (found by Ben, 2026-11-17)
+
+Not a hypothesis, a failure. In Safari (WebGPU) the lab showed its caret
+and no letters. Order 0049 had given the new channels their own vertex
+attributes: ten vertex buffers on the glyph mesh, where WebGPU guarantees
+eight. WebGL2 has no such limit and every check ran on WebGL2.
+
+Reproduced in the container on three.js's real WebGPU path (a software
+adapter, and a shim for one field this Chromium's WebGPU rejects): the
+old build asks for 10 buffers and is refused, "Vertex buffer count (10)
+exceeds the maximum number of vertex buffers (8)"; the fixed build asks
+for 7 and is not. The fix packs opacity, glow, wobble and ghost into one
+attribute and drops an unused normal. Order 0057 then pinned the limit in
+a test, added a browser step that inspects every pipeline three.js
+creates on WebGPU, and made the start-up probe fall back to WebGL2 on a
+WebGPU error; its builder checked the guard by mutation (a temporary
+ninth buffer failed the step and was caught by the probe).
+
+Still not measured anywhere but on Ben's machine: a WebGPU pixel. The
+software device here is lost before it presents.
+
