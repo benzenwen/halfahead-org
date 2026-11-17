@@ -29,6 +29,7 @@ Open the URL it prints. Sign-in is automatic on the emulator, as Ben, and Scout 
 - `bb e2e` — the end-to-end smoke in headless Chromium.
 - `bb site` — assembles what would be deployed (the landing page and the typing lab's release build) into `out/site`; deploys nothing.
 - `bb site:e2e` — runs the lab's browser check against that release build.
+- In the typing lab, `?webgl` in the address starts the renderer on WebGL2, for a browser whose WebGPU misbehaves.
 
 ## Read first
 

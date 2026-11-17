@@ -14,7 +14,8 @@
   (:require ["@mapbox/tiny-sdf" :default TinySDF]
             ["three/tsl" :as tsl]
             ["three/webgpu" :as three]
-            [halfahead.lab.ink :as ink]))
+            [halfahead.lab.ink :as ink]
+            [halfahead.lab.instance :as instance]))
 
 ;; --- glyph atlas -------------------------------------------------------------
 ;; One R8 texture of signed distance fields, packed in shelves. Characters
@@ -129,7 +130,7 @@
   same field, in vermilion; wobble as a jelly sway of the quad's corners."
   [^js atlas-texture ^js atlas-size]
   (let [rect (tsl/attribute "glyphRect" "vec4")
-        ;; opacity, glow, wobble and ghost share one attribute: see per-instance
+        ;; opacity, glow, wobble and ghost share one attribute: see lab.instance
         ^js look (tsl/attribute "glyphLook" "vec4")
         ^js opacity (.-x look), ^js glow (.-y look)
         ^js wobble (.-z look), ^js ghost (.-w look)
@@ -173,23 +174,14 @@
 
 ;; --- instances ---------------------------------------------------------------
 
-(def ^:private per-instance
-  ;; Every attribute here is its own vertex buffer, beside position, uv and
-  ;; instanceMatrix, and WebGPU guarantees only eight vertex buffers to a
-  ;; pipeline. Ten (one per channel) drew nothing at all on WebGPU while
-  ;; WebGL2 was fine, so channels are packed: four attributes, seven
-  ;; buffers. Add a channel to a packed attribute, not as a new one.
-  {"glyphRect" 4
-   ;; opacity, glow, wobble, ghost
-   "glyphLook" 4
-   ;; weight, blur, fill; and the letter's colour, in linear light
-   "glyphShape" 3 "glyphInk" 3})
+;; The per-instance attributes are lab.instance's, which says why they are
+;; packed and has the test that counts the pipeline's vertex buffers.
 
 (defn- glyph-mesh [capacity ^js material]
   (let [^js geometry (three/PlaneGeometry. 1 1 6 6)]
     ;; nothing lights a letter, and an unused normal is still a vertex buffer
     (.deleteAttribute geometry "normal")
-    (doseq [[attr width] per-instance]
+    (doseq [{attr :name width :width} instance/attributes]
       (.setAttribute geometry attr
                      (doto (three/InstancedBufferAttribute. (js/Float32Array. (* capacity width)) width)
                        (.setUsage three/DynamicDrawUsage))))
@@ -453,7 +445,7 @@
         (.set shape #js [(:weight p 0) (:blur p 0) (:fill p 1)] (* 3 i))
         (.set inks #js [(.-r c) (.-g c) (.-b c)] (* 3 i))))
     (.set (.-value atlas-size) atlas-width (:height @atlas))
-    (doseq [k (keys per-instance)]
+    (doseq [{k :name} instance/attributes]
       (aset (.getAttribute geometry k) "needsUpdate" true))
     (aset (.-instanceMatrix mesh) "needsUpdate" true)
     (set! (.-count mesh) n)
@@ -482,6 +474,7 @@
            :mesh (atom (glyph-mesh 256 material))
            :drawn (atom 0)
            :viewport (atom nil)
+           :gpu-errors (atom [])
            :backend (if (.. renderer -backend -isWebGPUBackend) "WebGPU" "WebGL2")}]
     (set! (.-background scene) (three/Color. bg))
     (set! (.-fog scene) (three/Fog. bg 20 50))
@@ -503,22 +496,114 @@
     (.replaceWith canvas copy)
     copy))
 
+(defn gpu-errors
+  "The messages of the WebGPU errors reported since the renderer started,
+  the first five at most; empty on WebGL2."
+  [r]
+  @(:gpu-errors r))
+
+(defn- gpu-device
+  "The GPUDevice r draws with; nil on WebGL2, or when this three.js keeps
+  it somewhere else."
+  ^js [r]
+  (let [^js backend (.-backend ^js (:renderer r))
+        ^js device (when (.-isWebGPUBackend backend) (.-device backend))]
+    (when (and device (fn? (.-pushErrorScope device)) (.-queue device))
+      device)))
+
+(def ^:private error-scopes ["validation" "internal" "out-of-memory"])
+
+(def ^:private probe-timeout-ms
+  "A lost device may never finish its work; the probe does not wait on it."
+  5000)
+
+(defn- thrown-message [^js e]
+  (or (.-message e) (str e)))
+
+(defn- probe!
+  "A promise of nil when r drew probe-frame, or of the message of what went
+  wrong. WebGPU reports nearly every failure after the call that caused it
+  has returned, so on WebGPU the frame is drawn inside error scopes that
+  are read once the device has done the work, and the device being lost
+  meanwhile counts too. three.js catches a failed pipeline in an error
+  scope of its own, logs it and then skips that pipeline's draws in
+  silence (ten vertex buffers went unnoticed that way), so what three logs
+  as an error during the probe is a failure as well."
+  [r probe-frame]
+  (let [draw (fn [] (try (draw! r probe-frame []) nil
+                         (catch :default e (thrown-message e))))]
+    (if-let [device (gpu-device r)]
+      (let [logged (atom [])
+            console-fn (three/getConsoleFunction)
+            _ (three/setConsoleFunction
+               (fn [kind message]
+                 ;; an error here ends in the fallback, so it is a warning
+                 (when (= "error" kind) (swap! logged conj (str message)))
+                 (if (= "log" kind) (js/console.log message) (js/console.warn message))))
+            _ (run! #(.pushErrorScope device %) error-scopes)
+            thrown (draw)
+            scoped (-> (if thrown (js/Promise.resolve) (.onSubmittedWorkDone (.-queue device)))
+                       (.then #(js/Promise.all (into-array (map (fn [_] (.popErrorScope device))
+                                                                 error-scopes))))
+                       (.then (fn [errors]
+                                (or thrown
+                                    (some (fn [^js e] (when e (.-message e))) errors)
+                                    (first @logged))))
+                       (.catch thrown-message))
+            lost (.then (.-lost device)
+                        ;; what three logged first says more than the loss does
+                        (fn [^js info] (or (first @logged) (str "device lost: " (.-message info)))))
+            late (js/Promise. (fn [resolve]
+                                (js/setTimeout #(resolve "the device did not finish the first frame")
+                                               probe-timeout-ms)))]
+        (.finally (js/Promise.race #js [scoped lost late])
+                  #(three/setConsoleFunction console-fn)))
+      (js/Promise.resolve (draw)))))
+
+(defn- watch-gpu!
+  "Keeps what the device reports from now on: an error no scope caught, or
+  the device being lost (which raises no error of its own, and leaves the
+  canvas blank). The first is warned of in the console and told to
+  on-gpu-error, once."
+  [r ^js device on-gpu-error]
+  (let [note! (fn [message]
+                (let [[before] (swap-vals! (:gpu-errors r) #(cond-> % (< (count %) 5) (conj message)))]
+                  (when (empty? before)
+                    (js/console.warn "WebGPU reported an error; ?webgl in the address uses WebGL2:" message)
+                    (on-gpu-error r))))]
+    (.addEventListener device "uncapturederror"
+                       (fn [^js e] (note! (str (some-> (.-error e) .-message)))))
+    (.then (.-lost device)
+           (fn [^js info]
+             ;; "destroyed" is this page disposing of its own renderer
+             (when (not= "destroyed" (.-reason info))
+               (note! (str "device lost: " (.-message info))))))))
+
 (defn start!
   "A promise of a renderer drawing into canvas (or a fresh copy of it).
   WebGPU when the browser has it and it can draw a first frame, WebGL2
-  otherwise; `backend` says which. Some browsers expose a WebGPU whose
-  interface is older than this three.js expects, and only the first frame
-  shows it, hence the probe, drawn from probe-frame (an :ha/glyph-frame
-  the shell supplies, so the camera comes from the core here too). stage
-  (a lab.stage) draws behind the letters."
-  [^js canvas probe-frame stage]
-  (-> (init canvas false stage)
-      (.then (fn [r]
-               (try
-                 (draw! r probe-frame [])
-                 r
-                 (catch :default e
-                   (js/console.warn "WebGPU could not draw; falling back to WebGL2:" (.-message ^js e))
-                   ((:dispose stage) @(:stage-state r))
-                   (.dispose ^js (:renderer r))
-                   (init (fresh-canvas canvas) true stage)))))))
+  otherwise, or at once with :webgl?; `backend` says which. Some browsers
+  expose a WebGPU whose interface is older than this three.js expects, or
+  one with less room than the lab asks for, and only drawing shows it,
+  after the fact: hence the probe (see probe!), drawn from probe-frame, an
+  :ha/glyph-frame the shell supplies, so the camera comes from the core
+  here too. It must hold a letter, so that every pipeline the lab uses is
+  made during the probe. A probe that fails is warned of in the console
+  and the renderer starts over on WebGL2. What WebGPU reports after a good
+  start is kept for `gpu-errors`, and on-gpu-error is called with the
+  renderer at the first. stage (a lab.stage) draws behind the letters."
+  [^js canvas probe-frame stage {:keys [webgl? on-gpu-error]}]
+  (if webgl?
+    (init canvas true stage)
+    (-> (init canvas false stage)
+        (.then (fn [r]
+                 (.then (probe! r probe-frame)
+                        (fn [problem]
+                          (if problem
+                            (do (js/console.warn "WebGPU could not draw; falling back to WebGL2:" problem)
+                                ((:dispose stage) @(:stage-state r))
+                                (.dispose ^js (:renderer r))
+                                (init (fresh-canvas canvas) true stage))
+                            (do (when-let [device (gpu-device r)]
+                                  (watch-gpu! r device on-gpu-error))
+                                r)))))))))

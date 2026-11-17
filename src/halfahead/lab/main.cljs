@@ -18,7 +18,9 @@
   Escape, an edit or another reading ends it. It keeps the draft's dress
   (lab.dress) for the frame too: placed afresh whenever the text or the
   style in force changes, with when each was first seen, and where the
-  mouse is over the stage, which gold glints by."
+  mouse is over the stage, which gold glints by. With ?webgl the renderer
+  starts on WebGL2 without trying WebGPU, for a browser whose WebGPU
+  misbehaves."
   (:require [halfahead.lab.audio :as audio]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
@@ -26,6 +28,7 @@
             [halfahead.lab.draft :as draft]
             [halfahead.lab.dress :as dress]
             [halfahead.lab.ink :as ink]
+            [halfahead.lab.instance :as instance]
             [halfahead.lab.moments :as moments]
             [halfahead.lab.pace :as pace]
             [halfahead.lab.pose :as pose]
@@ -98,6 +101,10 @@
 ;; ?debug or ?debug=1: frame timing and recent cues drawn over the stage for
 ;; screen recordings. Without it no stats or cue log are kept at all.
 (def ^:private debug? (.has (js/URLSearchParams. js/location.search) "debug"))
+
+(def ^:private webgl?
+  "?webgl: start on WebGL2 and leave WebGPU alone."
+  (.has (js/URLSearchParams. js/location.search) "webgl"))
 
 (defn- width-em
   "The layout width that fills about 70% of the viewport at the renderer's
@@ -307,6 +314,10 @@
              :soundLog #(clj->js (:sound-log @state))
              :stage (name (first chosen-stage))
              :stageState #(clj->js (render/stage-state r))
+             ;; what WebGPU has reported since the start, and the vertex
+             ;; buffers the glyph pipeline may bind (lab.instance)
+             :gpuErrors #(clj->js (render/gpu-errors r))
+             :vertexBuffers #(instance/vertex-buffers)
              ;; the read-back playing, times on the lab's clock; nil if none
              :reading #(when-let [{:keys [plan t0]} (:reading @state)]
                          (let [{:keys [duration-ms beat-ms stops entries] :as rd} (:reading plan)]
@@ -473,6 +484,23 @@
         "Enter" (do (.preventDefault e) (read-back! motion-query))
         nil))))
 
+(defn- probe-frame
+  "The frame the renderer tries itself on before the first real one: one
+  letter and the caret, so every pipeline the lab draws with is made
+  while the renderer is still watching for failures."
+  []
+  (pose/frame (draft/edit (draft/empty-draft) "a" 0 cues/word-cue) 0
+              {:width-em (width-em) :aspect (aspect)}))
+
+(defn- show-backend!
+  "The status line: the backend in use, and, once WebGPU has reported an
+  error, the way round it."
+  [r]
+  (set! (.-textContent (by-id "status"))
+        (if (seq (render/gpu-errors r))
+          "Rendering with WebGPU, with errors: add ?webgl to the address"
+          (str "Rendering with " (render/backend r)))))
+
 (defn init! []
   (let [^js input (by-id "type")
         ^js status (by-id "status")
@@ -506,16 +534,15 @@
     (.addEventListener sound-box "change" #(choose-sound! (.-checked sound-box) input))
     (.addEventListener js/window "keydown" on-gesture)
     (.addEventListener js/window "pointerdown" on-gesture)
-    (-> (render/start! (by-id "stage")
-                       (pose/frame (draft/empty-draft) 0 {:width-em (width-em) :aspect (aspect)})
-                       (second chosen-stage))
+    (-> (render/start! (by-id "stage") (probe-frame) (second chosen-stage)
+                       {:webgl? webgl? :on-gpu-error show-backend!})
         (.then (fn [r]
                  (if specimen?
                    (specimen-loop! r)
                    (do (edit! (.-value input))
                        (loop! r motion-query)))
                  (expose! r)
-                 (set! (.-textContent status) (str "Rendering with " (render/backend r)))))
+                 (show-backend! r)))
         (.catch (fn [e]
                   (set! (.-textContent status)
                         (str "Couldn't start the 3D renderer: " (.-message ^js e)))
