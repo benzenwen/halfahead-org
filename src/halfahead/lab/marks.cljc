@@ -63,6 +63,11 @@
   [["\u0300" "\u036f"] ["\u1ab0" "\u1aff"] ["\u1dc0" "\u1dff"]
    ["\u20d0" "\u20ff"] ["\ufe20" "\ufe2f"]])
 
+;; Holds skip only the accents that sit on Latin letters: the wider ranges
+;; above hold enclosing marks and emoji variation parts, which are no part
+;; of a letter being drawn out.
+(def ^:private combining-diacriticals [["\u0300" "\u036f"]])
+
 (defn- cased?
   "Whether s is a letter with an upper and a lower case."
   [s]
@@ -184,19 +189,53 @@
   ([kind [from to] amount] (mark kind from to amount))
   ([kind from to amount] {:span [from to] :kind kind :amount amount}))
 
-(defn- longest-letter-run
-  "The length of the longest run of one letter in word, any case."
+(defn- base-units
+  "The word's units in lower case, without the combining marks that sit on
+  its letters, so an accented letter repeats like a bare one."
   [word]
-  (->> (map (comp str/lower-case str) word)
-       (partition-by identity)
+  (->> (map str word)
+       (remove #(within? combining-diacriticals %))
+       (map str/lower-case)))
+
+(defn- longest-letter-run
+  "The length of the longest run of one letter among the base units."
+  [base]
+  (->> (partition-by identity base)
        (filter (comp letter? first))
        (map count)
        (reduce max 0)))
 
-(defn- elongations [ws]
-  (for [{:keys [from to text]} ws
-        :let [run (longest-letter-run text)]
-        :when (<= 3 run)]
+(def ^:private address-joints #{"." "/" "@" ":"})
+
+(defn- in-address?
+  "Whether the word is part of a URL, a path or an address: the run between
+  whitespace around it has a . / @ or : with a letter or digit directly on
+  both sides. The run is looked at, not the word, because '.' and ':' end
+  words. Punctuation at a word's edge ('nooo.', 'sooo...good') is not a
+  joint."
+  [units {:keys [from to]}]
+  (let [n (count units)
+        lo (loop [i from]
+             (if (and (pos? i) (not (whitespace (units (dec i))))) (recur (dec i)) i))
+        hi (loop [i to]
+             (if (and (< i n) (not (whitespace (units i)))) (recur (inc i)) i))
+        alnum? #(or (letter? %) (within? digits %))]
+    (some #(and (address-joints (units %))
+                (alnum? (units (dec %)))
+                (alnum? (units (inc %))))
+          (range (inc lo) (dec hi)))))
+
+(defn- elongations [units ws]
+  (for [{:keys [from to text] :as w} ws
+        :let [base (base-units text)
+              run (longest-letter-run base)]
+        :when (and (<= 3 run)
+                   ;; 'www', 'III' and 'zzz' are spelt that way, not drawn
+                   ;; out: a hold needs a second letter to be drawn out of.
+                   ;; Letters only, so an emoji or a digit beside the word
+                   ;; does not make it one.
+                   (<= 2 (count (distinct (filter letter? base))))
+                   (not (in-address? units w)))]
     ;; 0.5 + 0.1 (run - 2), as one division so 'loooove' is 0.7 exactly
     (assoc (mark :hold from to (min 1.0 (/ (+ 3 run) 10.0))) :warmth 0.3)))
 
@@ -279,9 +318,25 @@
 (defn- over-words [kind ws amount]
   (mark kind (:from (first ws)) (:to (peek ws)) amount))
 
-(defn- landing [ss]
-  (let [{:keys [words]} (peek ss)]
-    (when (and (<= 2 (count ss)) (<= (count words) 3))
+(defn- trailing-on?
+  "Whether a clause's closing run is an ellipsis the sentence trails on
+  past: '?' or '!' after it ends the sentence all the same."
+  [end]
+  (and (or (str/includes? end "…") (str/includes? end "..."))
+       (not (#{"?" "!"} (subs end (dec (count end)))))))
+
+(defn- landing
+  "A short last sentence lands, unless it trails off: an ellipsis anywhere
+  from its first word to the end of the text (inside it, at its end, or
+  glued to a word as in 'sooo...good') is the opposite of landing."
+  [units cs]
+  (let [ss (sentences (map #(cond-> % (trailing-on? (:end %)) (assoc :continues? true))
+                           cs))
+        {:keys [words]} (peek ss)]
+    (when (and (<= 2 (count ss))
+               (<= (count words) 3)
+               (not-any? #(trails-off? units %)
+                         (range (:from (first words)) (count units))))
       [(over-words :land words 0.7)])))
 
 (defn- comma-items
@@ -335,7 +390,7 @@
         ws (words text units)
         cs (clauses text units ws)
         ss (sentences cs)]
-    (->> (concat (elongations ws)
+    (->> (concat (elongations units ws)
                  (capitals units ws)
                  (asterisks units)
                  (parentheses units)
@@ -344,7 +399,12 @@
                  (sentence-ends cs)
                  (phrases units ws :turn turning-words)
                  (quotations units)
-                 (landing ss)
+                 ;; Landing joins sentences itself, from the clauses: to it
+                 ;; an ellipsis trails on into the same sentence, so 'So...
+                 ;; yes.' is one sentence that does not land. A list must
+                 ;; still stop at an ellipsis, so builds keep the sentences
+                 ;; every closing run ends.
+                 (landing units cs)
                  (builds units ss))
          (sort-by strongest-first)
          (reduce (fn [kept m]
@@ -383,12 +443,17 @@
   "{:effect e :intensity k} for a mark as a style (a :ha/style-point, or a
   :ha/style) performs it, or nil when the style is too spare to: the more
   flourish, the fainter a mark it still performs. A mark that names its own
-  :gesture is always performed, with that gesture."
+  :gesture is always performed, with that gesture. The intensity is the
+  mark's amount, whatever the style's energy: the style's tempo and
+  amplitude already slow and shrink a calm style's motion, and scaling
+  here as well would halve it twice."
   [point {:keys [amount gesture] :as mark}]
-  (let [{:keys [energy flourish] :as point} (style/as-point point)]
-    (when (or gesture (>= amount (- 0.9 (* 0.8 flourish))))
+  (let [{:keys [flourish] :as point} (style/as-point point)]
+    ;; The threshold can round up (0.42000000000000004 at flourish 0.6); the
+    ;; slack lets a mark exactly on it perform.
+    (when (or gesture (>= amount (- 0.9 (* 0.8 flourish) 1e-9)))
       {:effect (or gesture (effect point mark))
-       :intensity (max 0.1 (min 1.0 (* amount (+ 0.7 (* 0.6 (- energy 0.5))))))})))
+       :intensity (max 0.1 (min 1.0 amount))})))
 
 (def ^:private max-dress 8)
 
