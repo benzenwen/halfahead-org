@@ -5,7 +5,9 @@
   into what a letter at rest looks like: its size, its ink, its weight,
   and for gold a glint that brightens near a light (the pointer), as gold
   leaf caught a candle. Dress is presentation, never text: it adds, drops
-  and changes no character. Offsets are in UTF-16 units, a glyph's being
+  and changes no character. The two asterisks that enclose a dressed
+  stress have done their work once it is dressed: they are that dress's
+  markers, quietened by whoever draws and never dropped. Offsets are in UTF-16 units, a glyph's being
   the lengths of the glyphs before it. Pure, the same on both hosts.")
 
 (def looks
@@ -27,17 +29,37 @@
                   [0 []]
                   glyphs)))
 
+(def ^:private stress
+  "The dress a stress wears: what asterisks ask for."
+  #{:gilt :rubric :strong})
+
+(defn- markers
+  "[id-before id-after] when the glyph ending at from and the glyph
+  starting at to (at being offsets) are both an asterisk; else nil."
+  [chars at from to]
+  (let [before (some (fn [[id _ b]] (when (= b from) id)) at)
+        after (some (fn [[id a _]] (when (= a to) id)) at)]
+    (when (and before after (= "*" (chars before) (chars after)))
+      [before after])))
+
 (defn placed
   "[{:as kw :glyph-ids [id ...]} ...]: each :ha/dress of dress on the
   glyphs whose characters lie in its span, in the order given. A dress
-  whose span holds no glyph is left out."
+  whose span holds no glyph is left out. A :gilt, :rubric or :strong
+  dress whose span is enclosed by asterisks (the glyph just before it and
+  the glyph just after it are each '*') also has :markers [id-before
+  id-after]: the two glyphs that asked for it, which rest whispered while
+  it is worn (lab.pose)."
   [dress glyphs]
-  (let [at (offsets glyphs)]
+  (let [at (offsets glyphs)
+        chars (into {} (map (juxt :id :char)) glyphs)]
     (into []
           (keep (fn [{:keys [as] [from to] :span}]
-                  (let [ids (into [] (keep (fn [[id a b]] (when (and (<= from a) (<= b to)) id))) at)]
+                  (let [ids (into [] (keep (fn [[id a b]] (when (and (<= from a) (<= b to)) id))) at)
+                        around (when (stress as) (markers chars at from to))]
                     (when (seq ids)
-                      {:as as :glyph-ids ids}))))
+                      (cond-> {:as as :glyph-ids ids}
+                        around (assoc :markers around))))))
           dress)))
 
 (defn seen

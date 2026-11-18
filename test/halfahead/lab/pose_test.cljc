@@ -1109,6 +1109,143 @@
            (let [dressed-ids (set (mapcat :glyph-ids (:placed wearing)))]
              (every? #(or (nil? (:ink %)) (dressed-ids (:id %))) (live f)))))))
 
+;; --- the asterisks of a dressed stress recede (order 0060) --------------------
+
+(def ^:private starred (draft-of "*this* is great!" 0 []))
+(def ^:private gilt-this [{:span [1 5] :as :gilt}])
+
+(deftest the-asterisks-of-a-dressed-stress-rest-whispered
+  (doseq [level [1 2 3]]
+    (testing (str "level " level)
+      (let [opts {:reveal-opts {:start-level level}}
+            f (pose/frame starred 9000 (assoc opts :dress (worn starred gilt-this 0)))
+            ps (live f)]
+        (is (= [0 5] (:markers (first (:placed (worn starred gilt-this 0))))))
+        (is (schema/valid? :ha/glyph-frame f))
+        (is (= "*this* is great!" (str/join (map :char ps))) "no character is dropped")
+        (doseq [p [(ps 0) (ps 5)]]
+          (is (= "*" (:char p)))
+          (is (close? 0.85 (:scale p)))
+          (is (= :muted (:ink p)))
+          (is (== 1 (:tint p)))
+          (is (close? -0.2 (:weight p))))
+        (doseq [p (subvec ps 1 5)]
+          (is (= :gold (:ink p)))
+          (is (== 1 (:scale p))))
+        (doseq [p (subvec ps 6)]
+          (is (nil? (:ink p)))
+          (is (nil? (:weight p)))
+          (is (== 1 (:scale p))))
+        (is (close? (* 0.85 0.6) (:x (ps 1)))
+            "the layout gives a quietened asterisk 0.85 of its room")))))
+
+(deftest undressed-asterisks-are-ordinary-letters
+  (let [bare (pose/frame starred 9000 {})]
+    (is (every? #(and (nil? (:ink %)) (nil? (:weight %)) (== 1 (:scale %))) (live bare)))
+    (is (= bare (pose/frame starred 9000 {:dress (worn starred [] 0)}))
+        "a style too spare to dress the stress")
+    (let [flat {:reveal-opts {:start-level 0}}]
+      (is (= (pose/frame starred 9000 flat)
+             (pose/frame starred 9000 (assoc flat :dress (worn starred gilt-this 0))))
+          "level 0"))
+    (is (= bare (pose/frame starred 9000 {:dress (update (worn starred gilt-this 0) :placed
+                                                         (partial filterv (constantly false)))})))
+    (let [caps (draft-of "*THIS is great!" 0 [])
+          ps (live (pose/frame caps 9000 {:dress (worn caps [{:span [1 5] :as :gilt}] 0)}))]
+      (is (= (first (live (pose/frame caps 9000 {}))) (first ps))
+          "one asterisk alone marks nothing"))))
+
+(deftest markers-weigh-what-their-dress-weighs
+  (let [at (fn [t opts] (live (pose/frame starred t (assoc opts :dress (worn starred gilt-this 9000)))))]
+    (testing "first seen: nothing shows"
+      (let [ps (at 9000 {})]
+        (is (== 1 (:scale (ps 0))))
+        (is (zero? (:tint (ps 0))))
+        (is (nil? (:weight (ps 0))))))
+    (testing "half way with the gold"
+      (let [ps (at 9250 {})]
+        (is (close? 0.5 (:tint (ps 1))))
+        (doseq [i [0 5]]
+          (is (close? (:tint (ps 1)) (:tint (ps i))))
+          (is (close? 0.925 (:scale (ps i))))
+          (is (close? -0.1 (:weight (ps i)))))))
+    (testing "a quarter of the way"
+      (let [ps (at 9125 {})
+            w (* 0.25 0.25 (- 3.0 0.5))]
+        (is (close? w (:tint (ps 1))))
+        (is (close? w (:tint (ps 5))))
+        (is (close? (+ 1.0 (* w -0.15)) (:scale (ps 5))))))
+    (testing "all there from 500 ms, and at once with reduced motion"
+      (is (close? 0.85 (:scale ((at 9500 {}) 0))))
+      (is (= (at 9500 {}) (at 60000 {}) (at 9000 {:reduced-motion? true}))))))
+
+(deftest a-marker-inside-another-dress-keeps-it
+  (let [d (draft-of "*a*" 0 [])
+        f (fn [placed] (live (pose/frame d 9000 {:dress {:placed placed :seen {} :light nil}})))
+        gilt {:as :gilt :glyph-ids [1] :markers [0 2]}
+        ps (f [gilt {:as :versal :glyph-ids [0]}])]
+    (is (close? 1.8 (:scale (ps 0))))
+    (is (nil? (:ink (ps 0))) "the versal's, not muted")
+    (is (nil? (:weight (ps 0))))
+    (is (= :muted (:ink (ps 2))) "the other marker still recedes")
+    (is (close? 0.85 (:scale (ps 2))))
+    (is (= ps (f [{:as :versal :glyph-ids [0]} gilt])) "whichever comes first")
+    (testing "a marker two stresses share recedes once"
+      (let [d (draft-of "*a*b*" 0 [])
+            ps (live (pose/frame d 9000 {:dress {:placed [{:as :gilt :glyph-ids [1] :markers [0 2]}
+                                                          {:as :strong :glyph-ids [3] :markers [2 4]}]
+                                                 :seen {} :light nil}}))]
+        (is (= [-0.2 -0.2 -0.2] (mapv #(:weight (ps %)) [0 2 4])))
+        (is (every? #(close? 0.85 (:scale (ps %))) [0 2 4]))))))
+
+(def ^:private gen-starred-case
+  "A draft holding a starred word, a time, a level, when the dress was
+  seen, and the stress's dress."
+  (gen/fmap
+   (fn [[before word after born t level since as]]
+     (let [text (str before "*" word "*" after)
+           from (inc (count before))
+           draft (draft-of text born [])]
+       [draft t level (worn draft [{:span [from (+ from (count word))] :as as}] since)]))
+   (gen/tuple (gen/elements ["" "a " "so\n" "(x) "])
+              (gen/elements ["a" "this" "one thing"])
+              (gen/elements ["" " b" "!" "*"])
+              (gen/choose 0 1000)
+              (gen/choose 0 6000)
+              (gen/choose 0 3)
+              (gen/choose -1000 6000)
+              (gen/elements [:gilt :rubric :strong :whisper :versal]))))
+
+(defspec markers-recede-and-drop-nothing 200
+  (prop/for-all [[draft t level wearing] gen-starred-case
+                 reduced? gen/boolean]
+    (let [opts {:reveal-opts {:start-level level} :reduced-motion? reduced?}
+          f (pose/frame draft t (assoc opts :dress wearing))
+          late (pose/frame draft 20000 (assoc opts :dress wearing))
+          level (:level (:reveal f))
+          [{:keys [as glyph-ids markers]}] (:placed wearing)
+          allowed (set (concat glyph-ids markers))
+          by-id (into {} (map (juxt :id identity)) (live f))
+          rested (into {} (map (juxt :id identity)) (live late))]
+      (and (schema/valid? :ha/glyph-frame f)
+           (= (:text draft) (str/join (map :char (live f))))
+           (= (some? markers) (contains? #{:gilt :rubric :strong} as))
+           (every? #(or (nil? (:ink %)) (allowed (:id %))) (live f))
+           (or (pos? level) (= f (pose/frame draft t opts)))
+           (or (zero? (:level (:reveal late)))
+               (every? (fn [id]
+                       (let [p (rested id)]
+                         (and (= "*" (:char p))
+                              (= :muted (:ink p))
+                              (== 1 (:tint p))
+                              (close? 0.85 (:scale p))
+                                (close? -0.2 (:weight p)))))
+                       markers))
+           ;; a marker's tint is its dress's, whatever the moment
+           (or (zero? level)
+               (not (#{:gilt :rubric} as))
+               (every? #(close? (:tint (by-id (first glyph-ids))) (:tint (by-id %))) markers))))))
+
 ;; --- a style point as the choice (order 0051) ---------------------------------
 
 (def ^:private gen-unit
