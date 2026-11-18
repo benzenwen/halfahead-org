@@ -88,6 +88,37 @@
          (try (learn/choose (learn/start) :c)
               (catch #?(:clj Exception :cljs :default) e (:type (ex-data e)))))))
 
+(deftest turn-asks-the-other-way
+  (let [s (learn/start)]
+    (is (= 0.75 (:energy (:b (learn/pair s)))))
+    (is (= 0.25 (:energy (:b (learn/pair (learn/turn s))))))
+    (testing "nothing else changes: no flick counted, no miss counted"
+      (is (= (assoc-in s [:dir :energy] -1) (learn/turn s)))
+      (let [later (-> s (learn/choose :a) (learn/choose :b) (learn/choose :a))]
+        (is (= :warmth (:axis later)))
+        (is (= (update-in later [:dir :warmth] -) (learn/turn later)))))
+    (is (= s (learn/turn (learn/turn s))))
+    (testing "at a wall only one direction moves, so the pair is the same"
+      (let [wall (learn/start (assoc centre :energy 1.0))]
+        (is (= (learn/pair wall) (learn/pair (learn/turn wall))))
+        (is (= 0.75 (:energy (:b (learn/pair wall)))))))))
+
+(deftest step-is-the-next-pairs-step
+  (is (= 0.25 (learn/step (learn/start))))
+  (testing "two refusals on one axis halve it"
+    (let [back #(nth (iterate learn/skip %) 3)
+          s (-> (learn/start) (learn/choose :a) back (learn/choose :a) back)]
+      (is (= :energy (:axis s)))
+      (is (= 0.125 (learn/step s)))
+      (is (= 0.25 (learn/step (learn/skip s))))
+      (testing "and it is how far apart the pair is"
+        (let [{:keys [a b]} (learn/pair s)]
+          (is (= (learn/step s) (abs (- (:energy b) (:energy a)))))))))
+  (testing "it follows the axis asked about"
+    (let [s (assoc-in (learn/start) [:step :flourish] 0.0625)]
+      (is (= 0.25 (learn/step s)))
+      (is (= 0.0625 (learn/step (learn/skip s)))))))
+
 (deftest skip-asks-the-next-axis
   (is (= (assoc (learn/start) :axis :flourish) (learn/skip (learn/start))))
   (testing "four skips come back round"
