@@ -2,8 +2,12 @@
  ;; 2026-11-18: trimmed before its first run (no debug line, no replay
  ;; key), after the board showed what a page-sized order costs.
  ;; Its first run was cut short by a container restart two minutes into
- ;; the build, after the plan ($1.66). The plan station is replaced by a
- ;; replay of that plan (:engines), so it is not paid for twice.
+ ;; the build, after the plan ($1.66); its second by another restart 22
+ ;; minutes into the build, with all six files written. That work
+ ;; survived on disk and passes `bb test` and `bb lab:e2e` (33 steps), so
+ ;; this third run is a resume, as the board's was: the builder applies
+ ;; the saved diff and the review station reads it. The plan station is
+ ;; replaced by the foreman's note (:engines).
  :title "Lab flick, the page: 'Which?' reads your line back two ways and your style moves toward the one you pick"
  :lupa/deps #{"0053-lab-flick" "0059-lab-flick-turn"}
  :lupa/area :lab
@@ -19,7 +23,15 @@
          "src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"]
  :engines {:plan {:engine :exec
                   :cmd ["cat" "../../../out/foreman/0058-plan.md"]}}
- :design "lab.main and index.html: a 'Which?' button in the bar and Ctrl+/
+ :design "RESUME (2026-11-18). The last run built all of what follows
+          before the container restarted under it. Its whole diff is
+          saved at ../../../out/foreman/0058-lab-flick-ui.patch, relative
+          to the worktree's root; on it the foreman ran `bb test` (no
+          failures) and `bb lab:e2e` (33 steps, all passing, on WebGL2).
+          To build is to apply that patch (`git apply`), run `bb test`,
+          and change nothing that works. The rest of this design says
+          what the patch holds and what the review judges it against.
+          lab.main and index.html: a 'Which?' button in the bar and Ctrl+/
             ask for one exam on the current text (the button is disabled
             with no text or with reduced motion).
             The learner's state (lab.learn) is kept in the page and
