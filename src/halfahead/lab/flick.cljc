@@ -124,3 +124,14 @@
   "The learn state after the writer chooses :a or :b of the offer."
   [offer choice]
   (learn/choose (:state offer) choice))
+
+(defn resume
+  "The learn state the next exam starts from, for a writer whose style in
+  force sits at point: state when it is there too, else a learner begun
+  again at point (as with no state yet). A writer who has since picked
+  another style, or moved the XY pad, is examined from where they are,
+  not from where the last exam left them."
+  [state point]
+  (if (and state (= point (:point state)))
+    state
+    (learn/start point)))

@@ -265,7 +265,11 @@ Elegant, Caffeinated, Drunken, Coarse, and Mine for the board's point)
 chooses. Ctrl+1 to Ctrl+6 choose in
 the same order. Either way the textarea keeps (or gets back) the focus. On
 some systems the browser keeps Ctrl+digit for switching tabs; the picker
-always works.
+always works. The style last picked is remembered on the device
+(`localStorage`, key `halfahead.lab.style`), Mine included, so a reload
+starts in it; Auto when nothing, or anything else, is stored. Only the
+writer's own picks are remembered (the picker, Ctrl+1 to Ctrl+6, the XY
+pad, a flick): the tour's style steps are not.
 
 Every frame names the style in force at its time (`:style`), unless the
 choice is a style point (see The board), which has no name.
@@ -366,9 +370,9 @@ and warmth stay where the last named style left them; Plain's at first).
 Picking a named style, by the picker or Ctrl+1 to Ctrl+6, moves the dot
 to where that style sits (`style/point`). The point is remembered on the
 device (`halfahead.lab.board.point`, read back only if it is a valid
-`:ha/style-point`); the choice of style is not, so a reload starts on
-Auto with the dot where it was. The tour's own style steps leave the dot
-alone. Sound has no voice for a point yet: under Mine it sounds as Plain.
+`:ha/style-point`), and so is the style picked (see Styles), so a reload
+starts in Mine with the dot where it was. The tour's own style steps
+leave the dot alone. Sound has no voice for a point yet: under Mine it sounds as Plain.
 
 **Narrow screens.** From 900 px up the board is a column in the right
 margin, beside the text (which fills the middle 70%). Below that it
@@ -379,6 +383,61 @@ the debug panel and the tour's caption move up above it.
 `window.__lab.board()` returns `{visible, point, target}`;
 `__lab.cues()` the draft's placed cues and `__lab.textBox()` the box in
 CSS pixels around the live letters as last drawn.
+
+## The flick
+
+docs/product/score.md, "How people and agents drive it", and H5 and H8
+in docs/product/lab-notebook.md: nobody tunes four axes, but anybody can
+say which of two readings they like better. The **Which?** button in the
+bar, or Ctrl+/, asks for one exam on the text as it stands. The lab
+never starts one by itself. The button is disabled with no text and with
+reduced motion, where there would be nothing to compare.
+
+**What it asks.** The lab reads the line back twice through the
+read-back's own path (see Reading back): as **A**, the style in force
+now, then as **B**, one step away along one axis, each at the viewer's
+Pace and in its own point, dress included. A chip under the bar reads
+"A" while A plays, "B" while B plays, then "A or B?" with two buttons.
+ArrowLeft or the A button chooses A, ArrowRight or the B button chooses
+B; the arrows choose nothing before both have played, and while an exam
+runs they move neither the caret nor the XY pad. The text cannot be
+edited while an exam runs (the textarea is read-only, and still holds
+all of it). Escape at any time calls the exam off and changes nothing:
+the style, the dress and what is stored are as they were. So does any
+other command: a read-back, a pick of a style, the XY pad, a pad of the
+board, the tour.
+
+**What a choice does.** The learner (`halfahead.lab.learn`) moves toward
+the reading chosen (`flick/decide`), and the style becomes **Mine** at
+the learner's point: the picker shows it and the board's XY dot sits
+there. The learner's state is kept in the page and remembered on the
+device (`localStorage`, key `halfahead.lab.learn`, read back only if it
+has the learner's shape); nothing leaves the device. The learner's
+point is the lab's style point: an exam starts from the style in force
+when it is asked for (a named style's point, the one Auto reads at that
+moment, or the board's under Mine), and `flick/resume` carries the
+learner on if that is where it already is, and otherwise starts it again
+there. Moving the XY pad or picking another style therefore starts the
+learning afresh from that style.
+
+**How it ends.** `flick/offer` never offers a pair that would look the
+same, and an axis whose step has fallen below 1/16 is finished. When no
+axis has a pair left to tell apart on this line, the chip reads "Nothing
+more to tell apart on this line" for two seconds and nothing else
+happens. Another line may still have something to ask.
+
+**What it can learn from a line** (H8). Energy (speed) and softness
+(bounce) show on any line, since every letter moves by them. Flourish
+shows only where the line gives it something to do: a mark to perform or
+a phrase to dress; on a bare line it is not asked. Warmth is not learned
+yet: in a style it decides one thing, whether a dressed stress is gold
+or red, so its pair is almost never one that can be told apart.
+
+The chip is a polite live region, always in the page, so a screen reader
+hears "A", "B", "A or B?". `window.__lab.flick()` returns `{phase, axis,
+pointA, pointB, flicks, point}`: `phase` is `"a"`, `"gap"`, `"b"` or
+`"choose"`, and null with the offer's fields when no exam runs; `flicks`
+and `point` are the learner's (0 and null before any choice).
 
 ## Gestures and patches
 
@@ -896,6 +955,9 @@ a real button and Pace a labelled range input; a reading never changes
 the textarea's text, so assistive technology has all of it throughout.
 The tour's captions are a polite live region, Stop is a real button, and
 the tour does not run with reduced motion (see The tour). The board's
+flick's chip is a polite live region too, its choices real buttons as
+well as arrow keys, and no exam runs with reduced motion (see The
+flick). The board's
 pads are real buttons in a labelled toolbar, each named and reachable by
 Tab, pressed by Enter or Space; the XY pad is a focusable slider with a
 name and value text, moved by the arrow keys; all have a visible focus
@@ -1124,13 +1186,28 @@ it, Drunken is back. Started from the button over a typed "my own
 words", the tour plays on an empty box, and a Shift in scene 2 gives the
 draft back, focused, the caret at its end; started again and left to
 finish, it gives it back again. With reduced motion emulated, `?tour` starts no
-tour and the caption says why. All along it asserts on
+tour and the caption says why. The `flick` step, on a fresh page at
+`?reveal=3`, follows `__lab.flick()` and the chip, never the clock, and
+prints its backend. The picker shows Auto and Which? is disabled; with
+"I loooove this (honestly). But maybe not. Ship it!" typed and at rest
+nothing has started. Ctrl+/: the phase goes a, b, choose, with the chip
+reading "A", "B", "A or B?", a reading playing in a and b, the textarea
+read-only, and A's and B's points differing on exactly the axis
+reported (`flick.png`, at the choice). ArrowRight: one flick, the point
+is B's, the picker and the XY pad show Mine. Ctrl+/ again, an arrow
+during A (nothing), then Escape: the count, the point and both stored
+entries are unchanged. Two more exams, toward whichever option has the
+higher energy, one by a button and one by a key: energy has not fallen.
+After a reload the point, the count and Mine are kept; Elegant, picked,
+is kept over another. With a stored learner at Elegant's point whose
+steps are all 1/32, Ctrl+/ shows "Nothing more to tell apart on this
+line" and no frame has an exam. All along it asserts on
 `window.__lab`; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
-`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png`, `dress-dark.png`, `board.png`, `board-narrow.png`, `tour-2.png`, `tour-5.png` and `webgpu.png`, and stops the server it started. It is not part of
+`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png`, `dress-dark.png`, `board.png`, `board-narrow.png`, `tour-2.png`, `tour-5.png`, `flick.png` and `webgpu.png`, and stops the server it started. It is not part of
 `bb test`.
 
 ### The webgpu step

@@ -51,6 +51,7 @@
       padding: 0.2rem 0.5rem; cursor: pointer;
     }
     .bar button:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    .bar button:disabled { color: var(--muted); border-style: dashed; cursor: not-allowed; }
     /* ?debug only: numbers for screen recordings, in the corner below the
        text block, never in the way of the pointer. As wide as it needs up to
        the viewport, then wrapping, so no line is ever cut off. */
@@ -101,6 +102,28 @@
     }
     #tour-stop[hidden] { display: none; }
     #tour-stop:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* The flick's chip: top centre, under the bar. Like the caption it is
+       a live region that is always there, so a screen reader hears A, B,
+       then "A or B?"; idle, it is only out of sight. The two choices sit
+       either side of it, as the arrow keys that also choose them do. */
+    #flick {
+      position: fixed; left: 50%; top: 3.25rem; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 0.75rem; justify-content: center;
+      width: max-content; max-width: calc(100vw - 2rem); box-sizing: border-box;
+      padding: 0.4rem 0.75rem; background: var(--bg); color: var(--text);
+      border: 1px solid rgba(185, 173, 154, 0.5); border-radius: 0.25rem; pointer-events: none;
+    }
+    #flick.idle { opacity: 0; }
+    #flick-chip { margin: 0; font: 1.125rem/1.3 ui-serif, Georgia, "Times New Roman", serif; text-align: center; }
+    #flick button {
+      min-width: 2.75rem; min-height: 2.75rem; font: 1rem var(--condensed); color: var(--text);
+      background: var(--bg); border: 1px solid var(--signal); border-radius: 0.25rem;
+      cursor: pointer; pointer-events: auto;
+    }
+    #flick button[hidden] { display: none; }
+    #flick button:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* Narrow, the bar wraps onto more lines: the chip sits below them. */
+    @media (max-width: 600px) { #flick { top: 6.5rem; } }
     /* The board: hidden until asked for (the Board button, Ctrl+B). Wide, a
        column in the margin beside the text, which fills the middle 70%. */
     #board {
@@ -170,6 +193,7 @@
   <div class="bar">
     <p id="status" role="status">Starting the renderer…</p>
     <button id="read" type="button" aria-keyshortcuts="Control+Enter" title="Ctrl+Enter">Read back</button>
+    <button id="which" type="button" aria-keyshortcuts="Control+/" title="Ctrl+/" disabled>Which?</button>
     <button id="tour" type="button">Tour</button>
     <button id="board-toggle" type="button" aria-pressed="false" aria-controls="board"
             aria-keyshortcuts="Control+B" title="Ctrl+B">Board</button>
@@ -210,6 +234,11 @@
   <div id="tour-bar" class="idle">
     <p id="caption" aria-live="polite"></p>
     <button id="tour-stop" type="button" hidden>Stop</button>
+  </div>
+  <div id="flick" class="idle">
+    <button id="flick-a" type="button" aria-keyshortcuts="ArrowLeft" title="Left arrow" hidden>A</button>
+    <p id="flick-chip" aria-live="polite"></p>
+    <button id="flick-b" type="button" aria-keyshortcuts="ArrowRight" title="Right arrow" hidden>B</button>
   </div>
   <script src="js/main.js"></script>
 </body>

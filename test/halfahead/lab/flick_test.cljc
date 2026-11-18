@@ -321,3 +321,36 @@
                (= (dissoc (:dir s) axis) (dissoc (:dir state) axis))
                (>= (learn/step state) 0.0625)
                (contiguous-from-0? (flick/phases o)))))))
+
+;; --- resume ------------------------------------------------------------------
+
+(deftest resume-keeps-or-restarts
+  (let [p (point 0.25 0.5 0.75 1.0)
+        q (assoc p :energy 0.5)
+        s (-> (learn/start p) (learn/choose :a) (learn/choose :a) (learn/choose :a)
+              (learn/choose :a) (learn/choose :a))]
+    (testing "the exams so far left their trace, and the point where it was"
+      (is (= 5 (:flicks s)))
+      (is (= p (:point s)))
+      (is (not= (learn/start p) s)))
+    (testing "no state yet: a learner begun at the point"
+      (is (= (learn/start p) (flick/resume nil p))))
+    (testing "a state at the point is kept as it is"
+      (is (= s (flick/resume s p))))
+    (testing "a state somewhere else begins again at the point"
+      (let [r (flick/resume s q)]
+        (is (= (learn/start q) r))
+        (is (= 0 (:flicks r)))
+        (is (= q (:point r)))))))
+
+(defspec resume-is-at-the-point 100
+  (prop/for-all [s gen-learn-state
+                 p gen-point
+                 there? gen/boolean]
+    (let [p (if there? (:point s) p)
+          r (flick/resume s p)]
+      (and (= p (:point r))
+           (if (= p (:point s))
+             (= s r)
+             (= (learn/start p) r))
+           (= (learn/start p) (flick/resume nil p))))))
