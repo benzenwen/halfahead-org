@@ -6,6 +6,16 @@
  ;; $12 before the rework. Respecced: the reviewer's findings and the
  ;; foreman's answers to the builder's notes are at the end of the design
  ;; and in the acceptance criteria. The built work is in the worktree.
+ ;; The third run found that work gone (basefactory removes a kept worktree
+ ;; when its order runs again, uncommitted work and all), built everything
+ ;; a second time, was sent back once by the test gate because the
+ ;; foreman's three-knot tempo curve broke a test outside the scope
+ ;; (reading_test pins Elegant's tempo at 1.36), fixed that with a fourth
+ ;; knot, passed the gate, and again had too little left for the review
+ ;; ($0.79 of $12). $23.92 spent on this order so far and nothing merged.
+ ;; This fourth run is a resume: the diff is saved, the builder applies it,
+ ;; and the money goes to the review. The plan station is replaced by the
+ ;; foreman's note (:engines), since the plan is the same work.
  :title "Lab board: a few pads that mark what you just wrote, and one XY pad for your style (no parameters)"
  :lupa/deps #{"0056-lab-tour"}
  :lupa/area :lab
@@ -23,7 +33,19 @@
          "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
          "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
          "e2e/lab.mjs" "docs/LAB.md"]
- :design "Schema (the foreman's; do not edit): :ha/style-point,
+ :engines {:plan {:engine :exec
+                  :cmd ["cat" "../../../out/foreman/0051-plan.md"]}}
+ :design "RESUME (2026-11-18). The last run built all of what follows and
+          passed `bb test`; the foreman then ran `bb lab:e2e`
+          on it: 32 steps, all passing, on WebGL2 (the board step, the
+          tour's kept draft and the webgpu pipeline check among them). It
+          stopped before the review for want of budget. Its whole diff is
+          saved at ../../../out/foreman/0051-lab-board.patch, relative to
+          the worktree's root. To build is to apply that patch (`git
+          apply`), run `bb test`, and change nothing that works. The rest
+          of this design says what the patch holds and what the review
+          judges it against.
+          Schema (the foreman's; do not edit): :ha/style-point,
           :ha/mark-kind, :ha/word-cue's :source :board, :ha/direction.
           halfahead.lab.board (.cljc, pure):
           pads -> the board's pads in order, data: [{:id :stress :label
@@ -108,9 +130,12 @@
           held 600 ms or longer' in docs/LAB.md is true.
           And the foreman's answers to the builder's notes:
           (4) Every motion still ends within 5000 ms, for any point: in
-          lab.style/from-point the tempo's curve becomes piecewise linear
-          through (0, 1.5) (0.5, 1.0) (1, 0.5), not (0, 1.6), so the
-          calmest point is as slow as Elegant and no slower. Put lab.pose's
+          lab.style/from-point the tempo's curve is piecewise linear
+          through (0, 1.5) (0.2, 1.36) (0.5, 1.0) (1, 0.5). From energy
+          0.2 up it is the curve as it was, so every named style keeps its
+          tempo (a test outside this scope pins Elegant's at 1.36); below
+          0.2 it now flattens to 1.5 where it used to reach 1.6, so no
+          point is slower than 1.5. Put lab.pose's
           bound and docstring back to 5000 ms for every style and point,
           and update the tests that pinned 1.6.
           (5) A pad press must be seen. On a fresh page the reveal level

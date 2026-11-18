@@ -1,0 +1,62 @@
+{:id "0058-lab-flick-ui"
+ :title "Lab flick, the page: 'Which?' reads your line back two ways and your style moves toward the one you pick"
+ :lupa/deps #{"0053-lab-flick"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'How people and agents drive it', and the
+        H5 result in docs/product/lab-notebook.md. The pure exam is
+        lab.flick (order 0053). Put it on the page: on request the lab
+        reads the current line back as A (your style now) and as B (one
+        step along one axis), you flick toward the one you like, and your
+        style point moves. Never unprompted."
+ :scope ["src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+         "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "lab.main and index.html: a 'Which?' button in the bar and Ctrl+/
+            start an exam on the current text (disabled with no text or
+            with reduced motion; if offer gives nil a short note says
+            'Nothing to compare on this line yet'). During it: a chip
+            reads 'A' while A plays, 'B' while B plays, then 'A  or  B ?'
+            with two buttons; the left and right arrow keys, or the
+            buttons, choose; Escape cancels and changes nothing; R plays
+            the pair again. Each reading plays through the lab's reading
+            path with the pair's point as the style (dress included). On
+            a choice the learn state is (flick/decide ...), the style
+            becomes Mine at the state's point (the board's XY dot moves
+            with it), and the state is remembered per viewer in
+            localStorage (try/catch). The chip is an aria-live region so
+            a screen reader hears 'A', 'B', 'A or B?'. window.__lab.flick()
+            -> {phase axis pointA pointB flicks point} as plain data. The
+            debug overlay shows 'flick 3 · asking energy · step 0.25'.
+          Tests: the debug line for a flick.
+          e2e/lab.mjs, a new step 'flick' (?debug&reveal=3): type 'I
+          loooove this (honestly). But maybe not. Ship it!' and wait for
+          rest; Ctrl+/: flick().phase goes a, then b, then choose (wait on
+          the data, not on the clock), and the two readings ran with
+          different points (pointA and pointB differ on exactly the axis
+          reported); press ArrowRight: flick().flicks is 1, point equals
+          pointB, and the style picker shows Mine; Ctrl+/ then Escape:
+          nothing changes; four more exams always choosing the option with
+          the higher energy: point.energy has not fallen; reload: the
+          point and the flick count are kept. Screenshot out/lab/flick.png
+          during the choose phase.
+          docs/LAB.md: a short section 'The flick'. Its lesson, from the
+          H5 simulation: a careful chooser's point closes on their taste
+          (distance 0.292 to 0.067 in 12 flicks), a chooser who is wrong
+          one time in four does not converge, so the two readings must be
+          easy to tell apart and the axes few."
+ :acceptance
+ ["debug tests as in the design, on both hosts; `bb test` stays green"
+  "`bb lab:e2e` passes with the flick step and every existing step;
+   out/lab/flick.png for the foreman"]
+ :non-goals
+ ["Never start an exam unprompted; no telemetry; nothing leaves the device"
+  "No change to lab.flick, lab.learn, reading, pace, marks, score,
+   gestures, synth, dress, the board's pads, the renderer or the
+   director; do not edit the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/flick.cljc" "src/halfahead/lab/learn.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/board.cljc"
+           "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+           "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

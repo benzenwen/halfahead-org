@@ -1,5 +1,7 @@
 {:id "0053-lab-flick"
- :title "Lab flick: 'better like this, or like this?' reads your line back two ways, and your style moves toward the one you pick"
+ ;; Split on 2026-11-18: the board's build alone cost $7.70, so this order is
+ ;; the pure half of the flick and 0058 is the page.
+ :title "Lab flick, the pure half: one exam as data (a pair that is easy to tell apart, its timeline, the choice)"
  :lupa/deps #{"0051-lab-board" "0052-lab-dress"}
  :lupa/area :lab
  :lupa/risk :medium
@@ -12,10 +14,7 @@
         The H5 simulation says this only works when the two are easy to
         tell apart, so a pair that would look the same is never offered."
  :scope ["src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"
-         "src/halfahead/lab/learn.cljc" "test/halfahead/lab/learn_test.cljc"
-         "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
-         "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
-         "e2e/lab.mjs" "docs/LAB.md"]
+         "src/halfahead/lab/learn.cljc" "test/halfahead/lab/learn_test.cljc"]
  :design "halfahead.lab.learn gains (existing functions unchanged):
           (skip state) -> the state asking about the next axis, with
             nothing else changed (no flick counted).
@@ -37,56 +36,24 @@
           (phase-at phases t) -> the phase in force at t.
           (decide offer choice) -> the learn state after choosing :a or :b
             (learn/choose on the offer's state).
-          lab.main and index.html: a 'Which?' button in the bar and Ctrl+/
-            start an exam on the current text (disabled with no text or
-            with reduced motion; if offer gives nil a short note says
-            'Nothing to compare on this line yet'). During it: a chip
-            reads 'A' while A plays, 'B' while B plays, then 'A  or  B ?'
-            with two buttons; the left and right arrow keys, or the
-            buttons, choose; Escape cancels and changes nothing; R plays
-            the pair again. Each reading plays through the lab's reading
-            path with the pair's point as the style (dress included). On
-            a choice the learn state is (flick/decide ...), the style
-            becomes Mine at the state's point (the board's XY dot moves
-            with it), and the state is remembered per viewer in
-            localStorage (try/catch). The chip is an aria-live region so
-            a screen reader hears 'A', 'B', 'A or B?'. window.__lab.flick()
-            -> {phase axis pointA pointB flicks point} as plain data. The
-            debug overlay shows 'flick 3 · asking energy · step 0.25'.
           Tests: learn/skip; distinct? for plans that differ in each way
           and for two that do not; offer skipping an axis that shows
           nothing on a bare line and returning nil for an empty one;
           phases and phase-at; decide moves the point exactly as
           learn/choose does. Property: for any text and learn state, offer
           is nil or its two plans are distinct and its points differ on
-          exactly one axis.
-          e2e/lab.mjs, a new step 'flick' (?debug&reveal=3): type 'I
-          loooove this (honestly). But maybe not. Ship it!' and wait for
-          rest; Ctrl+/: flick().phase goes a, then b, then choose (wait on
-          the data, not on the clock), and the two readings ran with
-          different points (pointA and pointB differ on exactly the axis
-          reported); press ArrowRight: flick().flicks is 1, point equals
-          pointB, and the style picker shows Mine; Ctrl+/ then Escape:
-          nothing changes; four more exams always choosing the option with
-          the higher energy: point.energy has not fallen; reload: the
-          point and the flick count are kept. Screenshot out/lab/flick.png
-          during the choose phase.
-          docs/LAB.md: a section 'The flick' with the H5 numbers' lesson
-          (obvious differences, few axes)."
+          exactly one axis."
  :acceptance
- ["flick, learn and debug tests as in the design, on both hosts"
-  "`bb lab:e2e` passes with the flick step and every existing step; `bb
-   test` stays green; out/lab/flick.png for the foreman"]
+ ["flick and learn tests as in the design, on both hosts; `bb test` stays
+   green"]
  :non-goals
  ["Never start an exam unprompted; no telemetry; nothing leaves the device"
   "No change to learn's existing functions, reading, pace, marks, score,
    gestures, synth, dress, the board's pads, the renderer or the director;
    do not edit the schema"
-  "Do not run `bb e2e` or `bb play`"]
- :context ["docs/product/score.md" "docs/product/lab-notebook.md"
-           "src/halfahead/lab/learn.cljc" "src/halfahead/lab/reading.cljc"
-           "src/halfahead/lab/style.cljc" "src/halfahead/lab/board.cljc"
-           "src/halfahead/lab/dress.cljc" "src/halfahead/lab/main.cljs"
-           "src/halfahead/lab/debug.cljc" "public/lab/index.html"
-           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
- :budget-usd 12.0}
+  "No page, no lab.main, no browser check: order 0058"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["docs/product/score.md" "src/halfahead/lab/learn.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/style.cljc"
+           "src/halfahead/lab/dress.cljc" "DESIGN.md"]
+ :budget-usd 8.0}
