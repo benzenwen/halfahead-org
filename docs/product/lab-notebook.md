@@ -316,3 +316,13 @@ each always choosing the reading nearer their taste, from the centre, at
   "Can be told apart" is a rule (10% in tempo or amplitude, 0.2 in
   overshoot, or a different gesture or dress), not a measurement of what
   people see. A person at the keyboard is the test.
+
+On the page (order 0058): the browser check types "I loooove this
+(honestly). But maybe not. Ship it!", asks, and sees A, then B, then "A
+or B?", the two differing on energy alone; a choice moves the point,
+makes the style Mine and survives a reload; with every step below 1/16
+the page says "Nothing more to tell apart on this line". One weakness
+the reviewer found in that check: the line is typed fast, Auto reads it
+as Caffeinated, and the learner starts at the top of the energy axis, so
+"energy has not fallen" is nearly always true.
+

@@ -246,4 +246,14 @@ in `docs/product/lab-notebook.md`.
   flick into a pure order and a page order. Orders are now sized to one
   module and its tests, or one page change and its browser check, never
   both.
+- 2026-11-18, later: the flick is in (0053 the exam as data, 0059 after
+  the H8 measurement, 0058 the page). The container restarted three times
+  under running orders. Each time the builder's files survived on disk;
+  for the flick page, as for the board, the foreman saved the diff, ran
+  both gates on it, and had the order's next run apply it, so the review
+  station judged work already paid for. A killed run leaves no row in the
+  ledger: recorded spend is $204.15, and the four killed builds cost about
+  $11 to $16 more by an estimate from their transcripts
+  (`open-questions.md`, Q36). The factory is stopped with its queue
+  empty.
 

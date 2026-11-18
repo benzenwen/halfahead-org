@@ -954,11 +954,11 @@ labelled checkbox, and every sound has a visible counterpart. Read back is
 a real button and Pace a labelled range input; a reading never changes
 the textarea's text, so assistive technology has all of it throughout.
 The tour's captions are a polite live region, Stop is a real button, and
-the tour does not run with reduced motion (see The tour). The board's
-flick's chip is a polite live region too, its choices real buttons as
-well as arrow keys, and no exam runs with reduced motion (see The
-flick). The board's
-pads are real buttons in a labelled toolbar, each named and reachable by
+the tour does not run with reduced motion (see The tour). The flick's
+chip is a polite live region too, its choices real buttons as well as
+arrow keys, and no exam runs with reduced motion (see The flick). The
+board's pads are real buttons in a labelled toolbar, each named and
+reachable by
 Tab, pressed by Enter or Space; the XY pad is a focusable slider with a
 name and value text, moved by the arrow keys; all have a visible focus
 ring, and the board works at 360 px wide (see The board).

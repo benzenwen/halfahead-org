@@ -22,6 +22,14 @@ bb lab          # prints the URL of /lab/
   lands harder. Select one word and press LAND. BOOM is the card. The
   square is your style: energy across, flourish up; drag the dot to the
   top right and press a pad again. The picker then reads **Mine**.
+- **The flick.** Type a line with something in it, such as `I loooove
+  this (honestly). But maybe not. Ship it!`, and press **Which?** (or
+  Ctrl+/). The lab reads it back twice, A then B; press the left or right
+  arrow for the one you prefer. Your style moves toward it and the picker
+  reads **Mine**. Ask again a dozen times and it runs out of things to
+  ask: that is the exam ending, not a fault. It learns speed and bounce
+  from any line, flourish only from a line with something to flourish,
+  and warmth not at all yet (H8 in the notebook).
 - **The held note.** Type `I loooove it ` and watch "loooove": each
   letter lifts in turn, as in the Music app's lyrics.
 - **Read back.** Type `I loooove this (honestly). But maybe not. Ship
@@ -55,12 +63,16 @@ bb lab          # prints the URL of /lab/
    going: Plain keeps its plain motion but gets a modest flourish (0.35),
    dress and readings keep the style they began in, and bareness is the
    reveal level's job (order 0055). Say so if you want it otherwise.
-4. **The per-order cap (Q33).** The charter's $12 an order was set when
+4. **A pull request for the score drive.** Everything since 17 November
+   is on `claude/laughing-dijkstra-g9b3k8`, not on main, and no pull
+   request is open. Say the word and the foreman opens one (merge
+   commit, never squash: Q12).
+5. **The per-order cap (Q33).** The charter's $12 an order was set when
    an order cost about $3. The board cost $7.90 to build, and twice had
    too little left for its review. The foreman's answer was smaller
    orders and a resume, not a bigger cap; the cap is yours. $20 would
    fit a page-sized order with one rework.
-5. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q34.
+6. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q36.
    The ones that are expensive to change later are Q1 (the first tier is
    rhetorical), Q5 (patches are bounded) and Q25 (a requested read-back
    may run past five seconds).
@@ -73,9 +85,11 @@ bb lab          # prints the URL of /lab/
 | done | 0057: the WebGPU guard | The lab was blank on WebGPU for nine hours; it cannot ship that way again |
 | done | 0056: the tour | "Is there a demo to run and look at" |
 | done | 0051: the board | People get an instrument, not parameters |
-| 0053 | The flick, the pure half | One exam as data; H5 says offer only pairs that are easy to tell apart |
-| 0058 | The flick, the page | 'Which?' reads the line back two ways; your style moves toward your pick |
-| (new) | Board polish | From the board's review, none blocking: a pad press that places nothing still raises the reveal level; a key held on a focused pad shares its hold with Alt+digit; BOOM keeps the director off that phrase; Mine sounds like Plain |
+| done | 0053, 0059: the flick, the pure half | One exam as data; an axis is asked both ways and can finish (H8) |
+| done | 0058: the flick, the page | 'Which?' reads the line back two ways; your style moves toward your pick |
+| (new) | Board and flick polish | From their reviews, none blocking. Board: a pad press that places nothing still raises the reveal level; a key held on a focused pad shares its hold with Alt+digit; BOOM keeps the director off that phrase; Mine sounds like Plain. Flick: choosing A under a named style still moves you to Mine at that style's point (a point cannot hold everything a named style has); the browser check's "energy has not fallen" starts at the clamp, so it proves little; nothing checks an exam after a reload; the learner's stored shape has no schema entry |
+| (new) | The tour shows the board and the flick | The demo that plays by itself stops before the two instruments people get |
+| (new) | The gate says what failed | A failed gate reported a stack trace and no test name (basefactory finding 24); the product's `bb test` could print its failures last |
 | (new) | Scout writes scores | Bring the score into the app: `:ha/engine-reply` carries one (your yes on experiment 5) |
 | (new) | Glosses in the margin | The illuminator's other half: agents annotate beside the text |
 
