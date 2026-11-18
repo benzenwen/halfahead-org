@@ -1,4 +1,7 @@
 {:id "0051-lab-board"
+ ;; 2026-11-18: the first run was lost when the container restarted mid-build
+ ;; (nothing was wrong with the order). Recommitted unchanged so Lupa runs it
+ ;; again from a clean worktree.
  :title "Lab board: a few pads that mark what you just wrote, and one XY pad for your style (no parameters)"
  :lupa/deps #{"0056-lab-tour"}
  :lupa/area :lab
