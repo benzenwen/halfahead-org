@@ -329,15 +329,26 @@ try {
   done(`live text matches the textarea; ${typed.drawn} glyphs drawn`);
 
   begin('embers', page);
+  // Embers live 600 ms and a software-rendered frame can take 300, so one
+  // frame read after a wait is a coin toss (it failed once on 2026-11-18).
+  // Watch every frame from before the keys instead: the most ghosts seen.
+  await page.evaluate(() => {
+    window.__embers = { most: 0, watching: true };
+    const watch = () => {
+      const f = window.__lab.lastFrame();
+      if (f) window.__embers.most = Math.max(window.__embers.most, f.poses.filter((p) => p['ghost?']).length);
+      if (window.__embers.watching) requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  });
   for (let i = 0; i < 3; i++) await page.keyboard.press('Backspace');
-  await page.waitForTimeout(100);
-  // Read before the screenshot: embers live 600 ms, and a software-rendered
-  // screenshot can take most of that.
-  const burning = await nextFrame(page);
   await page.screenshot({ path: `${out}/embers.png` });
-  if (burning.ghosts === 0) throw new Error('no ghost poses after Backspace');
+  await page.waitForTimeout(700);
+  const burning = await nextFrame(page);
+  const embers = await page.evaluate(() => { window.__embers.watching = false; return window.__embers.most; });
+  if (embers === 0) throw new Error('no ghost poses in any frame after Backspace');
   if (burning.live !== burning.value) throw new Error(`live text "${burning.live}" != "${burning.value}"`);
-  done(`${burning.ghosts} ember(s) in flight`);
+  done(`${embers} ember(s) in flight`);
 
   begin('settled', page);
   await page.waitForTimeout(2000);
