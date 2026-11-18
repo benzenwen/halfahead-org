@@ -13,10 +13,20 @@ The design is `docs/product/score.md`; what was measured is in
 bb lab          # prints the URL of /lab/
 ```
 
+- **Watch the tour first.** Add `?tour` to the lab's address (or press
+  Tour): in about 40 seconds the lab types for itself, dresses a line in
+  gold, holds a note, dims the lights, reads a line back two ways and
+  takes the stage, with a caption for each scene. Any key stops it.
+- **The board.** Press **Board** (or Ctrl+B). Type `we did it` and press
+  STRESS, or Alt+1 without leaving the text. Hold a pad longer and it
+  lands harder. Select one word and press LAND. BOOM is the card. The
+  square is your style: energy across, flourish up; drag the dot to the
+  top right and press a pad again. The picker then reads **Mine**.
 - **The held note.** Type `I loooove it ` and watch "loooove": each
   letter lifts in turn, as in the Music app's lyrics.
-- **Read back.** Pick **Elegant**, type `I loooove this (honestly). But
-  maybe not. Ship it!`, press **Ctrl+Enter**. The line dims and fills
+- **Read back.** Type `I loooove this (honestly). But maybe not. Ship
+  it!`, press **Ctrl+Enter** (any style now performs something; Elegant
+  and Caffeinated differ most). The line dims and fills
   with ink at the Pace slider's words a minute, and each mark performs
   as the head reaches it. Try 150 and 400. Escape stops it. Then pick
   Caffeinated and do it again: the same marks, a different performance.
@@ -30,7 +40,9 @@ bb lab          # prints the URL of /lab/
   weight, focus, slant, stretch, fill and the five inks.
 - **An agent writing scores.** `bb lab:score-eval` (28 model calls, about
   $1); the page it is given is `resources/agent/score-reference.md`.
-- `?debug` shows what fired; `?reveal=3` skips to the dark stage.
+- `?debug` shows what fired; `?reveal=3` skips to the dark stage;
+  `?webgl` forces WebGL2 if WebGPU ever misbehaves (the lab also falls
+  back by itself now).
 
 ### Decisions you owe
 
@@ -43,7 +55,12 @@ bb lab          # prints the URL of /lab/
    going: Plain keeps its plain motion but gets a modest flourish (0.35),
    dress and readings keep the style they began in, and bareness is the
    reveal level's job (order 0055). Say so if you want it otherwise.
-4. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q32.
+4. **The per-order cap (Q33).** The charter's $12 an order was set when
+   an order cost about $3. The board cost $7.90 to build, and twice had
+   too little left for its review. The foreman's answer was smaller
+   orders and a resume, not a bigger cap; the cap is yours. $20 would
+   fit a page-sized order with one rework.
+5. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q34.
    The ones that are expensive to change later are Q1 (the first tier is
    rhetorical), Q5 (patches are bounded) and Q25 (a requested read-back
    may run past five seconds).
@@ -52,11 +69,13 @@ bb lab          # prints the URL of /lab/
 
 | order | what | why |
 |---|---|---|
-| (new) | Plain's flourish, and dress that stays | Q30: the default experience shows too little |
-| (new) | A reading keeps the style it started in | In Auto a reading can outlast its grant when the rhythm window lapses |
-| (new) | The glow takes the letter's ink | Gold glints pink: the halo has always been vermilion |
-| 0051 | The board | People get an instrument, not parameters |
-| 0053 | The flick | A style that learns you; H5 says make the two options obviously different |
+| done | 0055: Plain's flourish, dress that stays, a reading keeps its style, gold glows gold | Q30, Q31 |
+| done | 0057: the WebGPU guard | The lab was blank on WebGPU for nine hours; it cannot ship that way again |
+| done | 0056: the tour | "Is there a demo to run and look at" |
+| done | 0051: the board | People get an instrument, not parameters |
+| 0053 | The flick, the pure half | One exam as data; H5 says offer only pairs that are easy to tell apart |
+| 0058 | The flick, the page | 'Which?' reads the line back two ways; your style moves toward your pick |
+| (new) | Board polish | From the board's review, none blocking: a pad press that places nothing still raises the reveal level; a key held on a focused pad shares its hold with Alt+digit; BOOM keeps the director off that phrase; Mine sounds like Plain |
 | (new) | Scout writes scores | Bring the score into the app: `:ha/engine-reply` carries one (your yes on experiment 5) |
 | (new) | Glosses in the margin | The illuminator's other half: agents annotate beside the text |
 

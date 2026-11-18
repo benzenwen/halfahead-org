@@ -238,3 +238,12 @@ in `docs/product/lab-notebook.md`.
   keeps a flourish of 0.35; dress and readings keep the style they began
   in; order 0055) and queued a self-playing tour (0056), then the board
   and the flick.
+- 2026-11-18: the board (0051) took four runs and $26.87. The charter's
+  $12 an order no longer fits a page-sized order on this model, and
+  basefactory discards a halted order's built work when the order runs
+  again. The foreman kept the cap (it is Ben's), resumed the board from
+  its saved diff with the plan station replaced by a note, and split the
+  flick into a pure order and a page order. Orders are now sized to one
+  module and its tests, or one page change and its browser check, never
+  both.
+

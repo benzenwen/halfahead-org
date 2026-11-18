@@ -25,7 +25,13 @@
             becomes Mine at the state's point (the board's XY dot moves
             with it), and the state is remembered per viewer in
             localStorage (try/catch). The chip is an aria-live region so
-            a screen reader hears 'A', 'B', 'A or B?'. window.__lab.flick()
+            a screen reader hears 'A', 'B', 'A or B?'. The picker's choice
+            is remembered per viewer as well (today only the point is, so
+            a reload falls back to Auto and a learned style is not in
+            force): a reload starts in the style last picked, Mine
+            included (existing browser checks that count on Auto at the
+            start must still pass: give them a fresh page with empty
+            storage where they need one). window.__lab.flick()
             -> {phase axis pointA pointB flicks point} as plain data. The
             debug overlay shows 'flick 3 · asking energy · step 0.25'.
           Tests: the debug line for a flick.
@@ -38,7 +44,8 @@
           pointB, and the style picker shows Mine; Ctrl+/ then Escape:
           nothing changes; four more exams always choosing the option with
           the higher energy: point.energy has not fallen; reload: the
-          point and the flick count are kept. Screenshot out/lab/flick.png
+          point and the flick count are kept and the picker still shows
+          Mine; pick Elegant and reload: the picker shows Elegant. Screenshot out/lab/flick.png
           during the choose phase.
           docs/LAB.md: a short section 'The flick'. Its lesson, from the
           H5 simulation: a careful chooser's point closes on their taste
