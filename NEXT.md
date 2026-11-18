@@ -87,6 +87,7 @@ bb lab          # prints the URL of /lab/
 | done | 0051: the board | People get an instrument, not parameters |
 | done | 0053, 0059: the flick, the pure half | One exam as data; an axis is asked both ways and can finish (H8) |
 | done | 0058: the flick, the page | 'Which?' reads the line back two ways; your style moves toward your pick |
+| done | 0060: the asterisks of a dressed stress recede | Your first WebGPU screenshot: `*this*` in gold with both asterisks at full strength (Q37) |
 | (new) | Board and flick polish | From their reviews, none blocking. Board: a pad press that places nothing still raises the reveal level; a key held on a focused pad shares its hold with Alt+digit; BOOM keeps the director off that phrase; Mine sounds like Plain. Flick: choosing A under a named style still moves you to Mine at that style's point (a point cannot hold everything a named style has); the browser check's "energy has not fallen" starts at the clamp, so it proves little; nothing checks an exam after a reload; the learner's stored shape has no schema entry |
 | (new) | The tour shows the board and the flick | The demo that plays by itself stops before the two instruments people get |
 | (new) | The gate says what failed | A failed gate reported a stack trace and no test name (basefactory finding 24); the product's `bb test` could print its failures last |

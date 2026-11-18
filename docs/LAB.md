@@ -800,8 +800,8 @@ with a versal; only a point with flourish under 0.2 leaves nothing. A span is dr
   character: the live poses still spell the draft, the textarea is still
   what assistive technology reads, and a message's text is the same with
   or without it. The two asterisks enclosing a gilt, rubric or strong
-  stress are that dress's `:markers` and rest whispered, easing in and
-  out with it, still in the text and the textarea.
+  stress are that dress's `:markers` and rest whispered, easing in with
+  it and leaving when it does, still in the text and the textarea.
 - **Easing in.** `dress/seen` remembers when each dress was first seen
   (keyed by what it is and its first glyph), the only memory dress needs;
   the look comes in over 500 ms on a smoothstep from then, size included,
