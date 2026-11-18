@@ -63,10 +63,9 @@ bb lab          # prints the URL of /lab/
    going: Plain keeps its plain motion but gets a modest flourish (0.35),
    dress and readings keep the style they began in, and bareness is the
    reveal level's job (order 0055). Say so if you want it otherwise.
-4. **A pull request for the score drive.** Everything since 17 November
-   is on `claude/laughing-dijkstra-g9b3k8`, not on main, and no pull
-   request is open. Say the word and the foreman opens one (merge
-   commit, never squash: Q12).
+4. **A pull request for the score drive.** Done on 2026-11-18 at your
+   word: pull request 3, merged to main with a merge commit. The Pages
+   workflow ran and skipped, as it will until `PAGES` is `on`.
 5. **The per-order cap (Q33).** The charter's $12 an order was set when
    an order cost about $3. The board cost $7.90 to build, and twice had
    too little left for its review. The foreman's answer was smaller
