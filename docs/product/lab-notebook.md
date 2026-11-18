@@ -273,6 +273,11 @@ ninth buffer failed the step and was caught by the probe).
 Still not measured anywhere but on Ben's machine: a WebGPU pixel. The
 software device here is lost before it presents.
 
+2026-11-18: measured there. With the fix, Ben's Safari says "Rendering
+with WebGPU" and draws the letters, the gilt on a starred word and its
+gold halo (his screenshot of `*this* is great!`). Frame times on a GPU
+(H3) are still unmeasured.
+
 ### H8: what the flick can ask on an ordinary line (orders 0053 and 0059, 2026-11-18)
 
 The flick reads your line back twice, as your style now and one step

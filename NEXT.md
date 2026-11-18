@@ -72,7 +72,7 @@ bb lab          # prints the URL of /lab/
    too little left for its review. The foreman's answer was smaller
    orders and a resume, not a bigger cap; the cap is yours. $20 would
    fit a page-sized order with one rework.
-6. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q36.
+6. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q37.
    The ones that are expensive to change later are Q1 (the first tier is
    rhetorical), Q5 (patches are bounded) and Q25 (a requested read-back
    may run past five seconds).
