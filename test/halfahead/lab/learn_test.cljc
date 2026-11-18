@@ -88,6 +88,17 @@
          (try (learn/choose (learn/start) :c)
               (catch #?(:clj Exception :cljs :default) e (:type (ex-data e)))))))
 
+(deftest skip-asks-the-next-axis
+  (is (= (assoc (learn/start) :axis :flourish) (learn/skip (learn/start))))
+  (testing "four skips come back round"
+    (is (= (learn/start) (nth (iterate learn/skip (learn/start)) 4))))
+  (testing "after some flicks, only the axis changes and no flick is counted"
+    (let [s (reduce learn/choose (learn/start) [:b :a :a :b :a])]
+      (is (= :flourish (:axis s)))
+      (is (= (assoc s :axis :softness) (learn/skip s)))))
+  (testing "from the last axis it is the first again"
+    (is (= :energy (:axis (learn/skip (assoc (learn/start) :axis :warmth)))))))
+
 (defspec point-stays-valid 200
   (prop/for-all [p gen-point
                  choices (gen/vector (gen/elements [:a :b]) 0 200)]
