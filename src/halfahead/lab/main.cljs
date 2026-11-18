@@ -30,7 +30,14 @@
   also wires the board (lab.board): a toolbar of pads, hidden until asked
   for, and an XY pad whose point is the writer's own style, Mine. The
   shell turns pointer and key events into lab.board's hold events and adds
-  what a completed press gives to the draft; it decides nothing itself."
+  what a completed press gives to the draft; it decides nothing itself.
+  The Which? button or Ctrl+/ asks for one exam of lab.flick on the text
+  as it stands, never the page by itself: the shell plays the offer's two
+  readings through the read-back's own path on the frame loop's clock,
+  takes the choice (the arrows or the A and B buttons; Escape cancels and
+  changes nothing), and keeps the learner's state (lab.learn's), whose
+  point becomes the style, Mine. That state and the style picked are
+  remembered on this device."
   (:require [clojure.string :as str]
             [halfahead.lab.audio :as audio]
             [halfahead.lab.board :as board]
@@ -39,6 +46,7 @@
             [halfahead.lab.director :as director]
             [halfahead.lab.draft :as draft]
             [halfahead.lab.dress :as dress]
+            [halfahead.lab.flick :as flick]
             [halfahead.lab.ink :as ink]
             [halfahead.lab.instance :as instance]
             [halfahead.lab.moments :as moments]
@@ -96,8 +104,15 @@
   ;; the caption away;
   ;; :style-choice, the picker's: a :ha/style-choice, or :mine for the
   ;; board's point; :board, {:visible? :point (the XY pad's :ha/style-point)
-  ;; :holds (lab.board/hold's: the pads held down)}
+  ;; :holds (lab.board/hold's: the pads held down)};
+  ;; :learner, lab.learn's state after this viewer's last choice, nil
+  ;; before any; :exam, the exam running, if any: {:offer (lab.flick's)
+  ;; :phases (its timeline) :t0 (when it began) :phase (the one in force at
+  ;; the last tick) :dress-before (the :dress to put back on a cancel)};
+  ;; :flick-notice? while the chip says there is nothing more to ask, and
+  ;; :flick-timer, the timeout that will take that away
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
+         :learner nil :exam nil :flick-notice? false :flick-timer nil
          :board {:visible? false :point (style/point :plain) :holds nil}
          :pace 250 :reading nil
          :dress {:point nil :placed [] :seen {}} :light-px nil
@@ -118,6 +133,11 @@
 ;; point on its XY pad.
 (def ^:private board-key "halfahead.lab.board")
 (def ^:private point-key "halfahead.lab.board.point")
+
+;; Likewise the style this viewer last picked, and what the flicks have
+;; learned of them so far.
+(def ^:private style-key "halfahead.lab.style")
+(def ^:private learn-key "halfahead.lab.learn")
 
 ;; Likewise this viewer's reading pace.
 (def ^:private pace-key "halfahead.lab.pace")
@@ -186,18 +206,22 @@
   [s t]
   (update s :dress #(assoc % :seen (dress/seen (:seen %) (:placed %) t))))
 
-(defn- redressed
-  "state with the draft dressed by the style in force at t. Only an edit
-  and the writer's pick of a style come here: between them the dress
-  stays as it is, whatever :auto makes of the silence."
-  [{:keys [draft] :as s} t]
-  (let [{:keys [text glyphs]} draft
-        point (point-at s t)]
+(defn- dressed
+  "state with the draft dressed as the style at point dresses it, at t."
+  [{:keys [draft] :as s} point t]
+  (let [{:keys [text glyphs]} draft]
     (-> s
         (update :dress assoc
                 :point point
                 :placed (dress/placed (:dress (score/from-text text point)) glyphs))
         (seen t))))
+
+(defn- redressed
+  "state with the draft dressed by the style in force at t. Only an edit
+  and the writer's pick of a style come here: between them the dress
+  stays as it is, whatever :auto makes of the silence."
+  [s t]
+  (dressed s (point-at s t) t))
 
 (defn- frame [r t reduced-motion?]
   (let [{:keys [draft reading light-px] :as s} @state]
@@ -351,10 +375,108 @@
           (assoc-in [:reading :voiced-to] t)
           (voiced :cue begun)))))
 
+(defn- reading-of
+  "A read-back as :reading keeps it: plan, begun at t0 over glyphs and
+  played in in-force (a named style, or a point); nil without a plan."
+  [plan in-force glyphs t0]
+  (when plan
+    {:plan plan
+     :style in-force
+     :t0 t0
+     :cues (reading/cues plan glyphs t0)
+     :voiced-to (dec t0)}))
+
+;; --- the flick: the exam on the frame loop's clock ---------------------------
+
+(defn- unexamined
+  "state with the exam running, if any, called off: its reading stopped
+  and the dress as it was before. The dress is put back, not decided
+  again: under :auto a new decision could be another style's."
+  [{:keys [exam] :as s}]
+  (if exam
+    (assoc s :exam nil :reading nil :dress (:dress-before exam))
+    s))
+
+(defn- examined
+  "state with the exam running, if any, brought up to t. On entering :a
+  or :b that reading of the offer starts, in its own point (dress
+  included), timed from when the phase began, not from this frame, so a
+  late frame does not shift it. The gap and the choice play nothing.
+  Reduced motion calls the exam off: there would be nothing to compare."
+  [{:keys [exam draft] :as s} t reduced-motion?]
+  (let [{:keys [offer phases t0]} exam
+        phase (when exam (flick/phase-at phases (- t t0)))]
+    (cond
+      (nil? exam) s
+      reduced-motion? (unexamined s)
+      (= phase (:phase exam)) s
+      :else
+      (let [s (assoc-in s [:exam :phase] phase)
+            [plan point] (case phase
+                           :a [(:a offer) (:point-a offer)]
+                           :b [(:b offer) (:point-b offer)]
+                           nil)]
+        (if plan
+          (let [began (+ t0 (:at (first (filter #(= phase (:phase %)) phases))))]
+            (-> s
+                (assoc :reading (reading-of plan point (:glyphs draft) began))
+                (dressed point t)))
+          (assoc s :reading nil))))))
+
+(def ^:private nothing-more "Nothing more to tell apart on this line")
+(def ^:private nothing-more-ms 2000)
+
+(defn- show-flick!
+  "The page follows the exam: the chip (a live region) reads A, B, then
+  'A or B?' with its two buttons, or for a moment that there is nothing
+  more to ask; and the text cannot be edited while an exam runs. Each is
+  written only when it changes, so a screen reader hears it once."
+  []
+  (let [{:keys [exam flick-notice?]} @state
+        phase (:phase exam)
+        text (cond
+               exam ({:a "A" :b "B" :choose "A or B?"} phase "")
+               flick-notice? nothing-more
+               :else "")
+        ^js chip (by-id "flick-chip")
+        ^js input (by-id "type")]
+    (when (not= text (.-textContent chip))
+      (set! (.-textContent chip) text)
+      (.toggle (.-classList (by-id "flick")) "idle" (= "" text)))
+    (doseq [id ["flick-a" "flick-b"]]
+      (let [^js button (by-id id)]
+        (when (not= (.-hidden button) (not= :choose phase))
+          (set! (.-hidden button) (not= :choose phase)))))
+    (when (not= (.-readOnly input) (some? exam))
+      (set! (.-readOnly input) (some? exam)))))
+
+(defn- show-which!
+  "Which? can be asked only of some text, and only where motion plays."
+  [reduced-motion?]
+  (let [^js which (by-id "which")
+        off? (or reduced-motion? (str/blank? (get-in @state [:draft :text])))]
+    (when (not= off? (.-disabled which))
+      (set! (.-disabled which) off?))))
+
+(defn- cancel-flick!
+  "Call off the exam running, if any: nothing is learned or stored, and
+  the page is as it was. Every other command comes through here first, so
+  none runs under an exam."
+  []
+  (when (:exam @state)
+    (swap! state unexamined)
+    (show-flick!)))
+
 (defn- loop! [r ^js motion-query]
   (let [t (now-ms)
         reduced-motion? (.-matches motion-query)
-        _ (swap! state #(-> % (read-on t reduced-motion?) (directed t) (seen t)))
+        _ (swap! state #(-> %
+                            (examined t reduced-motion?)
+                            (read-on t reduced-motion?)
+                            (directed t)
+                            (seen t)))
+        _ (show-flick!)
+        _ (show-which! reduced-motion?)
         _ (play-queued!)
         f (frame r t reduced-motion?)
         ;; counted only here, once a tick, so each moment is handed on once
@@ -417,6 +539,16 @@
                                 :entries (clj->js entries)
                                 :performing (clj->js (:performing plan))
                                 :headAt (fn [at] (pace/head rd (- at t0)))}))
+             ;; the exam and the learner as plain data; phase is nil when
+             ;; no exam runs, point before this viewer's first choice
+             :flick #(let [{:keys [exam learner]} @state
+                           {:keys [offer phase]} exam]
+                       (clj->js {:phase phase
+                                 :axis (:axis offer)
+                                 :pointA (:point-a offer)
+                                 :pointB (:point-b offer)
+                                 :flicks (:flicks learner 0)
+                                 :point (:point learner)}))
              :bounds #(clj->js sound/bounds)
              :specimen #(sample-boxes r)
              ;; the dress placed on the draft's glyphs, as lab.dress has it
@@ -454,6 +586,7 @@
   before there is a message to read."
   [^js motion-query]
   (when-not (or specimen? (.-matches motion-query))
+    (cancel-flick!)
     (let [t (now-ms)]
       (swap! state
              (fn [{:keys [draft pace] :as s}]
@@ -466,12 +599,7 @@
                                           (style/from-point in-force)
                                           (style/params in-force))
                                         {:wpm pace})]
-                 (assoc s :reading (when plan
-                                     {:plan plan
-                                      :style in-force
-                                      :t0 t
-                                      :cues (reading/cues plan (:glyphs draft) t)
-                                      :voiced-to (dec t)}))))))))
+                 (assoc s :reading (reading-of plan in-force (:glyphs draft) t))))))))
 
 (defn- stop-reading!
   "End the reading playing, if any: everything is lit at once."
@@ -625,8 +753,10 @@
   "The writer moved the XY pad to x, y: that point is their style, Mine,
   from now on."
   [x y ^js picker]
+  (cancel-flick!)
   (place-point! (board/xy->point (get-in @state [:board :point]) x y))
   (swap! state #(-> % (assoc :style-choice :mine) (redressed (now-ms))))
+  (remember! style-key "mine")
   (set! (.-value picker) "mine"))
 
 (defn- press-pad!
@@ -638,6 +768,7 @@
   when there is nothing to mark, or on the specimen."
   [^js input pad held-ms]
   (when-not specimen?
+    (cancel-flick!)
     (let [t (now-ms)
           selection {:from (.-selectionStart input) :to (.-selectionEnd input)}]
       (swap! state
@@ -810,11 +941,124 @@
 (defn- pick-style!
   "The visitor's own pick of a style, from the picker or Ctrl+1..6: as
   choose-style!, and a named style moves the XY pad's dot to where that
-  style sits, so the pad starts from it."
+  style sits, so the pad starts from it. Remembered on this device, which
+  the tour's own style steps (choose-style!) are not."
   [choice picker input]
+  (cancel-flick!)
   (when (some #{choice} style/styles)
     (place-point! (style/point choice)))
-  (choose-style! choice picker input))
+  (choose-style! choice picker input)
+  (remember! style-key (name choice)))
+
+(defn- remembered-style
+  "The style this viewer last picked here, Mine included; Auto when
+  storage is empty, blocked, throws or holds anything else."
+  []
+  (let [choice (try (keyword (.getItem js/localStorage style-key))
+                    (catch :default _ nil))]
+    (if (some #{choice} (into [:auto :mine] style/styles)) choice :auto)))
+
+;; --- the flick: asking, choosing, remembering --------------------------------
+
+(def ^:private axes (set (keys (style/point :plain))))
+
+(defn- over-axes?
+  "Whether m has one value for each axis of a style point, each ok?."
+  [m ok?]
+  (and (map? m) (= axes (set (keys m))) (every? ok? (vals m))))
+
+(defn- learner
+  "raw (parsed JSON, keys as keywords) as lab.learn's state, or nil when
+  it is not one. Decoded here, at the boundary: the shape has no schema
+  entry yet."
+  [raw]
+  (when (map? raw)
+    (let [{:keys [point step dir missed axis flicks] :as s} (update raw :axis keyword)]
+      (when (and (= #{:point :step :dir :missed :axis :flicks} (set (keys s)))
+                 (schema/valid? :ha/style-point point)
+                 (over-axes? step #(and (number? %) (< 0 %) (<= % 1)))
+                 (over-axes? dir #{1 -1})
+                 (over-axes? missed nat-int?)
+                 (contains? axes axis)
+                 (nat-int? flicks))
+        s))))
+
+(defn- remembered-learner
+  "What the flicks had learned of this viewer here; nil when storage is
+  empty, blocked, throws or holds anything else."
+  []
+  (try (-> (.getItem js/localStorage learn-key)
+           js/JSON.parse
+           (js->clj :keywordize-keys true)
+           learner)
+       (catch :default _ nil)))
+
+(defn- ask-flick!
+  "One exam on the text as it stands, asked for by the writer: nothing on
+  the specimen, with reduced motion, with no text, or while one runs. The
+  learner carries on from the style in force now (flick/resume). With no
+  pair left that can be told apart the chip says so for a moment and
+  nothing else happens. Nothing is stored until a choice is made."
+  [^js motion-query]
+  (let [{:keys [exam draft pace learner flick-timer] :as s} @state
+        text (:text draft)]
+    (when-not (or specimen? exam (.-matches motion-query) (str/blank? text))
+      (let [t (now-ms)
+            offer (flick/offer (flick/resume learner (point-at s t)) text {:wpm pace})]
+        (js/clearTimeout flick-timer)
+        (if offer
+          (swap! state #(-> %
+                            (assoc :flick-notice? false
+                                   :exam {:offer offer :phases (flick/phases offer) :t0 t
+                                          :phase nil :dress-before (:dress %)})
+                            (examined t false)))
+          (swap! state assoc
+                 :flick-notice? true
+                 :flick-timer (js/setTimeout (fn []
+                                               (swap! state assoc :flick-notice? false)
+                                               (show-flick!))
+                                             nothing-more-ms)))
+        (show-flick!)))))
+
+(defn- decide-flick!
+  "The writer's choice of :a or :b, once both have played: the learner
+  moves (flick/decide), its point is the writer's style, Mine, on the XY
+  pad too, and both are remembered on this device."
+  [choice ^js picker ^js input]
+  (when (= :choose (get-in @state [:exam :phase]))
+    (let [learned (flick/decide (get-in @state [:exam :offer]) choice)]
+      (swap! state assoc :learner learned :exam nil :reading nil :style-choice :mine)
+      (place-point! (:point learned))
+      (swap! state redressed (now-ms))
+      (set! (.-value picker) "mine")
+      (remember! learn-key (js/JSON.stringify (clj->js learned)))
+      (remember! style-key "mine")
+      (show-flick!)
+      (.focus input))))
+
+(defn- on-flick-key
+  "While an exam runs the arrows are its own: they never reach the caret
+  or the XY pad, and choose once both readings have played. Escape calls
+  it off, and goes on to do whatever else it does."
+  [picker input ^js e]
+  (when (:exam @state)
+    (case (.-key e)
+      "Escape" (cancel-flick!)
+      ("ArrowLeft" "ArrowRight") (do (.preventDefault e)
+                                     (.stopPropagation e)
+                                     (decide-flick! (if (= "ArrowLeft" (.-key e)) :a :b)
+                                                    picker input))
+      nil)))
+
+(defn- wire-flick!
+  [^js picker ^js input motion-query]
+  (.addEventListener js/window "keydown" #(on-flick-key picker input %) true)
+  (.addEventListener (by-id "which") "click"
+                     (fn [_] (ask-flick! motion-query) (.focus input)))
+  (doseq [[id choice] [["flick-a" :a] ["flick-b" :b]]]
+    ;; a pointer on a choice never takes the focus from the text box
+    (.addEventListener (by-id id) "mousedown" #(.preventDefault %))
+    (.addEventListener (by-id id) "click" #(decide-flick! choice picker input))))
 
 (defn- remembered-sound?
   "Whether this viewer turned Sound on here before; off when storage is
@@ -858,6 +1102,7 @@
         ("b" "B") (do (.preventDefault e) (toggle-board!))
         "." (do (.preventDefault e) (wand!))
         "Enter" (do (.preventDefault e) (read-back! motion-query))
+        "/" (do (.preventDefault e) (ask-flick! motion-query))
         nil))))
 
 ;; --- the tour ----------------------------------------------------------------
@@ -988,6 +1233,7 @@
   box are the visitor's draft: they are kept aside and the tour begins on
   an empty box (stop-tour! puts them back)."
   [{:keys [^js motion-query ^js input] :as ctx}]
+  (cancel-flick!)
   (cond
     (or specimen? (:tour @state)) nil
 
@@ -1051,10 +1297,12 @@
     (.focus input)
     ;; the specimen is not the writer's text: typing changes nothing there
     (when-not specimen? (.addEventListener input "input" on-input))
+    (swap! state assoc :style-choice (remembered-style) :learner (remembered-learner))
     (set! (.-value picker) (name (:style-choice @state)))
     (.addEventListener picker "change"
                        #(pick-style! (keyword (.-value picker)) picker input))
     (when-not specimen? (wire-board! input picker))
+    (when-not specimen? (wire-flick! picker input motion-query))
     (.addEventListener js/window "keydown" #(on-key picker input motion-query %))
     (.addEventListener (by-id "read") "click"
                        (fn [_] (read-back! motion-query) (.focus input)))

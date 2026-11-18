@@ -2286,12 +2286,184 @@ try {
       + `reduced motion: no tour, the caption says so`);
   }
 
+  // The flick (docs/LAB.md, "The flick"): asked for with Ctrl+/ or Which?,
+  // the lab reads the line back as A then B and the style moves toward the
+  // one chosen. Followed on __lab.flick()'s data and the DOM, never the clock.
+  {
+    begin('flick', null);
+    const line = 'I loooove this (honestly). But maybe not. Ship it!';
+    const nothingMore = 'Nothing more to tell apart on this line';
+    const axes = ['energy', 'flourish', 'softness', 'warmth'];
+    const samePoint = (p, q) => !!p && !!q && axes.every((k) => p[k] === q[k]);
+    const page = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = page;
+    const flickBackend = await open(page);
+    console.log(`flick: on ${flickBackend}`);
+    // what the page shows of the exam, read in one go so the parts agree
+    const look = (p = page) => p.evaluate(() => {
+      const el = (id) => document.getElementById(id);
+      return {
+        flick: window.__lab.flick(), chip: el('flick-chip').textContent, live: el('flick-chip').getAttribute('aria-live'),
+        idle: el('flick').classList.contains('idle'),
+        buttons: !el('flick-a').hidden && !el('flick-b').hidden,
+        reading: window.__lab.reading() !== null, readOnly: el('type').readOnly,
+        focused: document.activeElement === el('type'), value: el('type').value,
+        picker: el('style').value, which: el('which').disabled, board: window.__lab.board().point,
+        stored: { learn: localStorage.getItem('halfahead.lab.learn'), style: localStorage.getItem('halfahead.lab.style') },
+      };
+    });
+    const phase = (name, timeout = 90000) => page.waitForFunction((n) => window.__lab.flick().phase === n, name, { timeout })
+      .catch(() => { throw new Error(`the exam never reached phase ${name}`); });
+    // Type the line and wait until every letter has stood still for a
+    // second of the lab's own clock, whatever the frame rate.
+    const typeToRest = async (p) => {
+      await p.keyboard.type(line, { delay: 40 });
+      await p.evaluate((text) => new Promise((resolve, reject) => {
+        let still = null, since = 0;
+        const give = setTimeout(() => reject(new Error('the letters never came to rest')), 60000);
+        const sample = () => {
+          const f = window.__lab.lastFrame();
+          const poses = JSON.stringify(f.poses.filter((q) => !q['ghost?']));
+          if (window.__lab.liveText() !== text || poses !== still) { still = poses; since = f['t-ms']; }
+          else if (f['t-ms'] - since >= 1000) { clearTimeout(give); return resolve(); }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }), line);
+    };
+    // Ask, follow the exam through A and B to the choice, and return it.
+    const examine = async () => {
+      await page.keyboard.press('Control+Slash');
+      await phase('a');
+      const a = await look();
+      if (a.flick.phase === 'a' && (a.chip !== 'A' || !a.reading || !a.readOnly || a.buttons || a.idle))
+        throw new Error(`while A plays: ${JSON.stringify(a)}`);
+      await phase('b');
+      const b = await look();
+      if (b.flick.phase === 'b' && (b.chip !== 'B' || !b.reading || !b.readOnly || b.buttons || b.idle))
+        throw new Error(`while B plays: ${JSON.stringify(b)}`);
+      await phase('choose');
+      const c = await look();
+      if (c.chip !== 'A or B?' || !c.buttons || c.reading || !c.readOnly || c.idle || c.live !== 'polite')
+        throw new Error(`at the choice: ${JSON.stringify(c)}`);
+      const apart = axes.filter((k) => c.flick.pointA[k] !== c.flick.pointB[k]);
+      if (apart.length !== 1 || apart[0] !== c.flick.axis)
+        throw new Error(`A and B differ on ${apart.join(', ') || 'no axis'}; the exam says ${c.flick.axis}`);
+      return c;
+    };
+
+    const atFirst = await look();
+    if (atFirst.picker !== 'auto' || !atFirst.which || atFirst.flick.phase !== null || atFirst.flick.flicks !== 0 || atFirst.flick.point !== null || !atFirst.idle)
+      throw new Error(`on a fresh page: ${JSON.stringify(atFirst)}`);
+    await typeToRest(page);
+    await page.waitForFunction(() => !document.getElementById('which').disabled, null, { timeout: 5000 })
+      .catch(() => { throw new Error('Which? is still disabled with a line typed'); });
+    // nothing starts by itself: a line at rest is not an exam
+    if ((await look()).flick.phase !== null) throw new Error('an exam started unasked');
+
+    // one exam, B chosen with the right arrow
+    const first = await examine();
+    await page.screenshot({ path: `${out}/flick.png` });
+    await page.keyboard.press('ArrowRight');
+    const one = await look();
+    if (one.flick.phase !== null || one.flick.flicks !== 1 || !samePoint(one.flick.point, first.flick.pointB)
+        || one.picker !== 'mine' || !samePoint(one.board, first.flick.pointB) || one.readOnly || !one.focused || one.value !== line
+        || one.stored.style !== 'mine' || !one.stored.learn)
+      throw new Error(`after choosing B of ${JSON.stringify(first.flick)}: ${JSON.stringify(one)}`);
+    await page.waitForFunction(() => document.getElementById('flick').classList.contains('idle'), null, { timeout: 5000 })
+      .catch(() => { throw new Error('the chip stayed after the choice'); });
+
+    // asked again and cancelled: nothing changes, on the page or in storage
+    await page.keyboard.press('Control+Slash');
+    await phase('a');
+    await page.keyboard.press('ArrowRight'); // no choice before both have played
+    const early = await look();
+    if (early.flick.phase === null || early.flick.flicks !== 1) throw new Error(`an arrow during A: ${JSON.stringify(early.flick)}`);
+    await page.keyboard.press('Escape');
+    const cancelled = await look();
+    if (cancelled.flick.phase !== null || cancelled.flick.flicks !== 1 || !samePoint(cancelled.flick.point, one.flick.point)
+        || cancelled.stored.learn !== one.stored.learn || cancelled.stored.style !== 'mine' || cancelled.picker !== 'mine'
+        || !samePoint(cancelled.board, one.board) || cancelled.readOnly || cancelled.reading || cancelled.value !== line)
+      throw new Error(`after Escape: ${JSON.stringify(cancelled)}`);
+
+    // two more, each toward the option with the higher energy: once by the
+    // buttons, once by the keys
+    const energies = [one.flick.point.energy];
+    const asked = [first.flick.axis];
+    for (const how of ['button', 'key']) {
+      const exam = await examine();
+      const b = exam.flick.pointB.energy > exam.flick.pointA.energy;
+      if (how === 'button') await page.click(b ? '#flick-b' : '#flick-a');
+      else await page.keyboard.press(b ? 'ArrowRight' : 'ArrowLeft');
+      const after = await look();
+      const wanted = b ? exam.flick.pointB : exam.flick.pointA;
+      if (after.flick.phase !== null || after.flick.flicks !== energies.length + 1 || !samePoint(after.flick.point, wanted)
+          || !samePoint(after.board, wanted) || after.picker !== 'mine' || !after.focused)
+        throw new Error(`after choosing ${b ? 'B' : 'A'} by ${how} of ${JSON.stringify(exam.flick)}: ${JSON.stringify(after)}`);
+      if (after.flick.point.energy < energies[energies.length - 1])
+        throw new Error(`energy fell from ${energies[energies.length - 1]} to ${after.flick.point.energy}`);
+      energies.push(after.flick.point.energy);
+      asked.push(exam.flick.axis);
+    }
+    const three = await look();
+
+    // a reload keeps the point, the count and Mine
+    await open(page);
+    const reloaded = await look();
+    if (reloaded.flick.flicks !== 3 || !samePoint(reloaded.flick.point, three.flick.point) || reloaded.picker !== 'mine'
+        || !samePoint(reloaded.board, three.flick.point) || reloaded.flick.phase !== null)
+      throw new Error(`after a reload: ${JSON.stringify(reloaded)}; before it ${JSON.stringify(three.flick)}`);
+
+    // a named style picked is remembered too
+    await page.selectOption('#style', 'elegant');
+    await open(page);
+    const elegant = await look();
+    if (elegant.picker !== 'elegant') throw new Error(`after picking Elegant and reloading the picker shows ${elegant.picker}`);
+
+    // a learner with every axis finished, at the point in force: no exam
+    await page.evaluate((point) => {
+      const each = (v) => ({ energy: v, flourish: v, softness: v, warmth: v });
+      localStorage.setItem('halfahead.lab.learn', JSON.stringify({
+        point, step: each(1 / 32), dir: each(1), missed: each(0), axis: 'energy', flicks: 9 }));
+    }, elegant.board);
+    await open(page);
+    const finished = await look();
+    if (finished.flick.flicks !== 9 || !samePoint(finished.flick.point, elegant.board) || finished.picker !== 'elegant')
+      throw new Error(`the stored learner was not read back: ${JSON.stringify(finished)}`);
+    await typeToRest(page);
+    // every frame from the key on: the chip says so and no exam ever runs
+    await page.evaluate(() => {
+      const seen = window.__flickSeen = [];
+      const sample = () => {
+        seen.push({ phase: window.__lab.flick().phase, chip: document.getElementById('flick-chip').textContent });
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await page.keyboard.press('Control+Slash');
+    await page.waitForFunction((text) => document.getElementById('flick-chip').textContent === text, nothingMore, { timeout: 5000 })
+      .catch(() => { throw new Error(`the chip never read "${nothingMore}"`); });
+    await page.waitForFunction(() => document.getElementById('flick-chip').textContent === '', null, { timeout: 10000 })
+      .catch(() => { throw new Error('the chip never cleared'); });
+    const seen = await page.evaluate(() => window.__flickSeen);
+    const end = await look();
+    if (seen.some((m) => m.phase !== null) || seen.some((m) => m.chip !== '' && m.chip !== nothingMore) || !seen.some((m) => m.chip === nothingMore))
+      throw new Error(`with nothing left to ask: ${JSON.stringify(seen.filter((m, i) => i === 0 || m.chip !== seen[i - 1].chip || m.phase !== seen[i - 1].phase))}`);
+    if (end.flick.phase !== null || end.flick.flicks !== 9 || end.readOnly || end.picker !== 'elegant' || !end.idle)
+      throw new Error(`after the notice: ${JSON.stringify(end)}`);
+    await page.close();
+    done(`on ${flickBackend}: Auto and Which? disabled on a fresh page; Ctrl+/ on "${line}": A, B, then "A or B?" with both buttons, differing on ${first.flick.axis} alone; `
+      + `ArrowRight: 1 flick, the point is B's, the picker and the XY pad show Mine; Ctrl+/ then Escape changed nothing, in storage either; `
+      + `two more toward the higher energy (axes ${asked.slice(1).join(', ')}; a button, then a key): energy ${energies.join(' -> ')}; `
+      + `kept over a reload with Mine; Elegant kept over a reload; with every step at 1/32: "${nothingMore}" and no exam`);
+  }
+
   for (const [p, errors] of consoleErrors) {
     current = p;
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark', 'webgpu', 'board', 'board-narrow', 'tour-2', 'tour-5',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark', 'webgpu', 'board', 'board-narrow', 'tour-2', 'tour-5', 'flick',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
