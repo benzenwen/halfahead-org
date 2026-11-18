@@ -116,13 +116,19 @@
            (apply str (repeat (- places (count frac)) "0")) frac))))
 
 (defn- style-text
-  "The style in force, and (auto) when the rhythm chose it."
+  "The style in force, and (auto) when the rhythm chose it; the writer's
+  own point (the board's XY pad) reads as mine with its four axes."
   [style style-choice]
-  (str "style " (name style) (when (= :auto style-choice) " (auto)")))
+  (if (map? style-choice)
+    (let [{:keys [energy flourish softness warmth]} style-choice]
+      (str "style mine (e " (fixed energy 2) " f " (fixed flourish 2)
+           " s " (fixed softness 2) " w " (fixed warmth 2) ")"))
+    (str "style " (name style) (when (= :auto style-choice) " (auto)"))))
 
 (defn overlay-text
   "The overlay: a timing line, a backend line naming the motion style in
-  force, then one line per cue log entry and one per direction log entry,
+  force (:style-choice may be a :ha/style-point, the writer's own), then
+  one line per cue log entry and one per direction log entry,
   each newest first."
   [{:keys [summary t-ms backend glyphs style style-choice log directions]}]
   (let [{:keys [frame fps mean-ms worst-ms]} summary]

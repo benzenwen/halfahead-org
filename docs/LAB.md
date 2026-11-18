@@ -226,7 +226,8 @@ displacements are scaled, so the effects themselves stay one closed set.
 - **Tempo** multiplies every duration, staggers included. The longest
   gesture a patch may be is 2400 ms plus a 900 ms stagger, so the slowest
   (elegant) cue still lands within 1.5 × (2400 + 900) = 4950 ms, which is
-  why the settle bound is 5 s in every style.
+  why the settle bound is 5 s in every style, and at any style point:
+  `style/from-point` never gives a tempo above 1.5 (see below).
 - **Overshoot** is how much of the birth spring's overshoot is kept (0 is a
   smoothstep). Below 1, a cue's progress is eased too.
 - **Amplitude** multiplies displacement (position, rotation, scale,
@@ -260,12 +261,14 @@ wrote. This is local and private: the rhythm is read from the birth times
 already in the in-memory draft, and nothing is recorded, stored or sent.
 
 A quiet picker in the bottom-right corner ("Motion style": Auto, Plain,
-Elegant, Caffeinated, Drunken, Coarse) chooses. Ctrl+1 to Ctrl+6 choose in
+Elegant, Caffeinated, Drunken, Coarse, and Mine for the board's point)
+chooses. Ctrl+1 to Ctrl+6 choose in
 the same order. Either way the textarea keeps (or gets back) the focus. On
 some systems the browser keeps Ctrl+digit for switching tabs; the picker
 always works.
 
-Every frame names the style in force at its time (`:style`).
+Every frame names the style in force at its time (`:style`), unless the
+choice is a style point (see The board), which has no name.
 
 A style also sits at a point in the style space (`style/point`: energy,
 flourish, softness, warmth), which the score's marks are performed and
@@ -276,6 +279,106 @@ CAPITALS) and dresses asides and strong stresses (see Dress), never with
 a versal. Plain is where Auto rests when the typing rhythm lapses, and
 Auto is the default, so a visitor typing at an ordinary pace sees some of
 the score. Bareness is the reveal's job: level 0 shows none of it.
+
+Any point has motion parameters of its own, `style/from-point`: energy
+sets the tempo, on straight lines through (0, 1.5), (0.2, 1.36),
+(0.5, 1.0) and (1, 0.5), and the amplitude, through (0, 0.75), (0.5, 1.0) and (1, 1.25);
+softness takes away overshoot (2 × (1 − softness)); no sway, no steps.
+The middle of the space is Plain's motion exactly, and the calmest point
+is as slow as Elegant and no slower, so the 5 s bound holds for every
+point. `pose/frame` takes a point as its `:style-choice`: births and cues
+then move by `from-point` of it, and the frame has no `:style`.
+
+## The board
+
+docs/product/score.md, "How people and agents drive it": people will not
+tune parameters, so the lab gives them an instrument. The board is hidden
+until asked for: the **Board** button in the bar, or Ctrl+B. Whether it
+is out is remembered on the device (`localStorage`, key
+`halfahead.lab.board`), like Sound and Pace. Everything it decides is in
+`halfahead.lab.board` (pure, both hosts); the shell only turns events
+into its data.
+
+**Pads.** A toolbar labelled "Board" of seven real buttons, each showing
+its name and its key:
+
+| Pad | Key | What it says of the phrase |
+|---|---|---|
+| STRESS | Alt+1 | this matters |
+| HOLD | Alt+2 | stay on it |
+| ASIDE | Alt+3 | under the breath |
+| TURN | Alt+4 | but |
+| DOUBT | Alt+5 | not sure |
+| LAND | Alt+6 | and that is that |
+| BOOM | Alt+7 | the big moment: a card |
+
+A pad is pressed with a pointer, with Enter or Space when it has the
+focus (Tab reaches each), or with Alt+1 to Alt+7 from anywhere while the
+board is out, the textarea included, which keeps its focus and gains no
+character. A pointer on a pad never takes the focus from the textarea.
+
+**The target** (`board/target text selection`) is what a pad acts on, a
+`[from to)` span in UTF-16 units: the selection, trimmed of whitespace,
+when it holds more than whitespace; otherwise the last phrase, from the
+end of the previous sentence (after `. ! ? …` followed by whitespace, or
+a newline; "3.5" stays whole) to the end of the text without trailing
+whitespace, and no more than its last 12 words. With nothing to mark a
+pad does nothing.
+
+**A press** (`board/press pad point glyphs span t amount`) of a mark pad
+places one cue on the glyphs wholly in the span, `:source :board`,
+`:word` the span's text (at most 64 units): the gesture the style point
+in force performs a mark of that kind and amount with
+(`marks/gesture-for`). A pad is a deliberate act, so a style too spare
+to perform the mark unasked still does: it gets the gesture the same
+style would choose with every flourish. BOOM places a direction, a
+`:card` of energy `amount`, on those glyphs. Both go into the draft as
+typing's own do: logged in the overlay, voiced when Sound is on, and
+gone when an edit removes their glyphs. A board cue counts as use for the
+reveal like any cue.
+
+**Amount** (`board/amount held-ms`) is how hard: 0.7 for a tap (up to
+150 ms) rising evenly to 1.0 for a pad (or its key) held 600 ms or
+longer. Every press therefore plays when it is released, on the pad it
+went down on. `board/hold` keeps which pads are down, pointer holds and
+key holds apart, and says which press a release completes, so an
+abandoned press never plays: a pointer that leaves the pad, is cancelled
+or comes up elsewhere, a pad that loses the focus with Enter still down,
+and the window losing the focus all drop it, and a digit released plays
+a pad only if Alt+digit put it down (a plain 1 types a 1). A click with
+no pointer or key behind it (a screen reader's) is a tap. Holds are
+timed by the events' own timestamps.
+
+**A press is always seen.** On a fresh page the reveal level is 0 and
+nothing performs. A mark pad leaves the level at 1 or more and BOOM at 3
+(a card needs the stage), from the moment the press is placed: by the
+cue's own use where that reaches it, else by as many wands as it takes,
+so the level is kept like any other.
+
+**The XY pad** is a square with a dot: the writer's style, energy across
+and flourish up. Clicking or dragging sets the point, the arrow keys move
+it by 0.05 when it has the focus, and it is a `slider` named "Style:
+energy across, flourish up" whose value text reads like "Energy 60%,
+flourish 40%". Moving it makes the style **Mine**: the picker gains that
+option and shows it, and the frame is given the point as its
+`:style-choice`, so marks are chosen, dressed and timed by it (softness
+and warmth stay where the last named style left them; Plain's at first).
+Picking a named style, by the picker or Ctrl+1 to Ctrl+6, moves the dot
+to where that style sits (`style/point`). The point is remembered on the
+device (`halfahead.lab.board.point`, read back only if it is a valid
+`:ha/style-point`); the choice of style is not, so a reload starts on
+Auto with the dot where it was. The tour's own style steps leave the dot
+alone. Sound has no voice for a point yet: under Mine it sounds as Plain.
+
+**Narrow screens.** From 900 px up the board is a column in the right
+margin, beside the text (which fills the middle 70%). Below that it
+would cover the line being written, so it docks as a band along the
+bottom, pads in two rows with the XY pad beside them, and the picker,
+the debug panel and the tour's caption move up above it.
+
+`window.__lab.board()` returns `{visible, point, target}`;
+`__lab.cues()` the draft's placed cues and `__lab.textBox()` the box in
+CSS pixels around the live letters as last drawn.
 
 ## Gestures and patches
 
@@ -759,14 +862,18 @@ The shell plays it on a timer of its own, not the frame loop, so it
 keeps its pace however slowly the frames are drawn.
 
 It starts only when asked: with `?tour` in the address (the landing page
-links to `lab/?tour`), or from the **Tour** button in the bar. It types
-after whatever is in the text box, and its second scene clears it. A
+links to `lab/?tour`), or from the **Tour** button in the bar. Words
+already in the text box are the visitor's draft: the shell keeps them
+aside, the tour begins on an empty box, and when it ends or is stopped
+they are put back through the same edit path as typing, the caret at
+their end, so the draft is the visitor's again. With an empty box at the
+start, what the tour typed stays on a stop, as before. A
 caption bar at the bottom centre, a polite live region, shows each
 scene's caption beside a **Stop** button. Any key press, click or tap
 stops it at once (the event still does what it does, so a letter typed
-lands after the tour's text): the scripted typing stops, what is on the
-page stays and is the visitor's to edit, and the caption reads "Your
-turn." for 2 s. When it ends or is stopped, the style and the pace the
+lands after the text): the scripted typing stops, what is on the
+page (or the draft kept aside) is the visitor's to edit, and the caption
+reads "Your turn." for 2 s. When it ends or is stopped, the style and the pace the
 visitor had come back and the textarea has the focus; the reveal level
 stays where the tour took it. The tour records nothing: its pace is not
 remembered on the device, and it makes no sound of its own (the lab's
@@ -788,7 +895,11 @@ labelled checkbox, and every sound has a visible counterpart. Read back is
 a real button and Pace a labelled range input; a reading never changes
 the textarea's text, so assistive technology has all of it throughout.
 The tour's captions are a polite live region, Stop is a real button, and
-the tour does not run with reduced motion (see The tour).
+the tour does not run with reduced motion (see The tour). The board's
+pads are real buttons in a labelled toolbar, each named and reachable by
+Tab, pressed by Enter or Space; the XY pad is a focusable slider with a
+name and value text, moved by the arrow keys; all have a visible focus
+ring, and the board works at 360 px wide (see The board).
 
 ## Debug overlay
 
@@ -819,9 +930,11 @@ loooove -> swell 0.7 (reading)
 - **backend and glyphs**: what the renderer is using and how many glyph
   instances it drew in that frame.
 - **style**: the motion style in force, with `(auto)` when the rhythm
-  chose it.
+  chose it; with the board's point in force (Mine) it reads `style mine
+  (e 0.60 f 0.40 s 0.50 w 0.50)`, the point's four axes.
 - **cues**: up to six cues fired in the last eight seconds, newest first,
-  each as word -> effect, intensity, and the source that chose it.
+  each as word -> effect, intensity, and the source that chose it; a
+  pad's reads like any other, `did it -> glow 0.7 (board)`.
 - **directions**: likewise up to six recent directions, newest first, each
   as the phrase (its first 16 characters) -> shot and energy.
 - **camera target**: where this frame's camera looks, in em.
@@ -967,7 +1080,31 @@ typed at 450 ms a key (Auto reads Elegant) and then the 14 words typed at
 40 ms a key (Caffeinated, so a versal) wear the same dress (kinds, glyph
 ids, inks, sizes) 1 s after the last key and 8 s later, when Auto reads
 Plain. The same data and colour checks as on paper pass on the dark stage
-(`?reveal=3`, `dress-dark.png`). On `/lab/?tour&debug` (the `tour`
+(`?reveal=3`, `dress-dark.png`). The `board` step, on
+`/lab/?debug&reveal=3` in Plain, reads the draft's cues and directions
+and every frame drawn (each with its own `t-ms`; a letter is moving when
+its pose differs from the one it rests in), never the clock. The board
+is hidden on load and Ctrl+B shows a toolbar named Board with seven
+named pads. With "we did it" typed, a click on STRESS places a `(board)`
+glow 0.7 on the whole phrase, shown in the overlay, and a frame shows
+its letters moving; Alt+2 places a swell with the focus and the text
+unchanged; with "did" selected LAND's cue has only those glyphs and no
+other letter moves; BOOM places a `:card`. A press that goes down on
+STRESS, moves off it and is released, then a typed 1, places no board
+cue and types the digit; the same after Alt+1 goes down and the window
+gets a `blur`. DOUBT held 800 ms with Enter, and again with Space, has
+amount 1.0, and a quick Enter 0.7, one cue each. A click in the XY pad's
+top right corner gives a point above 0.9 on both axes, the picker shows
+Mine, the overlay names it, and the arrow keys step it by 0.05; the same
+swell is then at rest sooner after its cue than Plain's was still seen
+moving (`board.png`, mid-swell). After a reload the board is still out
+and the point kept. On a fresh plain page at level 0, STRESS brings the
+level to 1 with the phrase moving in a frame at that level, and BOOM
+brings it to 3. At 360 × 640 with the board out and two lines typed, the
+board is a band along the bottom whose box does not intersect
+`textBox()`, every pad at least 24 px each way and inside the viewport,
+and a pad still plays (`board-narrow.png`); the boxes are apart at 1000
+px too. On `/lab/?tour&debug` (the `tour`
 step) it follows the tour by data, never by the clock: a recorder in the
 page notes every change of the caption, and the scenes must run 1 to 8
 with their captions. Scene 1 begins at level 0 on paper; in scene 2 the
@@ -983,14 +1120,17 @@ stored 300) are as before, the stored pace untouched. It prints the
 tour's measured length (`tour: N.N s end to end on <backend>`). Then,
 started from the Tour button with Drunken picked, a Shift key in scene 2
 stops it at once: the text typed so far stays, an x typed lands after
-it, Drunken is back. With reduced motion emulated, `?tour` starts no
+it, Drunken is back. Started from the button over a typed "my own
+words", the tour plays on an empty box, and a Shift in scene 2 gives the
+draft back, focused, the caret at its end; started again and left to
+finish, it gives it back again. With reduced motion emulated, `?tour` starts no
 tour and the caption says why. All along it asserts on
 `window.__lab`; it leaves `typing-mid.png`, `embers.png`,
 `settled.png`, `wrapped.png`, `reveal-0.png` to `reveal-3.png`, `crawl.png`, `steady.png`, `swell.png`, `card.png`, `push.png`, `fuse.png` (taken at the
 first slice where a letter of "merge" is more than 0.05 em off the line,
 so it always shows the fuse in flight), `debug.png`, `style-<name>.png` for
 each explicit style, and `style-auto-fast.png` and `style-auto-slow.png` in
-`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png`, `dress-dark.png`, `tour-2.png`, `tour-5.png` and `webgpu.png`, and stops the server it started. It is not part of
+`out/lab/`, with `specimen-dark.png`, `specimen-paper.png`, `reading.png`, `dress-paper.png`, `dress-glint.png`, `dress-dark.png`, `board.png`, `board-narrow.png`, `tour-2.png`, `tour-5.png` and `webgpu.png`, and stops the server it started. It is not part of
 `bb test`.
 
 ### The webgpu step
