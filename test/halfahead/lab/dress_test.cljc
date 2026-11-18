@@ -48,7 +48,9 @@
 (deftest each-dress-is-placed-on-the-glyphs-of-its-span
   (doseq [as all-dress]
     (testing (name as)
-      (is (= [{:as as :glyph-ids (mapv id-at (range 6 10))}]
+      (is (= [(cond-> {:as as :glyph-ids (mapv id-at (range 6 10))}
+                ;; a stress between asterisks names them (order 0060)
+                (#{:gilt :rubric :strong} as) (assoc :markers [(id-at 5) (id-at 10)]))]
              (dress/placed [{:span [7 11] :as as}] glyphs))
           "'gold' is units 7 to 11 and glyphs 6 to 9: the rocket before it is two units"))))
 
@@ -56,7 +58,7 @@
   (let [text "This is *the one thing* that matters (trust me)."
         worn (dress/placed (marks/dress-for (style/point :plain) text (marks/read text))
                            (glyphs-of text))]
-    (is (= [{:as :gilt :glyph-ids (mapv id-at (range 9 22))}
+    (is (= [{:as :gilt :glyph-ids (mapv id-at (range 9 22)) :markers [(id-at 8) (id-at 22)]}
             {:as :whisper :glyph-ids (mapv id-at (range 38 46))}]
            worn))
     (is (= ["the one thing" "trust me"]
@@ -66,7 +68,7 @@
 
 (deftest placed-keeps-order-and-drops-what-holds-no-glyph
   (is (= [{:as :versal :glyph-ids [(id-at 2)]}
-          {:as :gilt :glyph-ids (mapv id-at (range 6 10))}
+          {:as :gilt :glyph-ids (mapv id-at (range 6 10)) :markers [(id-at 5) (id-at 10)]}
           {:as :whisper :glyph-ids (mapv id-at (range 13 15))}]
          (dress/placed [{:span [3 4] :as :versal}
                         {:span [7 11] :as :gilt}
@@ -80,6 +82,47 @@
   (is (= [] (dress/placed [{:span [0 4] :as :gilt}] [])))
   (is (= [] (dress/placed [] glyphs)))
   (is (= [] (dress/placed nil glyphs))))
+
+(defn- plain-dress
+  "text's dress in Plain, placed on one glyph per character."
+  [text]
+  (dress/placed (marks/dress-for (style/point :plain) text (marks/read text))
+                (glyphs-of text)))
+
+(deftest the-asterisks-of-a-dressed-stress-are-its-markers
+  (is (= [{:as :gilt :glyph-ids (mapv id-at (range 1 5)) :markers [(id-at 0) (id-at 5)]}]
+         (plain-dress "*this* is great!")))
+  (is (= [{:as :gilt :glyph-ids (mapv id-at (range 2 6)) :markers [(id-at 1) (id-at 6)]}]
+         (plain-dress "**bold**"))
+      "the inner pair; the outer two are in no entry")
+  (is (= [{:as :gilt :glyph-ids (mapv id-at (range 0 4))}] (plain-dress "THIS is great!"))
+      "a stress in capitals has none")
+  (testing "a whispered aside has none"
+    (is (= [{:as :whisper :glyph-ids (mapv id-at (range 4 6))}] (plain-dress "ok (hm) fine")))
+    (is (= [{:as :whisper :glyph-ids [(id-at 1) (id-at 2)]}]
+           (dress/placed [{:span [1 3] :as :whisper}] (glyphs-of "*hm*")))
+        "even between asterisks")
+    (is (= [{:as :gilt :glyph-ids (mapv id-at (range 1 5)) :markers [(id-at 0) (id-at 5)]}
+            {:as :whisper :glyph-ids [(id-at 2) (id-at 3)]}]
+           (plain-dress "*(hm)*"))
+        "a starred aside: the stress has them, the whisper inside does not"))
+  (testing "both asterisks, or neither"
+    (doseq [as [:gilt :rubric :strong]]
+      (is (= [{:as as :glyph-ids (mapv id-at (range 1 5))}]
+             (dress/placed [{:span [1 5] :as as}] (glyphs-of "*gold"))) (name as))
+      (is (= [{:as as :glyph-ids (mapv id-at (range 0 4))}]
+             (dress/placed [{:span [0 4] :as as}] (glyphs-of "gold*"))) (name as))
+      (is (= [{:as as :glyph-ids (mapv id-at (range 1 5)) :markers [(id-at 0) (id-at 5)]}]
+             (dress/placed [{:span [1 5] :as as}] (glyphs-of "*gold*"))) (name as))))
+  (is (= [{:as :versal :glyph-ids [(id-at 1)]}]
+         (dress/placed [{:span [1 2] :as :versal}] (glyphs-of "*g*")))
+      "a versal is no stress")
+  (is (= [{:as :gilt :glyph-ids [(id-at 1)]}]
+         (dress/placed [{:span [2 3] :as :gilt}] (glyphs-of ["🚀" "g" "*"])))
+      "the rocket before it is no asterisk")
+  (is (= [{:as :gilt :glyph-ids [(id-at 1)]}]
+         (dress/placed [{:span [1 2] :as :gilt}] (glyphs-of ["*" "g" "**"])))
+      "an asterisk is a glyph of its own"))
 
 ;; --- seen --------------------------------------------------------------------
 
@@ -223,6 +266,23 @@
                           ;; consecutive glyphs: a span is one run of the text
                           (= (count glyph-ids)
                              (inc (- (order (peek glyph-ids)) (order (first glyph-ids)))))))
+                   placed)
+           ;; markers: only on a stress, the two asterisks either side of it
+           (every? (fn [{:keys [as glyph-ids markers]}]
+                     (or (nil? markers)
+                         (and (#{:gilt :rubric :strong} as)
+                              (= 2 (count markers))
+                              (every? #(= "*" (:char (glyphs (order %)))) markers)
+                              (= (order (first markers)) (dec (order (first glyph-ids))))
+                              (= (order (second markers)) (inc (order (peek glyph-ids)))))))
+                   placed)
+           ;; and every stress that has an asterisk on each side names them
+           (every? (fn [{:keys [as glyph-ids markers]}]
+                     (or markers
+                         (not (#{:gilt :rubric :strong} as))
+                         (not= ["*" "*"]
+                               (mapv #(:char (get glyphs % {}))
+                                     [(dec (order (first glyph-ids))) (inc (order (peek glyph-ids)))]))))
                    placed)
            (every? (set (mapcat :glyph-ids placed)) (keys sizes))
            (every? #{1.8 0.85} (vals sizes))

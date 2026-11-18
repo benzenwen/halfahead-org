@@ -1311,6 +1311,8 @@ try {
         level: f.reveal.level,
         lights: f.reveal.lights,
         poses: f.poses,
+        backend: lab.backend,
+        typed: document.getElementById('type').value,
         overlay: document.getElementById('debug').textContent,
         gold: lab.inkColour('gold', f.reveal.lights),
         dress: lab.dress().map((d) => {
@@ -1318,7 +1320,7 @@ try {
           const first = poses[0], last = poses[poses.length - 1];
           const top = lab.project(first.x, first.y + 0.9, 0);
           const bottom = lab.project(last.x + lab.advance(last.char), last.y - 0.3, 0);
-          return { as: d.as, text: poses.map((p) => p.char).join(''), poses,
+          return { as: d.as, text: poses.map((p) => p.char).join(''), poses, markers: d.markers ?? [],
                    box: { x0: top.x, y0: top.y, x1: bottom.x, y1: bottom.y } };
         }),
       };
@@ -1343,8 +1345,9 @@ try {
       if (ungilded) throw new Error(`a letter of the gilt phrase has ink ${ungilded.ink}, tint ${ungilded.tint}`);
       const loud = whisper.poses.find((p) => !(p.scale < 1) || p.ink !== 'muted');
       if (loud) throw new Error(`a letter of the whisper has scale ${loud.scale}, ink ${loud.ink}`);
+      // the gilt's two asterisks rest whispered (checked in (e)); nothing else may
       const bare = state.poses.find((p) => !gilt.poses.concat(whisper.poses).some((q) => q.id === p.id)
-        && ('ink' in p || p.scale !== 1));
+        && !gilt.markers.includes(p.id) && ('ink' in p || p.scale !== 1));
       if (bare) throw new Error(`"${bare.char}", outside any dress, has ink ${bare.ink}, scale ${bare.scale}`);
       const line = 'dress: gilt "the one thing" · whisper "trust me"';
       if (!state.overlay.includes(line)) throw new Error(`the overlay does not read '${line}': ${state.overlay}`);
@@ -1471,6 +1474,29 @@ try {
     if (plainLoud) throw new Error(`in Plain a letter of the whisper has scale ${plainLoud.scale}, ink ${plainLoud.ink}`);
     const plainLine = 'dress: gilt "the one thing" · whisper "trust me"';
     if (!plain.overlay.includes(plainLine)) throw new Error(`in Plain the overlay does not read '${plainLine}': ${plain.overlay}`);
+    // The asterisks of the dressed stress recede: still there, in the frame
+    // and in the text box, but muted and smaller than the letters beside
+    // them. The poses are the pure core's, the same on either backend.
+    const stars = the(plain, 'gilt').markers;
+    if (stars.length !== 2) throw new Error(`in Plain the gilt's markers are ${JSON.stringify(stars)}, not its two asterisks`);
+    const live = plain.poses.filter((p) => !p['ghost?']);
+    const quietened = stars.map((id) => {
+      const i = live.findIndex((p) => p.id === id);
+      const star = live[i];
+      if (!star || star.char !== '*') throw new Error(`marker ${id} is "${star?.char}", not an asterisk`);
+      if (star.ink !== 'muted' || star.tint !== 1) throw new Error(`an asterisk of the gilt phrase rests in ink ${star.ink}, tint ${star.tint}, not the muted ink`);
+      for (const beside of [live[i - 1], live[i + 1]]) {
+        if (!(star.scale < 1 && star.scale < beside.scale))
+          throw new Error(`an asterisk of the gilt phrase is at scale ${star.scale}, beside "${beside.char}" at ${beside.scale}`);
+      }
+      return star;
+    });
+    const gilded = the(plain, 'gilt').poses;
+    if (live[live.indexOf(quietened[0]) + 1].id !== gilded[0].id || live[live.indexOf(quietened[1]) - 1].id !== gilded[gilded.length - 1].id)
+      throw new Error(`the markers ${JSON.stringify(stars)} do not enclose the gilt phrase`);
+    if (plain.typed !== dressed || plain.typed.split('*').length !== 3)
+      throw new Error(`the text box holds "${plain.typed}", not "${dressed}" with both its asterisks`);
+    if (live.map((p) => p.char).join('') !== dressed) throw new Error('the frame no longer spells the text');
     await retype(paper, 'plain', fourteen);
     const unopened = await worn(paper);
     if (unopened.dress.some((d) => d.as === 'versal')) throw new Error(`Plain gives 14 words ${JSON.stringify(unopened.dress.map((d) => [d.as, d.text]))}`);
@@ -1566,7 +1592,8 @@ try {
     done(`on paper ${onPaper.summary}; under the pointer the gold glows up to ${brightest.toFixed(2)}, each letter on the curve for its distance, `
       + `and 0.12 again with it away; Caffeinated's versal at scale ${opened.first.scale.toFixed(2)}, the next letter ${(opened.second.x - rightEdge).toFixed(3)} em `
       + `past its right edge; the ${haloPixels.length} halo pixels round the gold under the pointer are ${offGold.toFixed(1)} from gold on paper, `
-      + `${offVermilion.toFixed(1)} from vermilion; Plain gives gilt "the one thing" and whisper "trust me" and 14 words no versal; `
+      + `${offVermilion.toFixed(1)} from vermilion; Plain gives gilt "the one thing" and whisper "trust me" and 14 words no versal, `
+      + `its two asterisks muted at scale ${quietened[0].scale} beside letters at 1 and both still in the text box (on ${plain.backend}); `
       + `at level 0 nothing is dressed in any of the five styles; in Auto the gilt and whisper typed at 450 ms a key (Elegant) and `
       + `the versal typed at 40 ms a key (Caffeinated) are the same 1 s after typing and 8 s later, when Auto reads Plain; `
       + `on the stage ${onStage.summary}`);

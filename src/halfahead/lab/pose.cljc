@@ -404,6 +404,20 @@
                  (smoothstep (clamp 0.0 1.0 (/ (- t since) dress-ease-ms))))]))
         placed))
 
+(defn- with-markers
+  "worn, and after it a whisper of the same weight on the :markers of each
+  dress that has them: the asterisks of a dressed stress have done their
+  work, so they recede with it. A marker inside a placed dress keeps that
+  dress instead, and one shared by two stresses recedes with the first."
+  [worn]
+  (first
+   (reduce (fn [[out taken] [{:keys [markers]} w]]
+             (if-let [ids (seq (remove taken markers))]
+               [(conj out [{:as :whisper :glyph-ids (vec ids)} w]) (into taken ids)]
+               [out taken]))
+           [worn (into #{} (mapcat (comp :glyph-ids first)) worn)]
+           worn)))
+
 (defn- eased-sizes
   "{glyph-id size} at this instant: each sized dress w of the way from 1
   to its size, a glyph in two taking the one further from 1."
@@ -741,7 +755,9 @@
   from when it was first seen: a sized letter's advance is multiplied by
   its size, so the layout, the wrapping and the caret make room for it,
   and it is scaled on its baseline from its left edge; inks, weights and
-  the glint are those of lab.dress/at-rest. At level 0, and with no
+  the glint are those of lab.dress/at-rest. The :markers of a placed
+  dress (the asterisks around a stress) wear :whisper at that dress's
+  weight, unless they lie inside another placed dress. At level 0, and with no
   :dress, frames are exactly as without it. Births, cues and
   shots are performed at the level in force when they happened (see the
   namespace doc); on reaching level 2 by use or a wand every letter then
@@ -763,7 +779,8 @@
         chars (mapv :char glyphs)
         t (double t-ms)
         {:keys [level lights reached]} (reveal/state draft t reveal-opts)
-        worn (when (and draft-dress (>= level 1)) (wearing draft-dress t reduced-motion?))
+        worn (when (and draft-dress (>= level 1))
+               (with-markers (wearing draft-dress t reduced-motion?)))
         sizes (if worn (eased-sizes worn glyphs) {})
         widths (mapv (fn [{:keys [id char]}]
                        (let [a (advance char)]
