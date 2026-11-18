@@ -1,6 +1,9 @@
 {:id "0058-lab-flick-ui"
  ;; 2026-11-18: trimmed before its first run (no debug line, no replay
  ;; key), after the board showed what a page-sized order costs.
+ ;; Its first run was cut short by a container restart two minutes into
+ ;; the build, after the plan ($1.66). The plan station is replaced by a
+ ;; replay of that plan (:engines), so it is not paid for twice.
  :title "Lab flick, the page: 'Which?' reads your line back two ways and your style moves toward the one you pick"
  :lupa/deps #{"0053-lab-flick" "0059-lab-flick-turn"}
  :lupa/area :lab
@@ -14,6 +17,8 @@
  :scope ["src/halfahead/lab/main.cljs" "public/lab/index.html"
          "e2e/lab.mjs" "docs/LAB.md"
          "src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"]
+ :engines {:plan {:engine :exec
+                  :cmd ["cat" "../../../out/foreman/0058-plan.md"]}}
  :design "lab.main and index.html: a 'Which?' button in the bar and Ctrl+/
             ask for one exam on the current text (the button is disabled
             with no text or with reduced motion).
