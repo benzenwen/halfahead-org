@@ -1,6 +1,6 @@
 {:id "0058-lab-flick-ui"
  :title "Lab flick, the page: 'Which?' reads your line back two ways and your style moves toward the one you pick"
- :lupa/deps #{"0053-lab-flick"}
+ :lupa/deps #{"0053-lab-flick" "0059-lab-flick-turn"}
  :lupa/area :lab
  :lupa/risk :medium
  :goal "docs/product/score.md, 'How people and agents drive it', and the
@@ -14,8 +14,9 @@
          "e2e/lab.mjs" "docs/LAB.md"]
  :design "lab.main and index.html: a 'Which?' button in the bar and Ctrl+/
             start an exam on the current text (disabled with no text or
-            with reduced motion; if offer gives nil a short note says
-            'Nothing to compare on this line yet'). During it: a chip
+            with reduced motion; if offer gives nil the chip says 'Nothing
+            more to tell apart on this line' for two seconds and nothing
+            else happens: that is how an exam ends, order 0059). During it: a chip
             reads 'A' while A plays, 'B' while B plays, then 'A  or  B ?'
             with two buttons; the left and right arrow keys, or the
             buttons, choose; Escape cancels and changes nothing; R plays

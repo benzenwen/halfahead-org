@@ -1,0 +1,68 @@
+{:id "0059-lab-flick-turn"
+ :title "Lab flick: ask an axis the other way before passing over it, and let an axis be finished"
+ :lupa/deps #{"0053-lab-flick"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :lupa/fixes #{"0053-lab-flick"}
+ :goal "The review of order 0053 and the foreman's H8 measurement
+        (docs/product/lab-notebook.md). As built, an axis whose pair looks
+        the same in the stored direction is passed over, and is never
+        asked the other way: on 'Fine. But maybe not.' from the centre,
+        flourish 0.5 to 0.75 shows nothing and 0.5 to 0.25 would. Over 30
+        ordinary lines and 20 simulated writers flourish was asked in 17%
+        of runs; asking the other way first makes it 60%. That alone lets
+        a writer who keeps refusing be asked the same question for ever,
+        so an axis must also be able to finish: H5 says small differences
+        teach nothing."
+ :scope ["src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"
+         "src/halfahead/lab/learn.cljc" "test/halfahead/lab/learn_test.cljc"]
+ :design "halfahead.lab.learn gains (existing functions unchanged in
+          behaviour):
+          (turn state) -> the state asking about the same axis in the
+            other direction, nothing else changed (no flick counted, no
+            miss counted).
+          (step state) -> the size of the step the next pair takes along
+            its axis.
+          skip's docstring says what it does, not who calls it.
+          halfahead.lab.flick/offer: for each of the learner's four axes
+          in turn, starting with the one it is asking about:
+            an axis whose step is below 1/16 is finished and is passed
+            over (learn/skip);
+            otherwise take (learn/pair s); if its two plans are not
+            distinct, take (learn/pair (learn/turn s)); if those are
+            distinct the offer's :state is the turned state; if neither
+            is, pass over the axis.
+          nil when no axis gives an offer. Everything else about the
+          offer's shape is as now.
+          distinct?: the thresholds are inclusive at their edges whatever
+          the rounding (tempo 1.0 against 0.9, amplitude 1.0 against 1.1
+          and overshoot 1.0 against 0.8 or 1.2 are distinct): compare
+          with a tolerance of 1e-9.
+          Tests: learn/turn and learn/step; offer on 'Fine. But maybe
+          not.' from (learn/start) reaches flourish and offers it
+          downward (point-b's flourish is below point-a's); a state whose
+          energy step is below 1/16 is never offered energy; distinct? at
+          the edges above, and just inside them (tempo 1.0 against 0.91,
+          overshoot 1.0 against 0.81 are not distinct), so the thresholds
+          are pinned. Property: for any text and learn state, offer is
+          nil or its two plans are distinct and its points differ on
+          exactly one axis (as now). And an ending: for each of a dozen
+          lines of your choosing (some bare, some with an aside, a held
+          word, capitals, asterisks), a writer who always chooses :a is
+          offered nothing more within 24 flicks, and one who always picks
+          the point with the lower energy (:a on a tie) within 30. (A
+          writer who always chooses :b walks from wall to wall for ever;
+          that is theirs to stop, each exam being asked for.)"
+ :acceptance
+ ["flick and learn tests as in the design, on both hosts; `bb test` stays
+   green"]
+ :non-goals
+ ["No change to learn/start, pair, choose, distance, simulate or
+   experiment, to reading, pace, marks, score, gestures, synth, dress or
+   style; do not edit the schema"
+  "No page, no lab.main, no browser check: order 0058"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"
+           "src/halfahead/lab/learn.cljc" "src/halfahead/lab/reading.cljc"
+           "DESIGN.md"]
+ :budget-usd 6.0}

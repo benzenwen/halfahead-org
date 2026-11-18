@@ -36,6 +36,7 @@ slow. In typed text the held syllable is elongation: "loooove".
 | H5 | A style can be learned from about a dozen flicks | Simulate readers with hidden style points and noisy choices; error against number of flicks | **Holds for a careful chooser, fails for a noisy one** (below) |
 | H6 | Pacing by the reader's beat keeps every performance inside reading time and the 5 s cap | Properties over generated scores and paces from 100 to 800 words a minute | **Holds, and shows the cap starves slow readers** (below) |
 | H7 | Dress (versal, rubric, gilt) stays readable on paper and on the dark stage | Contrast of each ink against both backgrounds ≥ 4.5:1, computed; screenshots | **Holds** for the inks and for dress as drawn (below) |
+| H8 | On an ordinary line the flick can find two readings a person can tell apart, on every axis of a style | 30 lines, 20 simulated careful writers; count what is asked and how far each axis moves toward their taste | **Half holds**: speed and bounce on every line; flourish only where the line has something to flourish; warmth never (below) |
 
 ## Results
 
@@ -272,3 +273,46 @@ ninth buffer failed the step and was caught by the probe).
 Still not measured anywhere but on Ben's machine: a WebGPU pixel. The
 software device here is lost before it presents.
 
+### H8: what the flick can ask on an ordinary line (orders 0053 and 0059, 2026-11-18)
+
+The flick reads your line back twice, as your style now and one step
+along one axis, and never offers two readings that would look the same
+(H5: look-alikes teach nothing). So how much of a style can a line
+teach? Thirty ordinary lines (bare ones such as "Merged." and "Sounds
+good.", and ones with an aside, a held word, capitals or asterisks),
+twenty simulated writers with tastes drawn evenly over the four axes,
+each always choosing the reading nearer their taste, from the centre, at
+250 words a minute. The script is
+`docs/product/experiments/h8_flick.clj`.
+
+| | as first built (0053) | asking the other way before passing over an axis; an axis finishes below a step of 1/16 (0059) |
+|---|---|---|
+| lines with something to ask | 30 of 30 | 30 of 30 |
+| flicks until nothing more to ask, median (least to most) | 11 (8 to 15) | 14 (9 to 27) |
+| runs in which flourish was asked | 17% | 60% |
+| runs in which warmth was asked | 0% | 7% |
+| median error in energy, before → after | 0.15 → 0.04 | 0.15 → 0.03 |
+| in softness | 0.27 → 0.03 | 0.27 → 0.03 |
+| in flourish | 0.34 → 0.28 | 0.34 → 0.21 |
+| in warmth | 0.19 → 0.19 | 0.19 → 0.17 |
+| distance to the writer's taste (`learn/distance`) | 0.252 → 0.212 | 0.252 → 0.194 |
+| a writer who refuses everything is asked at most | 9 times | 18 times |
+
+- **Speed and bounce are learned from any line**, in about a dozen
+  flicks. They are what a person notices first.
+- **Flourish is learned only where the line gives it something to do**: a
+  mark the style may perform or pass over. On a bare line there is
+  nothing to ask, and the exam does not ask. As first built it also
+  never asked downward when upward showed nothing (the reviewer of 0053
+  saw this on "Fine. But maybe not."); asking the other way first took
+  flourish from 17% of runs to 60%.
+- **Warmth is not learned.** In a style it decides one thing, whether a
+  dressed stress is gold or red. Open question Q35.
+- **The exam ends by itself**, once the steps are too small to tell
+  apart. Asking the other way without that floor asked a writer who
+  refused everything the same question for ever (60 times, where the
+  run was stopped).
+- **What this does not show.** The writers are simulated and careful.
+  "Can be told apart" is a rule (10% in tempo or amplitude, 0.2 in
+  overshoot, or a different gesture or dress), not a measurement of what
+  people see. A person at the keyboard is the test.

@@ -44,6 +44,7 @@ with; the cheap ones can flip in one order.*
 | Q32 | What an "at rest" letter is | Since dress, rest includes its dress (a whispered letter rests smaller); tests mean "stopped changing" | The builder changed one browser check to say so, and said so | — |
 | Q33 | The board did not fit $12 | Left the cap alone; split the flick into two orders (0053 pure, 0058 page) and resumed the board from its saved diff, so its fourth run paid for a review and not a third build | The charter says the cap is yours. The board took four runs and $26.87: one lost to a container restart, two that built everything and then had too little left for the review (a rerun throws the built work away) | Yours: `:usd-per-order` in `lupa.charter.edn`; $20 fits a page-sized order with one rework |
 | Q34 | How slow may the calmest style be? | Tempo 1.5 at energy 0 (it was 1.6); from energy 0.2 up the curve is as it was, so Elegant, Plain and the rest are unchanged | At 1.6 a point at energy 0 ran 5280 ms, past the 5 s cap; my first fix moved Elegant too and broke a test, and the builder's fourth knot was the better answer | One line in `lab.style` |
+| Q35 | Warmth, the fourth axis of a style | Left in the style point; the flick passes over it, because nothing on a line shows it | H8: warmth decides one thing (a dressed stress is gold or red), so the flick asked about it in 0 to 7% of runs. It needs more to do (the temperature of a glow, a gentler gesture) or it should go | A design choice more than an order |
 
 ## Still yours from before
 
