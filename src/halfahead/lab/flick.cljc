@@ -4,7 +4,9 @@
   style now) and B (one step along one axis), then the choice between
   them. A pair that would look the same is never offered, because the H5
   simulation (docs/product/lab-notebook.md) says flicks only teach when
-  the two are easy to tell apart. Nothing here starts an exam: it is
+  the two are easy to tell apart: the axis is asked the other way first,
+  and passed over if that shows nothing either. An axis whose step has
+  become small is finished, so the exams come to an end. Nothing here starts an exam: it is
   asked for. Pure, the same on both hosts."
   (:refer-clojure :exclude [distinct?])
   (:require [halfahead.lab.learn :as learn]
@@ -14,9 +16,21 @@
 ;; How far apart two motions must be before a person can be asked which
 ;; they prefer (H5: a choice between look-alikes is noise, and noise is
 ;; what slows the learner). Tempo and amplitude multiply, so they are
-;; compared as a share of the larger; overshoot is compared as it is.
+;; compared as a share of the smaller (1.0 is as far from 1.1 as from
+;; 0.9 is from 1.0); overshoot is compared as it is.
 (def ^:private told-apart-share 0.1)
 (def ^:private told-apart-overshoot 0.2)
+
+;; The thresholds are inclusive, and the values compared are sums and
+;; products of doubles: without this, 1.0 against 0.9 falls short of a
+;; tenth by rounding.
+(def ^:private tolerance 1e-9)
+
+(def ^:private finished-step
+  "An axis stepping by less than this is finished. H5: small differences
+  teach nothing, and without an end a writer who keeps refusing would be
+  asked the same question for ever."
+  0.0625)
 
 (def ^:private settle-ms
   "Held after each reading, so its last gesture is seen at rest."
@@ -37,19 +51,23 @@
           [(:span ((:marks score) mark)) effect intensity])
         performing))
 
+(defn- apart? [a b threshold]
+  (>= (abs (- a b)) (- threshold tolerance)))
+
 (defn- share-apart? [a b]
-  (>= (abs (- a b)) (* told-apart-share (max a b))))
+  (apart? a b (* told-apart-share (min a b))))
 
 (defn- motion-apart? [p q]
   (or (share-apart? (:tempo p) (:tempo q))
       (share-apart? (:amplitude p) (:amplitude q))
-      (>= (abs (- (:overshoot p) (:overshoot q))) told-apart-overshoot)))
+      (apart? (:overshoot p) (:overshoot q) told-apart-overshoot)))
 
 (defn distinct?
   "Whether two reading plans (lab.reading/plan) would look or sound
   different: the marks performing or their gestures differ, or the dress
   differs, or the motion parameters differ by at least 10% (of the
-  larger) in tempo or amplitude, or 0.2 in overshoot."
+  smaller) in tempo or amplitude, or 0.2 in overshoot. The thresholds
+  are inclusive: 1.0 against 0.9 or 1.1 is distinct."
   [plan-a plan-b]
   (or (not= (performance plan-a) (performance plan-b))
       (not= (:dress (:score plan-a)) (:dress (:score plan-b)))
@@ -64,17 +82,22 @@
 (defn offer
   "{:state s :axis k :a plan :b plan :point-a p :point-b p}: the exam to
   give for text read at pace, or nil when the text is not a message or no
-  axis gives a pair that can be told apart. s is learn-state moved on,
-  with no flick counted, past each axis whose pair would look the same;
-  a and b are the reading plans of (learn/pair s)'s two points."
+  axis gives a pair that can be told apart. s is learn-state with no
+  flick counted, moved on past each axis that is finished or whose pair
+  would look the same in both directions, and turned on its axis when
+  only the other direction shows; a and b are the reading plans of
+  (learn/pair s)'s two points."
   [learn-state text pace]
   (when-let [plan-a (plan-at text (:point learn-state) pace)]
-    (some (fn [s]
-            (let [{:keys [axis a b]} (learn/pair s)
-                  plan-b (plan-at text b pace)]
-              (when (distinct? plan-a plan-b)
-                {:state s :axis axis :a plan-a :b plan-b :point-a a :point-b b})))
-          (take axes-tried (iterate learn/skip learn-state)))))
+    (let [exam (fn [s]
+                 (let [{:keys [axis a b]} (learn/pair s)
+                       plan-b (plan-at text b pace)]
+                   (when (distinct? plan-a plan-b)
+                     {:state s :axis axis :a plan-a :b plan-b :point-a a :point-b b})))]
+      (some (fn [s]
+              (when (>= (learn/step s) finished-step)
+                (or (exam s) (exam (learn/turn s)))))
+            (take axes-tried (iterate learn/skip learn-state))))))
 
 (defn phases
   "The exam's timeline, in ms from its start: [{:phase :a :at 0 :ms da}

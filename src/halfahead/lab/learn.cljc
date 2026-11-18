@@ -52,10 +52,21 @@
 
 (defn skip
   "The state asking about the next axis, with nothing else changed: no
-  flick is counted, because the writer was shown nothing (lab.flick skips
-  an axis whose pair would look the same)."
+  flick is counted and no miss."
   [state]
   (update state :axis next-axis))
+
+(defn turn
+  "The state asking about the same axis in the other direction, with
+  nothing else changed: no flick is counted and no miss. At a wall only
+  one direction moves, so the pair there is the same either way."
+  [{:keys [axis] :as state}]
+  (update-in state [:dir axis] -))
+
+(defn step
+  "The size of the step the next pair takes along its axis."
+  [{:keys [axis] :as state}]
+  (get-in state [:step axis]))
 
 (defn choose
   "The state after the writer prefers `:a` or `:b` of `(pair state)`."
