@@ -50,6 +50,13 @@
 (defn- next-axis [axis]
   (nth axes (mod (inc (.indexOf axes axis)) (count axes))))
 
+(defn skip
+  "The state asking about the next axis, with nothing else changed: no
+  flick is counted, because the writer was shown nothing (lab.flick skips
+  an axis whose pair would look the same)."
+  [state]
+  (update state :axis next-axis))
+
 (defn choose
   "The state after the writer prefers `:a` or `:b` of `(pair state)`."
   [{:keys [axis] :as state} choice]
