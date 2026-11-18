@@ -24,8 +24,9 @@
   "Nothing merges to main without a human; the factory merges only into
    integration branches."]
 
- ;; Ben set a $150 cap for the first overnight drive (2026-10-21). Lupa has
- ;; no total-spend key yet; the foreman tracks it (DECISIONS.md H7).
+ ;; Ben set a $150 cap for the first overnight drive (2026-10-21) and raised
+ ;; it to $250 on 2026-11-17. Lupa has no total-spend key yet; the foreman
+ ;; tracks it (DECISIONS.md H7, H21).
  :charter/budget {:usd-per-tick 30.0
                   :usd-per-order 12.0}
 

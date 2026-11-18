@@ -73,3 +73,21 @@ The worker sends an engine an `:ha/engine-request` (`persona` and
 `:ha/engine-reply`: `text`, `delivery`, `emphasis` as *phrases* (the worker
 resolves them to spans; a phrase not found in the text is dropped), and an
 optional `cost-usd`.
+
+## The typing lab and the score (derived, never stored)
+
+The lab's shapes live in the same registry and are explained where they
+are used:
+
+- `docs/LAB.md`: `:ha/glyph`, `:ha/ghost`, `:ha/word-cue`,
+  `:ha/placed-cue`, `:ha/direction`, `:ha/draft`, `:ha/glyph-pose`,
+  `:ha/camera`, `:ha/glyph-frame`, `:ha/style`, `:ha/shot`.
+- `docs/product/score.md`: `:ha/channel`, `:ha/ink`, `:ha/curve`,
+  `:ha/osc`, `:ha/mod`, `:ha/patch` (a gesture written out),
+  `:ha/mark-kind`, `:ha/mark`, `:ha/dress`, `:ha/style-point`, `:ha/pace`,
+  `:ha/score` (a message as an agent would have it performed) and
+  `:ha/reading` (a score laid out in time for one reader).
+
+Two checks the schema cannot express are functions: a patch must end at
+rest and stay within each channel's bounds (`halfahead.lab.synth/problems`),
+and a score's spans must lie within its text (`halfahead.lab.score`).

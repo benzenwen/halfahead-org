@@ -1,0 +1,59 @@
+{:id "0053-lab-flick"
+ ;; Split on 2026-11-18: the board's build alone cost $7.70, so this order is
+ ;; the pure half of the flick and 0058 is the page.
+ :title "Lab flick, the pure half: one exam as data (a pair that is easy to tell apart, its timeline, the choice)"
+ :lupa/deps #{"0051-lab-board" "0052-lab-dress"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'How people and agents drive it', and the
+        H5 result in docs/product/lab-notebook.md. People will not tune
+        parameters, but they can tell which of two performances they
+        prefer. On request, the lab reads the current line back twice, as
+        A (your style now) and B (one step along one axis), you flick
+        toward the one you like, and your style point moves (lab.learn).
+        The H5 simulation says this only works when the two are easy to
+        tell apart, so a pair that would look the same is never offered."
+ :scope ["src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"
+         "src/halfahead/lab/learn.cljc" "test/halfahead/lab/learn_test.cljc"]
+ :design "halfahead.lab.learn gains (existing functions unchanged):
+          (skip state) -> the state asking about the next axis, with
+            nothing else changed (no flick counted).
+          halfahead.lab.flick (.cljc, pure): one exam, as data.
+          (distinct? plan-a plan-b) -> whether two reading plans
+            (lab.reading/plan) would look or sound different: the marks
+            performing or their gestures differ, or the dress differs, or
+            the motion parameters of their points differ by at least 10%
+            in tempo or amplitude or 0.2 in overshoot.
+          (offer learn-state text pace) -> {:state s :axis k :a plan :b
+            plan :point-a p :point-b p}, or nil when the text is not a
+            message or no axis gives a distinct pair: take (learn/pair s);
+            if its two plans are not distinct, (learn/skip s) and try the
+            next axis, at most four times.
+          (phases offer) -> the exam's timeline in ms from its start:
+            [{:phase :a :at 0 :ms da} {:phase :gap ..400} {:phase :b ..db}
+            {:phase :choose ..}], da and db each the reading's length
+            (stops and cues) plus 300 ms.
+          (phase-at phases t) -> the phase in force at t.
+          (decide offer choice) -> the learn state after choosing :a or :b
+            (learn/choose on the offer's state).
+          Tests: learn/skip; distinct? for plans that differ in each way
+          and for two that do not; offer skipping an axis that shows
+          nothing on a bare line and returning nil for an empty one;
+          phases and phase-at; decide moves the point exactly as
+          learn/choose does. Property: for any text and learn state, offer
+          is nil or its two plans are distinct and its points differ on
+          exactly one axis."
+ :acceptance
+ ["flick and learn tests as in the design, on both hosts; `bb test` stays
+   green"]
+ :non-goals
+ ["Never start an exam unprompted; no telemetry; nothing leaves the device"
+  "No change to learn's existing functions, reading, pace, marks, score,
+   gestures, synth, dress, the board's pads, the renderer or the director;
+   do not edit the schema"
+  "No page, no lab.main, no browser check: order 0058"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["docs/product/score.md" "src/halfahead/lab/learn.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/style.cljc"
+           "src/halfahead/lab/dress.cljc" "DESIGN.md"]
+ :budget-usd 8.0}

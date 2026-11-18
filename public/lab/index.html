@@ -45,6 +45,13 @@
     .bar > * { pointer-events: auto; margin: 0; }
     .bar a { color: var(--text); }
     .bar a:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    .bar button {
+      font: inherit; text-transform: inherit; letter-spacing: inherit; color: var(--text);
+      background: var(--bg); border: 1px solid rgba(185, 173, 154, 0.35); border-radius: 0.25rem;
+      padding: 0.2rem 0.5rem; cursor: pointer;
+    }
+    .bar button:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    .bar button:disabled { color: var(--muted); border-style: dashed; cursor: not-allowed; }
     /* ?debug only: numbers for screen recordings, in the corner below the
        text block, never in the way of the pointer. As wide as it needs up to
        the viewport, then wrapping, so no line is ever cut off. */
@@ -58,7 +65,9 @@
     /* A quiet picker in the corner opposite the debug panel. */
     .styles {
       position: fixed; right: 0.5rem; bottom: 0.5rem; display: flex; align-items: center;
-      gap: 0.5rem; font-family: var(--condensed); font-size: 0.8125rem;
+      /* wraps upwards from the corner on a narrow screen */
+      flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 1rem);
+      gap: 0.35rem 0.5rem; font-family: var(--condensed); font-size: 0.8125rem;
       text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted);
     }
     .styles select {
@@ -66,9 +75,111 @@
       border: 1px solid rgba(185, 173, 154, 0.35); border-radius: 0.25rem; padding: 0.2rem 0.35rem;
     }
     .styles select:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
-    .styles .sound { display: flex; align-items: center; gap: 0.3rem; }
+    .styles .sound, .styles .pace { display: flex; align-items: center; gap: 0.3rem; }
+    .styles input[type="range"] { width: 6rem; margin: 0; accent-color: var(--signal); }
+    .styles input[type="range"]:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    .styles output { min-width: 3ch; color: var(--text); font-variant-numeric: tabular-nums; }
     .styles input[type="checkbox"] { margin: 0; accent-color: var(--signal); }
     .styles input[type="checkbox"]:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* The tour's caption: bottom centre, above the picker and the debug
+       corner, large enough to read from across a room. The live region is
+       always there, so a screen reader hears each caption; idle, the bar
+       is only out of sight. Clicks pass through it to the page (any click
+       stops the tour); Stop takes its own. */
+    #tour-bar {
+      position: fixed; left: 50%; bottom: 5.5rem; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 0.5rem 1rem; flex-wrap: wrap; justify-content: center;
+      width: max-content; max-width: calc(100vw - 2rem); box-sizing: border-box;
+      padding: 0.6rem 1rem; background: var(--bg); color: var(--text);
+      border: 1px solid rgba(185, 173, 154, 0.5); border-radius: 0.25rem; pointer-events: none;
+    }
+    #tour-bar.idle { opacity: 0; }
+    #caption { margin: 0; font: 1.375rem/1.3 ui-serif, Georgia, "Times New Roman", serif; text-align: center; }
+    #tour-stop {
+      font: 0.8125rem var(--condensed); text-transform: uppercase; letter-spacing: 0.14em;
+      color: var(--text); background: var(--bg); border: 1px solid rgba(185, 173, 154, 0.5);
+      border-radius: 0.25rem; padding: 0.3rem 0.6rem; cursor: pointer; pointer-events: auto;
+    }
+    #tour-stop[hidden] { display: none; }
+    #tour-stop:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* The flick's chip: top centre, under the bar. Like the caption it is
+       a live region that is always there, so a screen reader hears A, B,
+       then "A or B?"; idle, it is only out of sight. The two choices sit
+       either side of it, as the arrow keys that also choose them do. */
+    #flick {
+      position: fixed; left: 50%; top: 3.25rem; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 0.75rem; justify-content: center;
+      width: max-content; max-width: calc(100vw - 2rem); box-sizing: border-box;
+      padding: 0.4rem 0.75rem; background: var(--bg); color: var(--text);
+      border: 1px solid rgba(185, 173, 154, 0.5); border-radius: 0.25rem; pointer-events: none;
+    }
+    #flick.idle { opacity: 0; }
+    #flick-chip { margin: 0; font: 1.125rem/1.3 ui-serif, Georgia, "Times New Roman", serif; text-align: center; }
+    #flick button {
+      min-width: 2.75rem; min-height: 2.75rem; font: 1rem var(--condensed); color: var(--text);
+      background: var(--bg); border: 1px solid var(--signal); border-radius: 0.25rem;
+      cursor: pointer; pointer-events: auto;
+    }
+    #flick button[hidden] { display: none; }
+    #flick button:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* Narrow, the bar wraps onto more lines: the chip sits below them. */
+    @media (max-width: 600px) { #flick { top: 6.5rem; } }
+    /* The board: hidden until asked for (the Board button, Ctrl+B). Wide, a
+       column in the margin beside the text, which fills the middle 70%. */
+    #board {
+      position: fixed; right: 0.5rem; top: 3.25rem; width: 6.25rem; box-sizing: border-box;
+      max-height: calc(100vh - 6.5rem); overflow-y: auto;
+      display: grid; gap: 0.3rem; font-family: var(--condensed); font-size: 0.8125rem;
+      text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+    }
+    #board[hidden] { display: none; }
+    .pad {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 0.25rem;
+      min-height: 2rem; margin: 0; padding: 0.2rem 0.45rem; font: inherit; text-transform: inherit;
+      letter-spacing: inherit; color: var(--text); background: var(--bg);
+      border: 1px solid rgba(185, 173, 154, 0.5); border-radius: 0.25rem; cursor: pointer;
+      touch-action: manipulation; user-select: none; -webkit-user-select: none;
+    }
+    .pad kbd { font: inherit; color: var(--muted); }
+    .pad[data-pad="boom"] { border-color: var(--signal); }
+    .pad:active { background: var(--signal); color: var(--bg); }
+    .pad:active kbd { color: var(--bg); }
+    .pad:focus-visible, #xy:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* The XY pad: energy across, flourish up; the dot is the writer's style. */
+    #xy {
+      position: relative; aspect-ratio: 1; box-sizing: border-box; background: var(--bg);
+      border: 1px solid rgba(185, 173, 154, 0.5); border-radius: 0.25rem; cursor: crosshair;
+      touch-action: none; user-select: none; -webkit-user-select: none; overflow: hidden;
+    }
+    #xy .axis { position: absolute; font-size: 0.625rem; letter-spacing: 0.06em; pointer-events: none; }
+    #xy .axis.up { left: 0.25rem; top: 0.15rem; }
+    #xy .axis.across { right: 0.25rem; bottom: 0.15rem; }
+    #xy-dot {
+      position: absolute; left: 50%; bottom: 35%; width: 0.75rem; height: 0.75rem; margin: -0.375rem;
+      border-radius: 50%; background: var(--signal); pointer-events: none;
+    }
+    /* Narrower than this the margin has no room for the column, and it
+       would cover the line being written: the board docks as a band along
+       the bottom, pads in two rows and the XY pad beside them, and what
+       lives at the bottom of the page moves up above it. */
+    @media (max-width: 900px) {
+      :root { --board-band: 7.25rem; }
+      #board {
+        left: 0; right: 0; top: auto; bottom: 0; width: auto; height: var(--board-band);
+        max-height: none; overflow: visible; padding: 0.5rem;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) 6.25rem; grid-template-rows: 1fr 1fr;
+        background: var(--bg); border-top: 1px solid rgba(185, 173, 154, 0.5);
+        font-size: 0.6875rem; letter-spacing: 0.04em;
+      }
+      .pad {
+        flex-direction: column; justify-content: center; align-items: center; gap: 0;
+        min-height: 0; padding: 0.1rem;
+      }
+      #xy { grid-column: 5; grid-row: 1 / span 2; height: 100%; width: auto; justify-self: end; }
+      :root[data-board="shown"] .styles,
+      :root[data-board="shown"] #debug { bottom: calc(var(--board-band) + 0.5rem); }
+      :root[data-board="shown"] #tour-bar { bottom: calc(var(--board-band) + 5.5rem); }
+    }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -81,7 +192,22 @@
   <textarea id="type" autofocus spellcheck="true" autocomplete="off"></textarea>
   <div class="bar">
     <p id="status" role="status">Starting the renderer…</p>
+    <button id="read" type="button" aria-keyshortcuts="Control+Enter" title="Ctrl+Enter">Read back</button>
+    <button id="which" type="button" aria-keyshortcuts="Control+/" title="Ctrl+/" disabled>Which?</button>
+    <button id="tour" type="button">Tour</button>
+    <button id="board-toggle" type="button" aria-pressed="false" aria-controls="board"
+            aria-keyshortcuts="Control+B" title="Ctrl+B">Board</button>
     <a href="../">Back to Half Ahead</a>
+  </div>
+  <!-- The pads are made by the shell from lab.board's pads, before the XY pad. -->
+  <div id="board" role="toolbar" aria-label="Board" hidden>
+    <div id="xy" role="slider" tabindex="0" aria-label="Style: energy across, flourish up"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"
+         aria-valuetext="Energy 50%, flourish 35%" title="Your style: drag, or use the arrow keys">
+      <span class="axis up" aria-hidden="true">Flourish</span>
+      <span class="axis across" aria-hidden="true">Energy</span>
+      <span id="xy-dot" aria-hidden="true"></span>
+    </div>
   </div>
   <div class="styles">
     <label for="style">Motion style</label>
@@ -93,10 +219,27 @@
       <option value="caffeinated">Caffeinated</option>
       <option value="drunken">Drunken</option>
       <option value="coarse">Coarse</option>
+      <option value="mine">Mine</option>
     </select>
+    <span class="pace">
+      <label for="pace">Pace</label>
+      <input type="range" id="pace" min="150" max="450" step="10" value="250"
+             aria-describedby="pace-unit">
+      <output id="pace-value" for="pace">250</output>
+      <span id="pace-unit" class="sr-only">words a minute</span>
+    </span>
     <label class="sound"><input type="checkbox" id="sound"> Sound</label>
   </div>
   <pre id="debug" aria-hidden="true" hidden></pre>
+  <div id="tour-bar" class="idle">
+    <p id="caption" aria-live="polite"></p>
+    <button id="tour-stop" type="button" hidden>Stop</button>
+  </div>
+  <div id="flick" class="idle">
+    <button id="flick-a" type="button" aria-keyshortcuts="ArrowLeft" title="Left arrow" hidden>A</button>
+    <p id="flick-chip" aria-live="polite"></p>
+    <button id="flick-b" type="button" aria-keyshortcuts="ArrowRight" title="Right arrow" hidden>B</button>
+  </div>
   <script src="js/main.js"></script>
 </body>
 </html>

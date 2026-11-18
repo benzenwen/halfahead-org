@@ -1,0 +1,99 @@
+{:id "0055-lab-default-feel"
+ :title "Lab default feel: Plain keeps a little flourish, dress and readings stop changing behind your back, and gold glows gold"
+ :lupa/deps #{"0057-lab-webgpu-guard"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "Three things the builders of 0050 and 0052 reported, all from the
+        foreman's design, which together make the default experience show
+        too little (open-questions Q30, Q31). (1) Auto is the default
+        style and falls back to Plain when the typing rhythm lapses; Plain
+        has no flourish, so it performs no marks and wears no dress, and a
+        visitor who types at an ordinary pace sees almost nothing of the
+        score, while dress put on in another style vanishes about six
+        seconds after typing stops. (2) A read-back planned in one style
+        is played in whatever style Auto drifts to, so its gestures can
+        outlast what they were granted. (3) The glow's halo is always
+        vermilion, so gilt letters glint pink. Ben's instruction was to
+        make the best aesthetic choice and keep going: Plain means plain
+        motion with restrained flourish; bareness is the reveal level's
+        job (level 0)."
+ :scope ["src/halfahead/lab/style.cljc" "test/halfahead/lab/style_test.cljc"
+         "test/halfahead/lab/marks_test.cljc"
+         "src/halfahead/lab/reading.cljc" "test/halfahead/lab/reading_test.cljc"
+         "src/halfahead/lab/dress.cljc" "test/halfahead/lab/dress_test.cljc"
+         "src/halfahead/lab/main.cljs" "src/halfahead/lab/render.cljs"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "1. Plain's point. (style/point :plain) becomes {:energy 0.5
+          :flourish 0.35 :softness 0.5 :warmth 0.5}. Its motion parameters
+          do not change: (params :plain) is as before, and (from-point
+          (point :plain)) still equals it. With flourish 0.35 Plain
+          performs marks of amount 0.62 or more (a held word, a landing,
+          capitals) and dresses asides (whisper), the strongest stress
+          (gilt, its warmth being 0.5) and other strong stresses (strong),
+          but never a versal. Update the tests that pin Plain's point or
+          say Plain performs or wears nothing (style, marks, reading,
+          dress), keeping every property.
+          2. Dress that stays. The draft's dress is decided by the style
+          point in force when the text last changed (an edit), not
+          re-derived from the style in force on each frame: lab.main
+          keeps that point with the draft's dress and recomputes dress
+          only on an edit or when the writer picks a style (the picker,
+          its shortcuts). So in Auto, dress no longer changes or vanishes
+          while the writer is idle. With the picker on Auto, the point
+          used at an edit is that of the style Auto infers at that
+          moment.
+          3. A reading keeps its style. When a read-back starts, lab.main
+          notes the named style in force then (for Auto, the style it
+          infers at that moment), plans the reading with that style's
+          point and motion parameters, and while the reading plays gives
+          frame that style as :style-choice, whatever Auto would infer
+          meanwhile; when the reading is over, or is ended by Escape or
+          an edit, the picker's choice applies again. (The writer is not
+          typing during a reading: an edit ends it.) lab.pose and the
+          schema do not change.
+          4. Gold glows gold. In lab.render the glow halo's colour is the
+          letter's own ink when the letter has an ink other than :text
+          (mixed by its :tint), and vermilion as before otherwise. No new
+          attribute if the existing ink attributes can be used; no new
+          draw call.
+          Tests: (point :plain) and from-point at it; gesture-for and
+          dress-for at Plain's point for the acceptance sentence of 0044
+          (which marks perform: the hold and the landing; which dress:
+          the aside's whisper); a reading planned in Elegant keeps
+          Elegant's parameters for its cues at every later time (pure, in
+          reading_test, by the data lab.main will pass).
+          e2e/lab.mjs: (a) dress step: with the picker on Auto and
+          ?reveal=1, type 'This is *the one thing* that matters (trust
+          me).' at a slow, steady pace (so Auto reads Elegant), then wait
+          8 s without typing: the dress in lastFrame is the same as 1 s
+          after typing stopped (same glyph ids, inks and sizes); replace
+          'Plain wears nothing' by: Plain gives gilt and whisper for that
+          sentence and no versal for a 14-word one; at ?reveal=0 nothing
+          is dressed in any style. (b) reading step: in Plain at 250 wpm
+          the reading of the acceptance sentence performs swell on
+          'loooove' and nod on 'Ship it' (window.__lab.reading()
+          .performing). (c) glint: with the pointer over the gilt phrase,
+          sample the screenshot's halo pixels just outside a gold
+          letter's ink: their hue is nearer to the palette's gold than to
+          vermilion (compare distances in rgb); screenshot
+          out/lab/dress-glint.png. Every other step passes unchanged, or
+          say exactly which assertion changed and why.
+          docs/LAB.md: Plain's flourish, dress staying, a reading's
+          style, the halo's colour."
+ :acceptance
+ ["Tests as in the design, on both hosts; `bb test` stays green"
+  "`bb lab:e2e` passes with the changed steps and every other step; the
+   final message lists every existing assertion that had to change"
+  "out/lab/dress-glint.png for the foreman, the gold's halo gold"]
+ :non-goals
+ ["No change to the other named styles' points or to any style's motion
+   parameters; no change to marks' rules, gestures, synth, pace, score,
+   the director, reveal or the stage; do not edit the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/open-questions.md" "docs/product/score.md"
+           "src/halfahead/lab/style.cljc" "src/halfahead/lab/marks.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/dress.cljc"
+           "src/halfahead/lab/pose.cljc" "src/halfahead/lab/main.cljs"
+           "src/halfahead/lab/render.cljs" "src/halfahead/lab/ink.cljc"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

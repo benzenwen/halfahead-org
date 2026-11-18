@@ -1,0 +1,105 @@
+{:id "0049-lab-channels"
+ :title "Lab channels: the renderer draws weight, focus, slant, stretch, fill and ink, shown on a type specimen"
+ :lupa/deps #{"0045-lab-gestures"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'Channels', and hypotheses H3 and H7 in
+        docs/product/lab-notebook.md. A pose can now carry :sx :sy :skew
+        :weight :blur :fill :ink :tint, and the gestures bloom, slam, hush,
+        lean, shiver and draw use them, but the renderer ignores them.
+        Draw them, at no extra draw call, and add a type specimen page that
+        shows every channel at fixed values, so the look can be judged by
+        eye and measured in a still picture instead of in passing frames."
+ :scope ["src/halfahead/lab/render.cljs" "src/halfahead/lab/main.cljs"
+         "src/halfahead/lab/ink.cljc" "test/halfahead/lab/ink_test.cljc"
+         "src/halfahead/lab/specimen.cljc" "test/halfahead/lab/specimen_test.cljc"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (the foreman's; do not edit): the optional keys of
+          :ha/glyph-pose and their rest values in its comment; :ha/ink.
+          halfahead.lab.ink (.cljc, pure): the closed palette as colours,
+          for paper (lights 0) and for the dark stage (lights 1):
+            (colour ink lights) -> [r g b] in 0..1, for lights 0 or 1 the
+            table's colour, between them a straight mix. :text is the
+            ink the page already uses on each (#1d1a16 on paper, #efe6d6
+            on the stage); :signal #c2401c and #ff7a55 (the page's own);
+            choose :gold, :cool and :muted for each background;
+            (contrast a b) -> the WCAG 2 contrast ratio of two colours.
+          Tests (H7): every ink has at least 4.5:1 contrast against its
+          background at lights 0 (#f6f1e7) and at lights 1 (#141210); the
+          five inks are told apart (pairwise colour distance above a
+          floor) on each background.
+          lab.render: read the optional pose keys, defaulting to rest.
+            :sx :sy multiply the quad's width and height (with :scale);
+            :skew shears the quad along x in proportion to height above
+            the baseline (compose it into the instance matrix);
+            :weight moves the distance field's edge: +1 clearly bolder,
+            -1 clearly lighter, without clipping at the quad's border and
+            without the letter vanishing;
+            :blur widens the edge's soft band, 1 being very soft but still
+            a letter;
+            :fill f draws the part of the quad left of f (in the quad's
+            own 0..1 width) in full and the rest at 35% alpha, with a
+            short soft boundary; 1 is fully inked;
+            :ink and :tint: the letter's colour is the :text ink mixed
+            :tint of the way toward (ink/colour ink lights), lights from
+            the frame's :reveal (a missing :tint with an :ink means 1).
+            All as per-instance attributes of the one instanced mesh and
+            the one TSL material: no new mesh, material or draw call.
+          halfahead.lab.specimen (.cljc, pure): (frame opts) -> a valid
+            :ha/glyph-frame that is a type specimen, opts {:advance fn
+            :width-em n :aspect n :lights 0|1}: rows of the word
+            'Halfahead' (or part of it), each row a channel at fixed
+            values, laid out with lab.pose/layout's advance: weight -1,
+            -0.5, 0, 0.5, 1; blur 0, 0.33, 0.66, 1; skew -0.3, 0, 0.3;
+            stretch sx 1.4 then sy 1.4; fill 0, 0.25, 0.5, 0.75, 1; the
+            five inks. Poses at rest otherwise; a frontal camera that
+            fits the rows; :reveal {:level 3 :lights lights}. Also
+            (samples opts) -> [{:row kw :value v :glyph-ids [..]}] so a
+            test can find each sample. Tests: the frame is valid for both
+            lights; every sample's ids exist; the rows carry the values
+            listed.
+          lab.main: with ?specimen in the URL the page draws
+            (specimen/frame ...) every frame instead of the draft's frame
+            (lights from ?reveal: 0 or 1 is paper, 2 or 3 the dark stage;
+            default dark), hides nothing else, and exposes
+            window.__lab.specimen() (the samples, with each sample's
+            bounding box in CSS pixels from the renderer's projection).
+            Typing is ignored there.
+          e2e/lab.mjs, a new step 'specimen' on /lab/?specimen (dark)
+            and /lab/?specimen&reveal=0 (paper), measuring a screenshot's
+            pixels inside each sample's box (stills, so no timing):
+            weight: the inked area grows from -1 to 0 to +1, by at least
+            15% each way; blur: the count of pixels that are neither
+            background nor full ink grows with blur; skew: the inked
+            pixels' centroid in the top third of the box is right of the
+            bottom third's for +0.3 and left for -0.3; stretch: the inked
+            bounding box is wider for sx and taller for sy than at rest;
+            fill: for 0.5 the left half's mean ink is at least twice the
+            right half's, and 0 and 1 are uniformly dim and full; inks:
+            the most common inked colour in each ink's sample is within a
+            small distance of (ink/colour ink lights), on both
+            backgrounds. Screenshots out/lab/specimen-dark.png and
+            out/lab/specimen-paper.png.
+            And H3: on the ordinary lab page with ?debug, type a 200
+            character paragraph and read the overlay's mean frame time;
+            report it in the step's line (no assertion: headless numbers
+            are for comparison only).
+          docs/LAB.md: the channels table, the palette, and the specimen
+          page."
+ :acceptance
+ ["ink and specimen tests as in the design, on both hosts"
+  "`bb lab:e2e` passes with the specimen step and every existing step;
+   `bb test` stays green; the two specimen screenshots for the foreman"
+  "The final message gives the inks chosen with their contrast ratios on
+   both backgrounds, and the mean frame time the e2e saw"]
+ :non-goals
+ ["No change to the pure core's motion, gestures, cues, styles, sound,
+   reveal, the director or the stage; do not edit the schema"
+  "No dress and no gilt glint yet (a later order)"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/score.md" "docs/product/lab-notebook.md"
+           "src/halfahead/schema.cljc" "src/halfahead/lab/render.cljs"
+           "src/halfahead/lab/main.cljs" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/gestures.cljc" "public/lab/index.html"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

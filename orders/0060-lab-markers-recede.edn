@@ -1,0 +1,55 @@
+{:id "0060-lab-markers-recede"
+ :title "Lab dress: the asterisks of a dressed stress recede"
+ :lupa/deps #{"0052-lab-dress" "0058-lab-flick-ui"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "Ben's first screenshot of the lab on WebGPU (2026-11-18) reads
+        '*this* is great!' with 'this' in gold and its two asterisks at
+        full strength either side. Once the stress is dressed the
+        asterisks have done their work. Flair may not drop a character
+        (the charter), but it may quieten one: the two asterisks rest
+        whispered, arriving and leaving with the dress they belong to."
+ :scope ["src/halfahead/lab/dress.cljc" "test/halfahead/lab/dress_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "lab.dress/placed: a :gilt, :rubric or :strong dress whose span
+            is enclosed by asterisks (the unit just before the span and
+            the unit just after it are both '*', each a glyph of its own)
+            gains :markers [id-before id-after] on its placed entry.
+            Every other entry is as now, and so is the order, so
+            window.__lab.dress() and the overlay's dress line read as
+            they do today.
+          lab.pose, where a placed dress becomes letters at rest: the
+            marker glyphs of a placed dress wear the look of :whisper
+            (lab.dress/looks), with the same weight over time as the
+            dress they belong to. Where nothing is dressed (level 0, or
+            a style too spare to dress the stress) they are ordinary
+            letters. A marker that lies inside another placed dress
+            keeps that dress.
+          Tests: placed for '*this* is great!' (gilt on 'this', :markers
+          the two asterisks' ids); for '**bold**' (the inner pair); a
+          stress in capitals has no :markers; a whispered aside has
+          none. pose: with the dress placed and at full weight both
+          asterisks are at whisper's size and ink and the letters
+          between them are gold; with no dress they are as any letter;
+          every existing pose and dress test passes unchanged.
+          e2e/lab.mjs, in the dress step, after 'This is *the one thing*
+          that matters (trust me).' has come to rest in Plain on paper:
+          the two asterisks' glyphs in lastFrame() are in the muted ink
+          and smaller than the letters beside them, and the text box
+          still holds both asterisks.
+          docs/LAB.md: one sentence under Dress."
+ :acceptance
+ ["dress and pose tests as in the design, on both hosts; `bb test` stays
+   green"
+  "`bb lab:e2e` passes with the added check and every existing step"]
+ :non-goals
+ ["No character is hidden, dropped or changed; the textarea's text is
+   untouched"
+  "No change to what marks/dress-for returns, to marks, score, the
+   schema, the renderer or lab.main"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/dress.cljc" "test/halfahead/lab/dress_test.cljc"
+           "src/halfahead/lab/pose.cljc" "e2e/lab.mjs" "docs/LAB.md"
+           "DESIGN.md"]
+ :budget-usd 8.0}

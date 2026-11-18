@@ -3,9 +3,11 @@
   draft and a time, where every letter stands, how it is turned, how big,
   bright and wobbly it is. Every frame is computed from scratch, never
   simulated, so a renderer may ask for any moment in any order, and every
-  motion ends exactly on the layout within 2500 ms of its cause, in every
-  style (plain births take 400 ms, cues 1500 ms, ghosts 600 ms; a style
-  stretches or squeezes the first two by its tempo, see lab.style), and
+  motion ends exactly on the layout within 5000 ms of its cause, in every
+  style and at any style point (plain births take 400 ms, ghosts 600 ms, and a cue as long as its
+  gesture's patch plays, at most 2400 ms plus a 900 ms stagger, see
+  lab.gestures; a style stretches or squeezes births and cues by its tempo,
+  at most 1.5, see lab.style, and a cue's own :tempo only hurries it), and
   within 5000 ms of a direction (see lab.director) for its shot. Apart from
   a :card, which takes a phrase out of the line on purpose, no letter ever
   strays more than half an em sideways from its place, so a word's motion
@@ -22,10 +24,18 @@
   and the letters peel off the page; at 3 shots and the crawl too. Each
   birth, cue and shot is performed at the level in force when it happened,
   so reaching a level never jerks a letter already moving; what a level
-  adds (the peel, the crawl) is eased in and settled within 900 ms of it."
+  adds (the peel, the crawl) is eased in and settled within 900 ms of it.
+  From level 1 a frame may be given the draft's dress (lab.dress): what
+  its letters wear at rest. Dress changes the resting place and look that
+  every motion above starts from and returns to, so all of it holds with
+  dress: a sized letter takes the room it needs in the layout, and cues
+  and shots perform on top of the dressed rest."
   (:require [clojure.string :as str]
+            [halfahead.lab.dress :as dress]
+            [halfahead.lab.gestures :as gestures]
             [halfahead.lab.reveal :as reveal]
-            [halfahead.lab.style :as style]))
+            [halfahead.lab.style :as style]
+            [halfahead.lab.synth :as synth]))
 
 ;; --- arithmetic --------------------------------------------------------------
 ;; Math/* reads the same in Clojure and ClojureScript, so no reader
@@ -67,15 +77,13 @@
        (partition-by (fn [[i c]] (if (str/blank? c) [:space i] :word)))
        (map #(mapv first %))))
 
-(defn layout
-  "One {:x :y} per char, left-aligned from x 0. A newline starts the next
-  line; a word that would cross width-em moves whole to the next line, and
-  a word wider than width-em breaks wherever it must. Line n has
-  y = -1.35 n. advance is a fn char -> em width."
-  [chars advance width-em]
-  (let [chars (vec chars)
-        width (double width-em)
-        adv #(double (advance (nth chars %)))]
+(defn- layout-widths
+  "layout, given the em width of each char (widths, a vector) in place of
+  a fn of the char: a dressed letter may be wider or narrower than its
+  character is."
+  [chars widths width-em]
+  (let [width (double width-em)
+        adv #(double (nth widths %))]
     (loop [toks (tokens chars), x 0.0, n 0, out (transient (vec (repeat (count chars) nil)))]
       (if-let [[i0 :as tok] (first toks)]
         (let [c (nth chars i0)]
@@ -103,15 +111,24 @@
               (recur (rest toks) x n out))))
         (persistent! out)))))
 
+(defn layout
+  "One {:x :y} per char, left-aligned from x 0. A newline starts the next
+  line; a word that would cross width-em moves whole to the next line, and
+  a word wider than width-em breaks wherever it must. Line n has
+  y = -1.35 n. advance is a fn char -> em width."
+  [chars advance width-em]
+  (let [chars (vec chars)]
+    (layout-widths chars (mapv advance chars) width-em)))
+
 (defn- end-position
-  "Where the next character would go: after the last char, or at the start
-  of the next line when the text ends with a newline."
-  [chars positions advance]
+  "Where the next character would go: after the last char (widths gives
+  how wide each is), or at the start of the next line when the text ends
+  with a newline."
+  [chars positions widths]
   (if-let [{:keys [x y]} (peek positions)]
-    (let [c (peek chars)]
-      (if (= "\n" c)
-        {:x 0.0 :y (- y line-height)}
-        {:x (+ x (double (advance c))) :y y}))
+    (if (= "\n" (peek chars))
+      {:x 0.0 :y (- y line-height)}
+      {:x (+ x (double (peek widths))) :y y})
     {:x 0.0 :y 0.0}))
 
 ;; --- motion ------------------------------------------------------------------
@@ -144,7 +161,7 @@
       (* (Math/floor (/ (* v steps) d)) (/ (double d) steps))
       v)))
 
-(def ^:private displacements #{:x :y :z :rx :ry :rz :scale})
+(def ^:private displacements #{:x :y :z :rx :ry :rz :scale :sx :sy :skew})
 
 (defn- amplified [delta amplitude]
   (reduce-kv (fn [m k v] (assoc m k (if (displacements k) (* amplitude v) v)))
@@ -196,71 +213,10 @@
                     :opacity (- (clamp 0.0 1.0 (/ a 90.0)) 1.0)}
                    ps age dur id)))))
 
-(def ^:private effect-ms
-  "How long each effect moves a glyph; none exceeds 1400 ms."
-  {:pop 400 :launch 1400 :shimmer 1400 :skitter 900 :quake 1000 :melt 1400
-   :rewind 700 :fuse 900 :jitter 1400 :glow 1000 :wobble 1400})
-
-(defn- effect-delta
-  "The delta for one effect at local time u (0 <= u < its duration), at
-  intensity k, for the glyph at position pos in the cue."
-  [effect u k id pos]
-  (let [d (double (effect-ms effect))
-        p (/ u d)
-        fade (- 1.0 p)]
-    (case effect
-      :pop {:scale (* 0.35 k (sin (* Math/PI p)))}
-
-      :launch (if (< u 700)
-                (let [q (/ u 700.0)
-                      arc (* 4.0 q (- 1.0 q))]
-                  {:y (* 1.2 k arc) :z (* 1.5 k arc)})
-                (let [e (- 1.0 (/ (- u 700.0) 700.0))]
-                  {:wobble (* k e e)}))
-
-      :shimmer {:glow (* 0.8 k fade fade (Math/abs (sin (/ (* tau u) 350.0))))
-                :y (* 0.05 k fade (sin (/ (* tau u) 700.0)))}
-
-      :skitter {:x (* 0.12 k fade fade (sin (+ (/ (* tau u) 90.0) (phase id 1))))}
-
-      :quake (let [a (+ (/ (* tau u) 70.0) (phase id 2))]
-               {:x (* 0.15 k fade (sin a))
-                :y (* 0.15 k fade (cos a))
-                :glow (* k (max 0.0 (- 1.0 (/ u 600.0))))})
-
-      :melt (let [droop (if (< u 600)
-                          (sin (* 0.5 Math/PI (/ u 600.0)))
-                          (let [q (/ (- u 600.0) 800.0)]
-                            (* (- 1.0 q) (- 1.0 q) (cos (* 3.0 Math/PI q)))))]
-              {:y (* -0.4 k droop) :rx (* 0.6 k droop)})
-
-      :rewind {:rz (* (- tau) k (- 1.0 (smoothstep p)))}
-
-      ;; the letters come in from a staggered layer in front of the line,
-      ;; alternately above and below it; nothing moves sideways
-      :fuse (let [apart (* k (- 1.0 (smoothstep p)))]
-              {:z (* 0.6 apart (if (even? pos) 1.0 0.5))
-               :y (* 0.2 apart (if (even? pos) 1.0 -1.0))})
-
-      :jitter {:x (* 0.04 k fade (sin (+ (/ (* tau u) 60.0) (phase id 3))))
-               :y (* 0.04 k fade (sin (+ (/ (* tau u) 75.0) (phase id 4))))}
-
-      :glow {:glow (* 0.9 k (sin (* Math/PI p)))}
-
-      :wobble {:wobble (* k fade fade)})))
-
-(defn- stagger-step
-  "25 ms between neighbours, compressed so the last glyph of any cue starts
-  within 100 ms: 100 + the longest effect (1400) is the 1500 ms settle."
-  [n]
-  (if (> n 5) (/ 100.0 (dec n)) 25.0))
-
 (def ^:private slowest-tempo
+  "The slowest any style plays: the named styles' and, by lab.style's
+  curve, any point's (from-point never exceeds Elegant's 1.5)."
   (reduce max (map (comp :tempo style/params) style/styles)))
-
-(def ^:private longest-cue-ms
-  "The last glyph of a cue starts within 100 ms and moves at most 1400."
-  (* slowest-tempo (+ 100 (reduce max (vals effect-ms)))))
 
 (defn- cue-ms
   "The plain effect time for a styled cue u real ms into a glyph's part:
@@ -274,27 +230,34 @@
       v)))
 
 (defn- cue-deltas
-  "id -> [delta ...] for every glyph a cue is moving at time t, each cue
-  performed in the style style-of gives for its firing time."
-  [cues t style-of]
+  "id -> [delta ...] for every glyph a cue is moving at time t: the cue's
+  gesture played by lab.synth, each cue performed with the params params-of
+  gives for its firing time, which also stretches the stagger. A cue's
+  own :tempo multiplies the style's, for the stagger, the duration and the
+  progress alike, so a hurried gesture is the same motion played faster."
+  [cues t params-of]
   (reduce
-   (fn [acc {:keys [glyph-ids cue at-ms]}]
-     (let [since (- t (double at-ms))]
-       (if (or (neg? since) (>= since longest-cue-ms))
+   (fn [acc {:keys [glyph-ids cue at-ms] hurry :tempo}]
+     (let [since (- t (double at-ms))
+           {:keys [effect intensity]} cue
+           patch (gestures/patch effect)
+           n (count glyph-ids)
+           total (synth/total-ms patch n)]
+       ;; the slowest tempo first: finding the style in force (for :auto, a
+       ;; reading of the rhythm) is only worth it for a cue that may be live
+       ;; (a cue's own :tempo is at most 1, so it only ends sooner)
+       (if (or (neg? since) (>= since (* slowest-tempo total)))
          acc
-         (let [{:keys [effect intensity]} cue
-               {:keys [tempo] :as ps} (style/params (style-of at-ms))
-               n (count glyph-ids)
-               step (stagger-step n)
-               d (effect-ms effect)
-               dur (* d tempo)]
+         (let [{:keys [tempo] :as ps} (cond-> (params-of at-ms)
+                                        hurry (update :tempo * hurry))
+               ms (:ms patch)
+               dur (* ms tempo)]
            (reduce
             (fn [acc [i id]]
-              (let [pos (if (= :rewind effect) (- n 1 i) i)
-                    u (- since (* step tempo pos))]
+              (let [u (- since (* tempo (synth/start-ms patch i n)))]
                 (if (and (>= u 0) (< u dur))
                   (update acc id (fnil into [])
-                          (performed (effect-delta effect (cue-ms u d ps) (double intensity) id i)
+                          (performed (synth/delta patch (cue-ms u ms ps) i n id (double intensity))
                                      ps u dur id))
                   acc)))
             acc
@@ -367,8 +330,32 @@
   than a space on either side, however many cues overlap on it."
   0.5)
 
+(def ^:private score-channels
+  "channel -> [rest lo hi] for the channels that came with the score. A
+  pose carries one only while it is away from rest, so a frame in which
+  none is moved is the frame it always was."
+  {:sx [1.0 0.0 ##Inf]
+   :sy [1.0 0.0 ##Inf]
+   :skew [0.0 ##-Inf ##Inf]
+   :weight [0.0 -1.0 1.0]
+   :blur [0.0 0.0 1.0]
+   :fill [1.0 0.0 1.0]})
+
+(defn- off-rest
+  "pose, whose score channels hold summed deltas so far, with each at its
+  value (rest plus the delta, kept in range) or absent when that is rest."
+  [pose]
+  (reduce-kv (fn [p channel [at-rest lo hi]]
+               (if-let [delta (get p channel)]
+                 (let [v (clamp lo hi (+ at-rest delta))]
+                   (if (== v at-rest) (dissoc p channel) (assoc p channel v)))
+                 p))
+             pose
+             score-channels))
+
 (defn- apply-deltas
-  "base plus every delta, with x held within x-reach of the base x."
+  "base plus every delta, with x held within x-reach of the base x and
+  every other channel within its range."
   [{base-x :x :as base} deltas]
   (if (empty? deltas)
     base
@@ -377,7 +364,12 @@
         (update :scale #(max 0.0 %))
         (update :opacity #(clamp 0.0 1.0 %))
         (update :glow #(clamp 0.0 1.0 %))
-        (update :wobble #(clamp 0.0 1.0 %)))))
+        (update :wobble #(clamp 0.0 1.0 %))
+        off-rest
+        ;; a tint mixes towards the letter's ink, which only dress gives
+        (as-> p (if (:ink p)
+                  (update p :tint #(clamp 0.0 1.0 %))
+                  (dissoc p :tint))))))
 
 (def ^:private ember-ms 600)
 
@@ -393,6 +385,79 @@
          :x x :y (+ y (* 1.5 p)) :z (if (< level 2) 0.0 (* 0.3 p))
          :rx 0.0 :ry 0.0 :rz (if (zero? level) 0.0 (* (if (even? id) 1.0 -1.0) tau p))
          :scale (- 1.0 (* 0.4 p)) :opacity (- 1.0 p) :glow (* 0.5 (- 1.0 p)) :wobble 0.0}))))
+
+;; --- dress -------------------------------------------------------------------
+;; Dress is applied to the letter at rest, before any motion, so everything
+;; that moves a letter starts from and returns to its dressed pose.
+
+(def ^:private dress-ease-ms 500)
+
+(defn- wearing
+  "[[placed-dress w] ...]: how far in each placed dress is at t, 0 to 1,
+  easing over 500 ms from when it was first seen; all the way with reduced
+  motion, and for dress nobody has kept a time for."
+  [{:keys [placed seen]} t reduced-motion?]
+  (mapv (fn [{:keys [as glyph-ids] :as d}]
+          (let [since (get seen [as (first glyph-ids)])]
+            [d (if (or reduced-motion? (nil? since))
+                 1.0
+                 (smoothstep (clamp 0.0 1.0 (/ (- t since) dress-ease-ms))))]))
+        placed))
+
+(defn- with-markers
+  "worn, and after it a whisper of the same weight on the :markers of each
+  dress that has them: the asterisks of a dressed stress have done their
+  work, so they recede with it. A marker inside a placed dress keeps that
+  dress instead, and one shared by two stresses recedes with the first."
+  [worn]
+  (first
+   (reduce (fn [[out taken] [{:keys [markers]} w]]
+             (if-let [ids (seq (remove taken markers))]
+               [(conj out [{:as :whisper :glyph-ids (vec ids)} w]) (into taken ids)]
+               [out taken]))
+           [worn (into #{} (mapcat (comp :glyph-ids first)) worn)]
+           worn)))
+
+(defn- eased-sizes
+  "{glyph-id size} at this instant: each sized dress w of the way from 1
+  to its size, a glyph in two taking the one further from 1."
+  [worn glyphs]
+  (reduce (fn [m [d w]]
+            (reduce-kv (fn [m id size]
+                         (let [s (+ 1.0 (* w (- size 1.0)))]
+                           (if (> (abs (- s 1.0)) (abs (- (get m id 1.0) 1.0)))
+                             (assoc m id s)
+                             m)))
+                       m
+                       (dress/sizes [d] glyphs)))
+          {}
+          worn))
+
+(defn- sized
+  "pose scaled to size and kept on its baseline at its left edge, given
+  that a glyph scales about the middle of its advance and 0.35 em above
+  its baseline (as a :card assumes)."
+  [pose size advance]
+  (-> pose
+      (assoc :scale size)
+      (update :x + (* 0.5 (- size 1.0) advance))
+      (update :y + (* 0.35 (- size 1.0)))))
+
+(defn- dressed
+  "bases with each glyph's size and the look of every dress it wears."
+  [bases worn sizes advance light]
+  (let [looks-of (reduce (fn [m [{:keys [as glyph-ids]} w]]
+                           (reduce #(update %1 %2 (fnil conj []) [(dress/looks as) w])
+                                   m glyph-ids))
+                         {}
+                         worn)]
+    (mapv (fn [{:keys [id char] :as base}]
+            (reduce (fn [p [look w]] (dress/at-rest p look w light))
+                    (if-let [size (sizes id)]
+                      (sized base size (double (advance char)))
+                      base)
+                    (looks-of id)))
+          bases)))
 
 ;; --- camera ------------------------------------------------------------------
 
@@ -599,6 +664,15 @@
     #(style/infer glyphs %)
     (constantly style-choice)))
 
+(defn- params-of
+  "fn from a time to the motion parameters in force then: a point's own
+  (lab.style/from-point) when the choice is a :ha/style-point, else those
+  of the named style in force."
+  [style-choice glyphs]
+  (if (map? style-choice)
+    (constantly (style/from-point style-choice))
+    (comp style/params (style-of style-choice glyphs))))
+
 (defn- birth-styles
   "born-ms -> params for the glyphs still being born at t: the style in
   force at each birth, read (for :auto) from the glyphs born strictly
@@ -611,7 +685,7 @@
                 (distinct)
                 (map (fn [b]
                        (let [before (filterv #(< (:born-ms %) b) glyphs)]
-                         [b (style/params ((style-of style-choice before) b))]))))
+                         [b ((params-of style-choice before) b)]))))
           glyphs)))
 
 (def ^:private flat-births
@@ -652,14 +726,39 @@
     (or started-there? reduced-motion?) 1.0
     :else (smoothstep (clamp 0.0 1.0 (/ (- t t3) crawl-ease-ms)))))
 
+(defn- inked
+  "live with the reading head's ink: each pose whose glyph fills gives
+  less than 1 gets that :fill, times any a cue gave it."
+  [live fills]
+  (mapv (fn [{:keys [id] :as pose}]
+          (let [v (get fills id 1.0)]
+            (if (< v 1)
+              (assoc pose :fill (* v (:fill pose 1.0)))
+              pose)))
+        live))
+
 (defn frame
   "The :ha/glyph-frame for draft at t-ms: one live pose per glyph, in
   order, then one ember per ghost younger than 600 ms, the caret and the
   camera, the :style in force at t, and the :reveal level and house
   lights. opts: {:advance fn :width-em n :aspect n :reduced-motion? b
-  :style-choice c :reveal-opts r}, aspect being the viewport's width over
-  its height, c a :ha/style-choice (default :plain) and r the opts for
-  lab.reveal (default {:start-level 3}, the full stage). Births, cues and
+  :style-choice c :reveal-opts r :fills m :dress d}, aspect being the
+  viewport's width over its height, c a :ha/style-choice (default :plain)
+  or a :ha/style-point (then births and cues move by lab.style/from-point
+  of it, and the frame has no :style),
+  r the opts for lab.reveal (default {:start-level 3}, the full stage), m
+  a map glyph-id -> how much of the glyph a reading head has inked (see
+  lab.reading; absent or nil when nothing is being read) and d the
+  draft's dress, {:placed [...] :seen {...} :light {:x :y} or nil} as
+  lab.dress places and remembers it, the light being where the pointer is
+  on the text plane, in em. From level 1 each dress eases in over 500 ms
+  from when it was first seen: a sized letter's advance is multiplied by
+  its size, so the layout, the wrapping and the caret make room for it,
+  and it is scaled on its baseline from its left edge; inks, weights and
+  the glint are those of lab.dress/at-rest. The :markers of a placed
+  dress (the asterisks around a stress) wear :whisper at that dress's
+  weight, unless they lie inside another placed dress. At level 0, and with no
+  :dress, frames are exactly as without it. Births, cues and
   shots are performed at the level in force when they happened (see the
   namespace doc); on reaching level 2 by use or a wand every letter then
   present peels up 0.6 em off the page and back over 700 ms; the camera
@@ -669,27 +768,36 @@
   The draft's :directions are performed as shots (a :card takes the
   phrase centre stage, a :push or :pull moves the camera), each over by
   4500 ms after its :at-ms. With reduced motion every live pose is its
-  (possibly receded) resting place, there are no embers or shots, and the
+  (possibly receded, fully dressed) resting place, there are no embers, shots or fills, and the
   camera is on the current line without easing; levels still advance, but
   the lights are at the level's value at once and nothing peels."
-  [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice reveal-opts]
+  [draft t-ms {:keys [advance width-em aspect reduced-motion? style-choice reveal-opts fills]
+               draft-dress :dress
                :or {advance default-advance width-em 40 aspect 1.6
                     style-choice :plain reveal-opts {:start-level 3}}}]
   (let [{:keys [glyphs ghosts cues directions]} draft
         chars (mapv :char glyphs)
-        positions (layout chars advance width-em)
-        end (end-position chars positions advance)
         t (double t-ms)
         {:keys [level lights reached]} (reveal/state draft t reveal-opts)
+        worn (when (and draft-dress (>= level 1))
+               (with-markers (wearing draft-dress t reduced-motion?)))
+        sizes (if worn (eased-sizes worn glyphs) {})
+        widths (mapv (fn [{:keys [id char]}]
+                       (let [a (advance char)]
+                         (if-let [size (sizes id)] (* size a) a)))
+                     glyphs)
+        positions (layout-widths chars widths width-em)
+        end (end-position chars positions widths)
         lights (if reduced-motion? (if (>= level 2) 1.0 0.0) lights)
         level-when #(reveal/level-at reached reveal-opts %)
         start-level (level-when ##-Inf)
         current (line-progress glyphs (mapv line-of positions) t reduced-motion?)
         crawl (crawl-weight level (reached 3) (>= start-level 3) reduced-motion? t)
-        bases (mapv #(base-pose current crawl %1 %2) glyphs positions)
+        bases (cond-> (mapv #(base-pose current crawl %1 %2) glyphs positions)
+                worn (dressed worn sizes advance (:light draft-dress)))
         live (if reduced-motion?
                bases
-               (let [cue-style (style-of style-choice glyphs)
+               (let [cue-style (params-of style-choice glyphs)
                      cues-at (group-by #(min 2 (level-when (:at-ms %))) cues)
                      moving (merge-with into
                                         (update-vals (cue-deltas (cues-at 1 []) t cue-style)
@@ -711,10 +819,12 @@
         staged (assoc draft :directions (filterv #(>= (level-when (:at-ms %)) 3) directions))
         [live cam] (if reduced-motion?
                      [live cam]
-                     (perform-shot live cam staged positions t {:advance advance :width-em width-em}))]
-    {:t-ms t-ms
-     :poses (into live embers)
-     :caret end
-     :camera cam
-     :style ((style-of style-choice glyphs) t)
-     :reveal {:level level :lights lights}}))
+                     (perform-shot live cam staged positions t {:advance advance :width-em width-em}))
+        live (if (and fills (not reduced-motion?)) (inked live fills) live)]
+    (cond-> {:t-ms t-ms
+             :poses (into live embers)
+             :caret end
+             :camera cam
+             :reveal {:level level :lights lights}}
+      ;; a point has no name to report
+      (not (map? style-choice)) (assoc :style ((style-of style-choice glyphs) t)))))

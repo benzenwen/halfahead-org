@@ -1,0 +1,106 @@
+{:id "0058-lab-flick-ui"
+ ;; 2026-11-18: trimmed before its first run (no debug line, no replay
+ ;; key), after the board showed what a page-sized order costs.
+ ;; Its first run was cut short by a container restart two minutes into
+ ;; the build, after the plan ($1.66); its second by another restart 22
+ ;; minutes into the build, with all six files written. That work
+ ;; survived on disk and passes `bb test` and `bb lab:e2e` (33 steps), so
+ ;; this third run is a resume, as the board's was: the builder applies
+ ;; the saved diff and the review station reads it. The plan station is
+ ;; replaced by the foreman's note (:engines).
+ :title "Lab flick, the page: 'Which?' reads your line back two ways and your style moves toward the one you pick"
+ :lupa/deps #{"0053-lab-flick" "0059-lab-flick-turn"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'How people and agents drive it', and H5
+        and H8 in docs/product/lab-notebook.md. The pure exam is lab.flick
+        (orders 0053 and 0059). Put it on the page: on request the lab
+        reads the current line back as A (your style now) and as B (one
+        step along one axis), you flick toward the one you like, and your
+        style point moves. Never unprompted."
+ :scope ["src/halfahead/lab/main.cljs" "public/lab/index.html"
+         "e2e/lab.mjs" "docs/LAB.md"
+         "src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"]
+ :engines {:plan {:engine :exec
+                  :cmd ["cat" "../../../out/foreman/0058-plan.md"]}}
+ :design "RESUME (2026-11-18). The last run built all of what follows
+          before the container restarted under it. Its whole diff is
+          saved at ../../../out/foreman/0058-lab-flick-ui.patch, relative
+          to the worktree's root; on it the foreman ran `bb test` (no
+          failures) and `bb lab:e2e` (33 steps, all passing, on WebGL2).
+          To build is to apply that patch (`git apply`), run `bb test`,
+          and change nothing that works. The rest of this design says
+          what the patch holds and what the review judges it against.
+          lab.main and index.html: a 'Which?' button in the bar and Ctrl+/
+            ask for one exam on the current text (the button is disabled
+            with no text or with reduced motion).
+            The learner's state (lab.learn) is kept in the page and
+            remembered per viewer in localStorage (every access in
+            try/catch). Its point is the lab's style point. One new pure
+            function decides that, with a test on both hosts:
+            (flick/resume state point) -> state when its point is point
+            (or state is nil: then (learn/start point)), else the learner
+            started again at point (learn/start point). The page calls it
+            when an exam is asked for, with the point of the style in
+            force (a named style's point, the style Auto reads at that
+            moment, or the board's point under Mine).
+            Then (flick/offer state text pace). nil: the chip says
+            'Nothing more to tell apart on this line' for two seconds and
+            nothing else happens (that is how an exam ends). Otherwise
+            the exam runs on (flick/phases offer): a chip reads 'A' while
+            reading A plays, 'B' while B plays, then 'A or B?' with two
+            buttons. ArrowLeft or the A button chooses A, ArrowRight or
+            the B button chooses B; Escape at any time cancels and
+            changes nothing. Each reading plays through the lab's
+            read-back path with that reading's point as the style (dress
+            included). The text cannot be edited while an exam runs.
+            On a choice the state becomes (flick/decide offer choice),
+            the style becomes Mine at the state's point (the board's XY
+            dot shows it) and the state is stored. The chip is an
+            aria-live region, so a screen reader hears 'A', 'B', 'A or
+            B?'.
+            The style picked is remembered per viewer as well (today
+            only the point is, so a reload falls back to Auto and a
+            learned style is not in force): a reload starts in the style
+            last picked, Mine included. Existing browser checks that
+            count on Auto at the start must still pass: give them a
+            fresh page with empty storage where they need one.
+            window.__lab.flick() -> {phase axis pointA pointB flicks
+            point} as plain data; phase is null when no exam runs.
+          e2e/lab.mjs, a new step 'flick' (?reveal=3, on a page with
+          empty storage): type 'I loooove this (honestly). But maybe
+          not. Ship it!' and wait for rest; Ctrl+/: flick().phase goes a,
+          then b, then choose (wait on the data, not on the clock), and
+          pointA and pointB differ on exactly the axis reported; press
+          ArrowRight: flick().flicks is 1, point equals pointB, and the
+          style picker shows Mine; Ctrl+/ then Escape: flicks and point
+          are unchanged; two more exams choosing the option with the
+          higher energy: point.energy has not fallen; reload: the point
+          and the flick count are kept and the picker still shows Mine;
+          pick Elegant and reload: the picker shows Elegant; then with a
+          stored state whose steps are all below 1/16 (write it to
+          storage and reload), Ctrl+/ shows 'Nothing more to tell apart
+          on this line' and flick().phase stays null. Screenshot
+          out/lab/flick.png during a choose phase. The step says which
+          backend it ran on.
+          docs/LAB.md: a short section 'The flick': what it asks, how it
+          ends, and what it can learn from a line (H8: speed and bounce
+          from any line; flourish only where the line gives it something
+          to do; warmth not yet)."
+ :acceptance
+ ["flick/resume's test, on both hosts; `bb test` stays green"
+  "`bb lab:e2e` passes with the flick step and every existing step;
+   out/lab/flick.png for the foreman"]
+ :non-goals
+ ["Never start an exam unprompted; no telemetry; nothing leaves the device"
+  "No change to lab.flick beyond adding resume; none to lab.learn,
+   reading, pace, marks, score, gestures, synth, dress, the board's
+   pads, the renderer or the director; do not edit the schema"
+  "No debug overlay line and no replay key in this order"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["src/halfahead/lab/flick.cljc" "test/halfahead/lab/flick_test.cljc"
+           "src/halfahead/lab/learn.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/board.cljc"
+           "src/halfahead/lab/main.cljs" "public/lab/index.html"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

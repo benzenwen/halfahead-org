@@ -1,0 +1,131 @@
+{:id "0045-lab-gestures"
+ :title "Lab gestures: every effect becomes a patch (data), eight new gestures join, and 'loooove' swells like a held note"
+ :lupa/deps #{"0042-lab-synth"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md and hypothesis H1 in
+        docs/product/lab-notebook.md: one small synthesizer can express
+        every effect the lab has. Replace lab.pose's hand-written
+        effect-delta with patches played by lab.synth, prove the eleven
+        old effects move exactly as before, add the eight new gestures the
+        foreman specified, and make the first subtle read: a word with a
+        held letter ('loooove') swells, each letter lifting in turn, as
+        Ben measured in the Music app's lyrics."
+ :scope ["src/halfahead/lab/gestures.cljc" "test/halfahead/lab/gestures_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/cues.cljc" "test/halfahead/lab/cues_test.cljc"
+         "src/halfahead/lab/glossary.cljc" "e2e/lab.mjs" "docs/LAB.md"]
+ :design "halfahead.lab.gestures (.cljc, data): patches, a map from every
+          :ha/word-effect to a :ha/patch, and (patch effect).
+          The eleven existing effects, transcribed from lab.pose's
+          effect-delta, effect-ms and stagger so they move exactly as
+          today. All have :stagger {:ms-per-glyph 25 :max-ms 100};
+          :rewind's is :order :reverse. For example :melt is {:ms 1400
+          :mods [{:channel :y :amount -0.4 :curve :rise-sine :from 0 :to
+          3/7} {:channel :rx :amount 0.6 :curve :rise-sine :from 0 :to 3/7}
+          {:channel :y :amount -0.4 :curve :fade2 :from 3/7 :to 1 :osc
+          {:wave :cosine :period-ms 1600/3}} {:channel :rx :amount 0.6
+          ...the same...}]} (as doubles); :fuse uses :each :even/:odd for
+          z (0.6 and 0.3) and :alternate? for y; the jittering ones use
+          :osc with :phase :id and the salts effect-delta uses.
+          Proof (H1): move today's effect-delta and effect-ms, unchanged,
+          into gestures_test.cljc as the reference, and assert that for
+          each of the eleven, (synth/delta (patch e) u i n id k) equals the
+          reference within 1e-9 on every channel, for u on a 7 ms grid over
+          the effect's duration, positions 0 to 5, ids 0, 3 and 11, k 0.3
+          and 1. If one cannot be matched, do not bend the others: say
+          which and why at the top of the final message.
+          The eight new gestures, exactly these (amounts at intensity 1):
+            :swell  {:ms 2400 :stagger {:ms-per-glyph 120 :max-ms 900}
+                     :mods [{:channel :y :amount 0.25 :curve :rise-sine :from 0 :to 0.375}
+                            {:channel :y :amount 0.25 :curve :fade2 :from 0.375 :to 1}
+                            {:channel :glow :amount 0.45 :curve :arch}]}
+            :bloom  {:ms 1600 :stagger {:ms-per-glyph 40 :max-ms 200}
+                     :mods [{:channel :weight :amount 0.6 :curve :arch}
+                            {:channel :glow :amount 0.5 :curve :arch}
+                            {:channel :scale :amount 0.06 :curve :arch}]}
+            :slam   {:ms 900 :stagger {:ms-per-glyph 15 :max-ms 60}
+                     :mods [{:channel :scale :amount 1.4 :curve :spring-fall}
+                            {:channel :z :amount 2.0 :curve :spring-fall}
+                            {:channel :weight :amount 0.8 :curve :fade2}
+                            {:channel :glow :amount 0.7 :curve :fade2}]}
+            :hush   {:ms 1400 :stagger {:ms-per-glyph 20 :max-ms 100}
+                     :mods [{:channel :scale :amount -0.12 :curve :arch}
+                            {:channel :weight :amount -0.5 :curve :arch}
+                            {:channel :blur :amount 0.35 :curve :arch}
+                            {:channel :opacity :amount -0.3 :curve :arch}]}
+            :lean   {:ms 1300 :stagger {:ms-per-glyph 30 :max-ms 150}
+                     :mods [{:channel :skew :amount 0.28 :curve :rise :from 0 :to 0.3}
+                            {:channel :skew :amount 0.28 :curve :fall :from 0.3 :to 1}]}
+            :nod    {:ms 700 :stagger {:ms-per-glyph 20 :max-ms 100}
+                     :mods [{:channel :y :amount -0.12 :curve :arch}
+                            {:channel :rx :amount 0.25 :curve :arch}]}
+            :shiver {:ms 1100
+                     :mods [{:channel :x :amount 0.035 :curve :fade
+                             :osc {:wave :sine :period-ms 55 :phase :id :salt 6}}
+                            {:channel :blur :amount 0.25 :curve :fade2}]}
+            :draw   {:ms 500
+                     :mods [{:channel :fill :amount -1.0 :curve :fall}
+                            {:channel :glow :amount 0.3 :curve :arch}]}
+          gestures tests: every :ha/word-effect has a patch; every patch
+          has no synth/problems; (synth/total-ms p 40) x 1.5 (the slowest
+          tempo) <= 5000 for each.
+          lab.pose: cue-deltas plays (gestures/patch effect) through
+          lab.synth in place of effect-delta, effect-ms and stagger-step
+          (delete them): each letter's start is (synth/start-ms patch i n)
+          x tempo, its delta (synth/delta patch (cue-ms u ms ps) i n id k),
+          then styled by performed as now. A style's :amplitude also
+          scales :sx :sy and :skew. apply-deltas learns the new channels:
+          :sx and :sy rest at 1 (a delta adds to 1, never below 0), :skew
+          at 0, :weight at 0 kept in [-1 1], :blur at 0 in [0 1], :fill at
+          1 in [0 1]; a :tint delta is dropped (nothing gives letters an
+          ink yet). A pose carries one of these keys only when its value
+          differs from rest, so every existing frame is unchanged. Cues
+          now settle within 5000 ms of their cause in every style (was
+          2500); births, ghosts, shots and every other invariant are as
+          they were. Update the namespace doc and the settle tests to say
+          so, and keep every other pose test passing unchanged.
+          lab.cues: a word with one letter three or more times in a row
+          (compare case-insensitively; letters only) is a held word: its
+          cue is {:effect :swell :intensity (min 1 (+ 0.5 (* 0.1 (- run
+          2)))) :source :elongation}. Order of rules: glossary,
+          elongation, punctuation, shape, default.
+          lab.glossary: after \"wobble\", add the eight new gestures
+          performing their own names, each at intensity 0.9, under a
+          comment dated 2026-11-17: \"swell\" \"bloom\" \"slam\" \"hush\"
+          \"lean\" \"nod\" \"shiver\" \"draw\". Change nothing else there.
+          e2e/lab.mjs, one new step 'swell' (with ?debug&reveal=3, and
+          the Plain style picked first, so no style adds sway): type
+          'I loooove it '; the overlay shows 'loooove -> swell 0.7
+          (elongation)'; sample window.__lab's frame on every animation
+          frame for 6 s and assert, independent of frame rate: at least
+          one sampled frame has a letter of 'loooove' lifted above its
+          resting y; no sampled lift exceeds 0.25 x 0.7 + 0.001 em; the
+          peak lift of each letter of the word
+          comes no earlier than the letter before it (among frames
+          sampled); and 5.5 s after the cue every letter is at rest.
+          Screenshot out/lab/swell.png about 1 s after the cue.
+          docs/LAB.md: a section 'Gestures and patches' (what a patch is,
+          the table of nineteen gestures, how to add one, that
+          synth/problems is the gate), and the settle time."
+ :acceptance
+ ["gestures tests: the H1 equivalence for all eleven old effects (or an
+   honest list of those that could not be matched), the eight new patches
+   exactly as specified, no problems, within the cap; the eight glossary
+   entries"
+  "pose and cues tests updated as in the design; all other existing tests
+   pass unchanged"
+  "`bb lab:e2e` passes with the swell step and every existing step; `bb
+   test` stays green; out/lab/swell.png for the foreman"]
+ :non-goals
+ ["No renderer changes: the new channels (:weight :blur :skew :fill :sx
+   :sy) reach the frame as data and are drawn by a later order"
+  "No changes to lab.synth, styles, the director, sound, reveal or the
+   stage, and none to the glossary beyond the eight entries; do not edit
+   the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/score.md" "docs/product/lab-notebook.md"
+           "src/halfahead/schema.cljc" "src/halfahead/lab/synth.cljc"
+           "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+           "src/halfahead/lab/cues.cljc" "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

@@ -1,0 +1,122 @@
+{:id "0044-lab-marks"
+ :title "Lab marks: read what a message's words are doing from plain text, and let a style point choose the gesture and the dress"
+ :lupa/deps #{"0041-lab-stage-flash-test"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md: the first tier of the score is rhetorical.
+        A mark says what a span is doing (stress, hold, aside, turn, doubt,
+        build, land, voice), with an amount and an affect; a style, which
+        is a point in a four-axis space, turns a mark into a gesture and
+        decides what it leaves behind (dress). People never write marks,
+        so read them from the plain-text tells; agents will write them.
+        This order is the pure notation layer; nothing is wired into the
+        lab yet."
+ :scope ["src/halfahead/lab/marks.cljc" "test/halfahead/lab/marks_test.cljc"
+         "src/halfahead/lab/style.cljc" "test/halfahead/lab/style_test.cljc"]
+ :design "Schema (the foreman's; do not edit): :ha/mark :ha/mark-kind
+          :ha/dress :ha/style-point :ha/word-effect.
+          halfahead.lab.style gains (existing functions unchanged):
+          (point style) -> the :ha/style-point of a named style:
+            :plain       {:energy 0.5  :flourish 0.0  :softness 0.5 :warmth 0.5}
+            :elegant     {:energy 0.2  :flourish 0.45 :softness 0.9 :warmth 0.7}
+            :caffeinated {:energy 0.95 :flourish 0.75 :softness 0.2 :warmth 0.5}
+            :drunken     {:energy 0.4  :flourish 0.65 :softness 0.8 :warmth 0.6}
+            :coarse      {:energy 0.8  :flourish 0.55 :softness 0.0 :warmth 0.15}
+          (as-point x) -> x when it is a point, (point x) for a style.
+          (from-point point) -> motion parameters in the shape params
+            returns, for any point: :tempo piecewise linear in energy
+            through (0, 1.6) (0.5, 1.0) (1, 0.5); :amplitude likewise
+            through (0, 0.75) (0.5, 1.0) (1, 1.25); :overshoot 2 (1 -
+            softness); :sway and :steps nil. So (from-point (point :plain))
+            is (params :plain) exactly. Named styles keep their own params.
+          halfahead.lab.marks (.cljc, pure, the same on both hosts):
+          feelings -> a public map of named feelings to affect, energy
+            then warmth: :tender [-0.3 0.9] :joyful [0.6 0.8] :giddy [0.9
+            0.7] :calm [-0.7 0.4] :wistful [-0.5 0.2] :awed [0.3 0.6]
+            :grave [-0.4 -0.2] :anxious [0.6 -0.5] :furious [0.9 -0.9]
+            :cold [-0.3 -0.8] :wry [0.1 -0.2] :urgent [0.9 -0.1];
+            (feel k) -> {:energy e :warmth w} or nil.
+          (read text) -> the marks a message's plain text tells of, a
+            valid vector of :ha/mark ordered by span start, then longer span
+            first. Spans are [from to) in
+            UTF-16 units, never empty, never past the text, never
+            splitting a surrogate pair. Tells:
+            - a letter repeated three or more times in a row inside a word
+              ('loooove', 'sooo'; compare case-insensitively): :hold on the
+              whole word, amount min(1, 0.5 + 0.1 (run - 2)), warmth 0.3;
+            - a word in capitals (two or more cased letters, all upper
+              case): :stress 0.8, energy 0.7; capital words next to each
+              other (separated by single spaces) are one mark;
+            - *asterisks* around a phrase with no space just inside them:
+              :stress 0.7 on the words between (the asterisks stay text
+              and are outside the span);
+            - (parentheses): :aside 0.6 on what is inside;
+            - an ellipsis ('…' or three or more full stops) right after a
+              word: :hold 0.5, energy -0.4, on that word;
+            - a hedge ('maybe' 'perhaps' 'probably' 'i guess' 'sort of'
+              'kind of', whole words, any case): :doubt 0.5 on the hedge;
+            - a sentence that ends with '?': :doubt 0.4 on its last word;
+            - a sentence that ends with '!': :stress 0.6, energy 0.8, on
+              its last word; with two or more '!', amount 0.9;
+            - a turning word ('but' 'however' 'yet' 'although' 'instead'
+              'actually', whole words, any case): :turn 0.5 on it;
+            - text inside double quotes, straight or curly: :voice 0.5 on
+              what is inside;
+            - a last sentence of one to three words, in a message of more
+              than one sentence: :land 0.7 over its words;
+            - three or more items separated by commas within a sentence,
+              each of at most three words: :build 0.6 from the first item
+              to the last.
+            Two marks of one kind that overlap: the stronger stays. Marks
+            of different kinds may overlap. At most 16, the strongest
+            kept. Never throws, for any string.
+          (gesture-for point mark) -> {:effect e :intensity k}, or nil when
+            the style is too spare to perform the mark: it performs when
+            amount >= 0.9 - 0.8 flourish. A mark's own :gesture always
+            performs and is the effect. Otherwise, with e and w the mark's
+            energy and warmth (default 0) and E and S the point's energy
+            and softness:
+              :stress  w >= 0.4 -> :bloom; else (w <= -0.4 or e >= 0.6) ->
+                       :slam when S < 0.5, :glow otherwise; else :glow when
+                       S >= 0.5, :pop otherwise
+              :hold    :swell
+              :aside   :hush
+              :turn    :rewind when E >= 0.6, else :nod
+              :doubt   :shiver when e >= 0.5 and w <= -0.3; else :wobble
+                       when E >= 0.6; else :lean
+              :build   :launch when E >= 0.6, else :shimmer
+              :land    :slam when E >= 0.6 and S < 0.5, else :nod
+              :voice   :draw
+            intensity is amount (0.7 + 0.6 (E - 0.5)), kept in [0.1 1].
+          (dress-for point text marks) -> a valid vector of at most 8
+            :ha/dress, ordered like marks: every :aside becomes :whisper
+            (flourish >= 0.2); the strongest :stress of amount >= 0.7
+            becomes :gilt when the point's warmth >= 0.5, :rubric otherwise
+            (flourish >= 0.3); every other :stress of amount >= 0.7
+            becomes :strong (flourish >= 0.3); and the first character
+            becomes a :versal when it is a letter, the text has 12 or more
+            words and flourish >= 0.6.
+          Tests: one example per tell, with exact spans, including text
+          with emoji and combining marks before the tell; overlap and the
+          cap of 16; every row of the gesture table; from-point at the
+          five named points and at the corners; and properties: for any
+          string, read returns a valid vector whose spans are inside the
+          text and split no surrogate pair; for any point and mark,
+          gesture-for returns nil or a valid effect and intensity; if a
+          mark performs at flourish f it performs at every f' > f; dress-for
+          is always valid."
+ :acceptance
+ ["marks and style tests as in the design, on both hosts"
+  "(read \"I loooove this (honestly). But maybe not. Ship it!\") gives, in
+   order, a :hold on 'loooove' (amount 0.7), an :aside on 'honestly', a
+   :turn on 'But', a :doubt on 'maybe', a :land on 'Ship it' and a :stress
+   on 'it', with exact spans (asserted in a test)"
+  "`bb test` stays green"]
+ :non-goals
+ ["No wiring into lab.pose, cues, the page or the app; no model calls"
+  "Do not change style/params, style/infer or the named styles' values"
+  "Do not edit the schema; do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["docs/product/score.md" "src/halfahead/schema.cljc"
+           "src/halfahead/lab/style.cljc" "src/halfahead/lab/cues.cljc"
+           "test/halfahead/lab/draft_test.cljc" "DESIGN.md"]
+ :budget-usd 10.0}

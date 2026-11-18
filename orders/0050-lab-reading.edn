@@ -1,0 +1,136 @@
+{:id "0050-lab-reading"
+ :title "Lab reading: Ctrl+Enter reads the draft back as its reader would get it, lit word by word at their pace, marks performing as the head arrives"
+ :lupa/deps #{"0045-lab-gestures" "0046-lab-score-pace" "0049-lab-channels" "0054-lab-marks-polish"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'The clock'. Ben watched a lyric fill with
+        light as it was sung and said: music has a bound pacing for lyrics;
+        text's pacing varies by reader. Put the reading head on screen:
+        Ctrl+Enter (or a button) reads the current draft back. The text
+        dims, then fills with ink word by word at the reader's pace; each
+        mark's gesture begins as the head reaches it; a held word keeps the
+        head longer; a long message does not hold the reader and shows only
+        its strongest marks. A pace control sets words per minute."
+ :scope ["src/halfahead/lab/reading.cljc" "test/halfahead/lab/reading_test.cljc"
+         "src/halfahead/lab/pace.cljc" "test/halfahead/lab/pace_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+         "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :design "Schema (the foreman's; do not edit): :ha/reading (entries carry
+          :ms), :ha/placed-cue's optional :tempo, :ha/word-cue's :source
+          :score, :ha/glyph-pose's optional :fill.
+          lab.pace (measured in order 0046: under the 5 s cap a 150 wpm
+          reader gets no reading head for anything over about ten words,
+          so the slowest readers got the least pacing): (reading score
+          pace opts) takes :cap-ms in opts, default 5000, everything as
+          now at the default; a reading is paced when its stops sum to at
+          most cap - 1000, and entries are granted up to cap. The schema
+          now allows :duration-ms up to 30000. The five-second rule is for
+          performances that start by themselves; a read-back is asked
+          for and Escape stops it, so the lab passes :cap-ms 30000. Add
+          tests: at 150 wpm with :cap-ms 30000 the acceptance sentence is
+          paced; the default is unchanged; the H6 properties hold with cap
+          in place of 5000 for caps from 5000 to 30000.
+          halfahead.lab.reading (.cljc, pure): what a reading asks of the
+          frame.
+          (natural-ms point n effect) -> how long a gesture lasts
+            unhurried for n letters in the style at point: (synth/total-ms
+            (gestures/patch effect) n) x the tempo of (style/from-point
+            point).
+          (plan text point pace) -> {:score s :reading r :performing [{:mark
+            i :effect e :intensity k}]} or nil for text that is not a
+            message: s is (score/from-text text point); each mark's
+            gesture is (marks/gesture-for point mark), and a mark the
+            style does not perform is left out of the score before
+            pacing; r is (pace/reading s pace {:cap-ms 30000 :ms-of
+            ...natural-ms of the mark's gesture over its letters...}).
+          (cues plan glyphs t0) -> the :ha/placed-cue for each entry of
+            the reading: :glyph-ids the glyphs whose characters lie in the
+            mark's span (a glyph's offset is the sum of the UTF-16 lengths
+            of the glyphs before it), :cue {:word (the span's text, at
+            most 64 chars) :effect :intensity :source :score}, :at-ms t0 +
+            the entry's :at-ms, and :tempo (entry :ms / natural ms) when
+            that is below 1.
+          (fills plan glyphs t0 t) -> {glyph-id fill} while a paced
+            reading is under way (t0 <= t < t0 + the stops' total): 1 for
+            glyphs the head has passed, 0 for those it has not reached,
+            the fraction for the one it is in ((pace/head reading (- t
+            t0)) against the glyph's offsets); nil before, after, and for
+            a reading with no stops (highlights).
+          (over? plan glyphs t0 t) -> true once the stops are done and
+            every cue has finished (its start + granted ms).
+          lab.pose: a placed cue's :tempo multiplies the style's tempo for
+            that cue (stagger, duration and progress alike), so a hurried
+            gesture is the same motion played faster. frame's opts gain
+            :fills, a map glyph-id -> fill: a live pose gets :fill v for
+            its glyph when v < 1 (multiplied with any :fill a cue gives);
+            absent or nil changes nothing. With reduced motion :fills is
+            ignored.
+          lab.main: Ctrl+Enter, and a 'Read back' button in the bar,
+            start a reading of the current text at now: the plan with the
+            style point in force ((style/as-point ...) of the style the
+            frame reports) and the pace from a new control, 'Pace', a
+            slider from 150 to 450 words a minute, default 250, shown as a
+            number, remembered per viewer in localStorage (every access in
+            try/catch). While a reading plays, its cues are drawn with the
+            draft's (merged for the frame only; the draft is not changed)
+            and :fills goes to the frame; sounds play for its cues when
+            sound is on. Escape, any edit, or starting another reading
+            ends it at once (everything lit). With reduced motion Ctrl+Enter
+            does nothing. window.__lab.reading() -> nil, or {t0 durationMs
+            beatMs stops entries performing headAt (a function of a time
+            on the lab's clock)} as plain data. The debug overlay shows
+            'reading paced|highlights · N ms · beat B ms' and the marks
+            performing while one plays (lab.debug: a pure line for it).
+          Tests: natural-ms; plan for the sentence in order 0044's
+          acceptance at 250 wpm (which marks perform at Elegant's point
+          and at Plain's); cues with exact glyph ids and a :tempo below 1
+          for a late :swell; fills before, during (a lit prefix, one
+          fraction, a dim suffix) and after; text with emoji (offsets by
+          UTF-16 length); pose: a cue with :tempo 0.5 is at the same pose
+          at u as the same cue without it at 2u (property), and :fills
+          reaches poses and is ignored with reduced motion; every existing
+          pose test passes unchanged.
+          e2e/lab.mjs, a new step 'reading' (?debug&reveal=3, Elegant
+          picked, pace set to 250; Plain would perform no marks at all,
+          its flourish being 0, and Elegant has no sway), sampling window.__lab.lastFrame() and
+          reading() on every animation frame so nothing depends on frame
+          rate: type 'I loooove this (honestly). But maybe not. Ship it!';
+          wait until every letter is at rest (the typing's own cues and
+          any shot are over; in Elegant a swell takes up to 5 s, so wait on
+          the data: every live pose at its resting place for 500 ms);
+          press Ctrl+Enter; then (a) in every sampled frame during the
+          stops the fills along the text are non-increasing (a lit prefix,
+          at most one fraction, a dim suffix); (b) the boundary agrees
+          with headAt(that frame's time) within 1.5 characters; (c) no
+          letter of 'loooove' lifts before the head reaches the word, and
+          at least one sampled frame after shows it lifted; (d) once
+          reading() is nil again (wait on the data) no pose has a :fill,
+          and 5.5 s later every letter is at rest;
+          (e) with the pace at 400 the reading's durationMs is smaller
+          than at 150; (f) Escape during a reading leaves no :fill in the
+          next frame. Screenshot out/lab/reading.png taken about 40% of
+          the way through a reading at 150 wpm.
+          docs/LAB.md: a section 'Reading back' (the head, beats, holds,
+          highlights, the pace control, the 5 s cap)."
+ :acceptance
+ ["reading, pose and debug tests as in the design, on both hosts"
+  "`bb lab:e2e` passes with the reading step and every existing step; `bb
+   test` stays green; out/lab/reading.png for the foreman"
+  "The final message says, for the acceptance sentence at 250 wpm in
+   Plain and in Elegant, which marks performed, when, and with what tempo"]
+ :non-goals
+ ["No dress, no A/B flick, no board (later orders); no model calls"
+  "No change to lab.score, lab.marks, lab.synth, gestures, the renderer,
+   the director, reveal or the stage, and none to lab.pace beyond :cap-ms;
+   do not edit the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/score.md" "docs/product/lab-notebook.md"
+           "src/halfahead/schema.cljc" "src/halfahead/lab/pace.cljc"
+           "src/halfahead/lab/score.cljc" "src/halfahead/lab/marks.cljc"
+           "src/halfahead/lab/gestures.cljc" "src/halfahead/lab/synth.cljc"
+           "src/halfahead/lab/style.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+           "public/lab/index.html" "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

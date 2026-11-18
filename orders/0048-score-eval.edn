@@ -1,0 +1,99 @@
+{:id "0048-score-eval"
+ :title "Score eval: measure whether an agent can write valid, varied scores from one page of reference"
+ :lupa/deps #{"0046-lab-score-pace" "0047-site"}
+ :lupa/area :lab
+ :lupa/risk :low
+ :goal "Hypothesis H4 in docs/product/lab-notebook.md: the full score
+        language is for agents, so an agent given one page of reference
+        (resources/agent/score-reference.md) should write scores that are
+        valid on the first try and that change with what it means. Build
+        the harness that asks, checks and counts. The foreman runs it and
+        records the numbers; tests use canned replies and make no model
+        calls."
+ :scope ["src/halfahead/dev/score_eval.clj" "test/halfahead/dev/score_eval_test.clj"
+         "bb.edn"]
+ :design "Inputs, written by the foreman (read them, do not edit):
+          resources/agent/score-reference.md (the page an agent is given)
+          and resources/eval/score-cases.edn (28 cases: :mark, the text is
+          fixed and a :feeling is given; :compose, the agent answers :said
+          with its own text; :patch, the text is fixed and :brief asks for
+          a written-out patch).
+          halfahead.dev.score-eval (.clj). Pure:
+          (prompt case reference) -> {:system s :user u}. The system
+            prompt is one line ('You are an agent in a conversation where
+            text is performed, not only shown.') and then the reference,
+            verbatim. The user prompt: for :mark, the text (to be used
+            unchanged as \"text\") and 'What you mean by it:' with the
+            feeling's name and its two numbers from lab.marks/feelings as
+            words (for example 'tender: calm and warm'); for :compose,
+            'Someone said:' and the :said text, and 'Reply in one to three
+            sentences, as a score.'; for :patch, the text and the :brief.
+          (parse-reply raw) -> the JSON object in a model's reply as
+            Clojure data with string keys, or {:error kw}: the reply may
+            wrap it in a ```json fence or put prose around it; take the
+            first balanced {...} that parses.
+          (->score data) -> {:score x :unfound [phrase ...]}: the reply as
+            the data lab.score/normalize takes. Keys and enum values
+            become keywords (\"kind\" \"gesture\" \"curve\" \"channel\"
+            \"wave\" \"phase\" \"order\" \"each\" \"as\" \"shot\", and
+            \"style\" when it is a string); \"alternate\" and \"abs\" become
+            :alternate? and :abs?; each mark's and dress's \"phrase\" is
+            replaced by the :span of its first occurrence in the text (in
+            UTF-16 units); a phrase that is not in the text is left out
+            and listed in :unfound. Never throws.
+          (measure case reply-text) -> one result map: :id :mode;
+            :parsed? ; :valid? (normalize gave a score); :text-kept? (for
+            :mark and :patch, the reply's text equals the case's text);
+            :marks (count kept), :dropped (normalize's list), :unfound;
+            :kinds (frequencies of mark kinds); :energy and :warmth (the
+            mean over marks, missing as 0; nil with no marks);
+            :gestures (named gestures used); :patches (count of marks that
+            kept a :patch) and :patch-problems (count removed for
+            problems, with lab.synth/problems' output); :dress (count);
+            :style :shot.
+          (summary results) -> the numbers for the notebook: n; the rates
+            of :parsed?, :valid?, :text-kept? and 'clean' (valid with
+            nothing dropped and nothing unfound); marks per reply (mean,
+            min, max); the share of replies with no marks; kinds overall;
+            for the :mark cases, per feeling, the mean energy and warmth,
+            and the share whose warmth has the feeling's sign (tender +,
+            furious -; wry is not scored) and whose energy has it (furious
+            +, tender -); for the :patch cases, how many replies carried a
+            patch and how many patches had no problems; total cost.
+          I/O (thin, at the edge): (ask! {:system :user} opts) runs
+            `claude -p <user> --system-prompt <system> --tools \"\"
+            --disallowedTools \"mcp__*\" --output-format json` with a
+            timeout (default 180 s), through an injectable :process-fn as
+            halfahead.worker.engine does, and returns {:raw result-text
+            :cost-usd n} or {:error ...}; a failure is a result with
+            :parsed? false, never an exception.
+          bb lab:score-eval [--only id-prefix] [--limit n] [--repeat k]:
+            runs the cases one after another (never in parallel), prints a
+            line per case and the summary as a table, and writes
+            out/score-eval/report.edn ({:summary .. :results ..}, each
+            result with the raw reply). It makes model calls and costs
+            money: it prints the count before starting, and it is not part
+            of `bb test`.
+          Tests (no model calls): prompt for one case of each mode; parse
+          of a bare object, a fenced one, one with prose around it, and
+          junk; ->score for a reply with marks, dress, a patch (with
+          \"alternate\" and \"abs\"), an unfound phrase and a string
+          style; measure on canned replies: a clean one, one whose text
+          was changed, one with a patch that does not end at rest (counted
+          in :patch-problems, the mark kept), one that is not JSON;
+          summary on a hand-made list of results with exact numbers; ask!
+          with a fake :process-fn for success, non-zero exit and timeout."
+ :acceptance
+ ["score-eval tests as in the design; `bb test` stays green"
+  "`bb lab:score-eval --limit 1` is NOT run by the factory: do not spend
+   on model calls; say in the final message that the foreman runs it"]
+ :non-goals
+ ["No model calls in tests or in the order's own checks"
+  "No change to the worker, the app, lab.score or the reference and cases"
+  "Do not run `bb e2e`, `bb play` or `bb lab:e2e`"]
+ :context ["docs/product/lab-notebook.md" "resources/agent/score-reference.md"
+           "resources/eval/score-cases.edn" "src/halfahead/lab/score.cljc"
+           "src/halfahead/lab/marks.cljc" "src/halfahead/lab/synth.cljc"
+           "src/halfahead/worker/engine.clj" "test/halfahead/worker/engine_test.clj"
+           "bb.edn" "DESIGN.md"]
+ :budget-usd 8.0}

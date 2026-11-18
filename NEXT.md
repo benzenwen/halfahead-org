@@ -1,5 +1,101 @@
 # Next: what needs Ben, and what the factory does after
 
+## The score drive, 2026-11-17 (newest first)
+
+The design is `docs/product/score.md`; what was measured is in
+`docs/product/lab-notebook.md`; every choice made without you is in
+`docs/product/open-questions.md`; the path to production is
+`docs/PROD.md`.
+
+### Try it (five minutes)
+
+```sh
+bb lab          # prints the URL of /lab/
+```
+
+- **Watch the tour first.** Add `?tour` to the lab's address (or press
+  Tour): in about 40 seconds the lab types for itself, dresses a line in
+  gold, holds a note, dims the lights, reads a line back two ways and
+  takes the stage, with a caption for each scene. Any key stops it.
+- **The board.** Press **Board** (or Ctrl+B). Type `we did it` and press
+  STRESS, or Alt+1 without leaving the text. Hold a pad longer and it
+  lands harder. Select one word and press LAND. BOOM is the card. The
+  square is your style: energy across, flourish up; drag the dot to the
+  top right and press a pad again. The picker then reads **Mine**.
+- **The flick.** Type a line with something in it, such as `I loooove
+  this (honestly). But maybe not. Ship it!`, and press **Which?** (or
+  Ctrl+/). The lab reads it back twice, A then B; press the left or right
+  arrow for the one you prefer. Your style moves toward it and the picker
+  reads **Mine**. Ask again a dozen times and it runs out of things to
+  ask: that is the exam ending, not a fault. It learns speed and bounce
+  from any line, flourish only from a line with something to flourish,
+  and warmth not at all yet (H8 in the notebook).
+- **The held note.** Type `I loooove it ` and watch "loooove": each
+  letter lifts in turn, as in the Music app's lyrics.
+- **Read back.** Type `I loooove this (honestly). But maybe not. Ship
+  it!`, press **Ctrl+Enter** (any style now performs something; Elegant
+  and Caffeinated differ most). The line dims and fills
+  with ink at the Pace slider's words a minute, and each mark performs
+  as the head reaches it. Try 150 and 400. Escape stops it. Then pick
+  Caffeinated and do it again: the same marks, a different performance.
+- **Dress.** Add `?reveal=1` (the paper page), pick Elegant, type `This
+  is *the one thing* that matters (trust me).`: gold and a whisper. Move
+  the mouse over the gold. In Caffeinated a sentence of twelve words or
+  more gets a raised initial.
+- **The gestures.** Type their names: `swell bloom slam hush lean nod
+  shiver draw` (and the earlier eleven).
+- **The type specimen.** `/lab/?specimen`, and `&reveal=0` for paper:
+  weight, focus, slant, stretch, fill and the five inks.
+- **An agent writing scores.** `bb lab:score-eval` (28 model calls, about
+  $1); the page it is given is `resources/agent/score-reference.md`.
+- `?debug` shows what fired; `?reveal=3` skips to the dark stage;
+  `?webgl` forces WebGL2 if WebGPU ever misbehaves (the lab also falls
+  back by itself now).
+
+### Decisions you owe
+
+1. **The cap.** Settled: you raised it to $250 on 2026-11-17 ($142.64
+   was spent). The queue is running again.
+2. **Production.** `docs/PROD.md`: one sentence from you, two repository
+   settings, and the charter wording. The deploy workflow is written and
+   switched off.
+3. **What Plain means (Q30).** Chosen by the foreman after you said keep
+   going: Plain keeps its plain motion but gets a modest flourish (0.35),
+   dress and readings keep the style they began in, and bareness is the
+   reveal level's job (order 0055). Say so if you want it otherwise.
+4. **A pull request for the score drive.** Everything since 17 November
+   is on `claude/laughing-dijkstra-g9b3k8`, not on main, and no pull
+   request is open. Say the word and the foreman opens one (merge
+   commit, never squash: Q12).
+5. **The per-order cap (Q33).** The charter's $12 an order was set when
+   an order cost about $3. The board cost $7.90 to build, and twice had
+   too little left for its review. The foreman's answer was smaller
+   orders and a resume, not a bigger cap; the cap is yours. $20 would
+   fit a page-sized order with one rework.
+6. **Review the choices.** `docs/product/open-questions.md`, Q1 to Q37.
+   The ones that are expensive to change later are Q1 (the first tier is
+   rhetorical), Q5 (patches are bounded) and Q25 (a requested read-back
+   may run past five seconds).
+
+### Next orders, in the order the foreman would run them
+
+| order | what | why |
+|---|---|---|
+| done | 0055: Plain's flourish, dress that stays, a reading keeps its style, gold glows gold | Q30, Q31 |
+| done | 0057: the WebGPU guard | The lab was blank on WebGPU for nine hours; it cannot ship that way again |
+| done | 0056: the tour | "Is there a demo to run and look at" |
+| done | 0051: the board | People get an instrument, not parameters |
+| done | 0053, 0059: the flick, the pure half | One exam as data; an axis is asked both ways and can finish (H8) |
+| done | 0058: the flick, the page | 'Which?' reads the line back two ways; your style moves toward your pick |
+| done | 0060: the asterisks of a dressed stress recede | Your first WebGPU screenshot: `*this*` in gold with both asterisks at full strength (Q37) |
+| (new) | Board and flick polish | From their reviews, none blocking. Board: a pad press that places nothing still raises the reveal level; a key held on a focused pad shares its hold with Alt+digit; BOOM keeps the director off that phrase; Mine sounds like Plain. Flick: choosing A under a named style still moves you to Mine at that style's point (a point cannot hold everything a named style has); the browser check's "energy has not fallen" starts at the clamp, so it proves little; nothing checks an exam after a reload; the learner's stored shape has no schema entry |
+| (new) | The tour shows the board and the flick | The demo that plays by itself stops before the two instruments people get |
+| (new) | The gate says what failed | A failed gate reported a stack trace and no test name (basefactory finding 24); the product's `bb test` could print its failures last |
+| (new) | Scout writes scores | Bring the score into the app: `:ha/engine-reply` carries one (your yes on experiment 5) |
+| (new) | Glosses in the margin | The illuminator's other half: agents annotate beside the text |
+
+## The first drive, 2026-10-21
+
 Written by the foreman at the end of the first overnight drive
 (2026-10-21). DECISIONS.md has the reasoning; this page is the to-do list.
 

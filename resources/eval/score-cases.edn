@@ -1,0 +1,43 @@
+;; Cases for `bb lab:score-eval` (hypothesis H4 in docs/product/lab-notebook.md):
+;; can an agent write valid, varied scores from one page of reference?
+;; Written by the foreman; all text here is invented for the test.
+;;   :mark     the text is fixed; the agent adds the score for a given mood
+;;   :compose  the agent answers a message with its own text and score
+;;   :patch    the text is fixed and the brief asks for a written-out patch
+[;; six lines that can be meant three ways
+ {:id "plan-tender"    :mode :mark :feeling :tender  :text "So that's the plan. We ship on Friday."}
+ {:id "plan-furious"   :mode :mark :feeling :furious :text "So that's the plan. We ship on Friday."}
+ {:id "plan-wry"       :mode :mark :feeling :wry     :text "So that's the plan. We ship on Friday."}
+ {:id "module-tender"  :mode :mark :feeling :tender  :text "You rewrote the whole module over the weekend."}
+ {:id "module-furious" :mode :mark :feeling :furious :text "You rewrote the whole module over the weekend."}
+ {:id "module-wry"     :mode :mark :feeling :wry     :text "You rewrote the whole module over the weekend."}
+ {:id "review-tender"  :mode :mark :feeling :tender  :text "I read your review. Every word of it."}
+ {:id "review-furious" :mode :mark :feeling :furious :text "I read your review. Every word of it."}
+ {:id "review-wry"     :mode :mark :feeling :wry     :text "I read your review. Every word of it."}
+ {:id "machine-tender"  :mode :mark :feeling :tender  :text "It works on my machine."}
+ {:id "machine-furious" :mode :mark :feeling :furious :text "It works on my machine."}
+ {:id "machine-wry"     :mode :mark :feeling :wry     :text "It works on my machine."}
+ {:id "fine-tender"    :mode :mark :feeling :tender  :text "Fine. Do it your way."}
+ {:id "fine-furious"   :mode :mark :feeling :furious :text "Fine. Do it your way."}
+ {:id "fine-wry"       :mode :mark :feeling :wry     :text "Fine. Do it your way."}
+ {:id "users-tender"   :mode :mark :feeling :tender  :text "We made it to a thousand users."}
+ {:id "users-furious"  :mode :mark :feeling :furious :text "We made it to a thousand users."}
+ {:id "users-wry"      :mode :mark :feeling :wry     :text "We made it to a thousand users."}
+
+ ;; replies the agent composes
+ {:id "compose-shipped"   :mode :compose :said "We shipped it. After nine months. I can't quite believe it."}
+ {:id "compose-outage"    :mode :compose :said "The migration ate the production database. Backups are from Tuesday."}
+ {:id "compose-by-hand"   :mode :compose :said "Is it weird that I miss writing code by hand?"}
+ {:id "compose-tests"     :mode :compose :said "Give me one sentence on why tests matter."}
+ {:id "compose-apology"   :mode :compose :said "My agent just apologised to me for the third time today."}
+ {:id "compose-compilers" :mode :compose :said "Tell me something beautiful about compilers."}
+
+ ;; signature moves: the brief asks for a patch
+ {:id "patch-gravity" :mode :patch :text "Gravity always wins."
+  :brief "Make 'Gravity' sag under its own weight and bounce back. Write the motion as a patch."}
+ {:id "patch-lights" :mode :patch :text "And then the lights went out."
+  :brief "Make 'the lights went out' dim away to almost nothing and come back. Write the motion as a patch."}
+ {:id "patch-round" :mode :patch :text "Round and round we go."
+  :brief "Make 'Round and round' travel as a wave through its letters. Write the motion as a patch."}
+ {:id "patch-snap" :mode :patch :text "Snap."
+  :brief "Make it arrive hard and fast from the front, with a small bounce. Write the motion as a patch."}]

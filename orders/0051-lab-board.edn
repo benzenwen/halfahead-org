@@ -1,0 +1,194 @@
+{:id "0051-lab-board"
+ ;; 2026-11-18: the first run was lost when the container restarted mid-build.
+ ;; The second built everything, passed the gate and the browser check, got
+ ;; REWORK from review for one real defect (an abandoned pad press later
+ ;; fires from a typed digit) and two smaller ones, and then ran out of its
+ ;; $12 before the rework. Respecced: the reviewer's findings and the
+ ;; foreman's answers to the builder's notes are at the end of the design
+ ;; and in the acceptance criteria. The built work is in the worktree.
+ ;; The third run found that work gone (basefactory removes a kept worktree
+ ;; when its order runs again, uncommitted work and all), built everything
+ ;; a second time, was sent back once by the test gate because the
+ ;; foreman's three-knot tempo curve broke a test outside the scope
+ ;; (reading_test pins Elegant's tempo at 1.36), fixed that with a fourth
+ ;; knot, passed the gate, and again had too little left for the review
+ ;; ($0.79 of $12). $23.92 spent on this order so far and nothing merged.
+ ;; This fourth run is a resume: the diff is saved, the builder applies it,
+ ;; and the money goes to the review. The plan station is replaced by the
+ ;; foreman's note (:engines), since the plan is the same work.
+ :title "Lab board: a few pads that mark what you just wrote, and one XY pad for your style (no parameters)"
+ :lupa/deps #{"0056-lab-tour"}
+ :lupa/area :lab
+ :lupa/risk :medium
+ :goal "docs/product/score.md, 'How people and agents drive it'. People
+        will not tune parameters. Give them an instrument instead: a small
+        board, hidden until asked for, with pads that say what the last
+        phrase is doing (STRESS, HOLD, ASIDE, TURN, DOUBT, LAND), one big
+        moment (BOOM, a card), and one XY pad whose position is the
+        writer's style: energy across, flourish up. Keyboard first. The
+        Cramer end of the dial."
+ :scope ["src/halfahead/lab/board.cljc" "test/halfahead/lab/board_test.cljc"
+         "src/halfahead/lab/style.cljc" "test/halfahead/lab/style_test.cljc"
+         "src/halfahead/lab/pose.cljc" "test/halfahead/lab/pose_test.cljc"
+         "src/halfahead/lab/main.cljs" "src/halfahead/lab/debug.cljc"
+         "test/halfahead/lab/debug_test.cljc" "public/lab/index.html"
+         "e2e/lab.mjs" "docs/LAB.md"]
+ :engines {:plan {:engine :exec
+                  :cmd ["cat" "../../../out/foreman/0051-plan.md"]}}
+ :design "RESUME (2026-11-18). The last run built all of what follows and
+          passed `bb test`; the foreman then ran `bb lab:e2e`
+          on it: 32 steps, all passing, on WebGL2 (the board step, the
+          tour's kept draft and the webgpu pipeline check among them). It
+          stopped before the review for want of budget. Its whole diff is
+          saved at ../../../out/foreman/0051-lab-board.patch, relative to
+          the worktree's root. To build is to apply that patch (`git
+          apply`), run `bb test`, and change nothing that works. The rest
+          of this design says what the patch holds and what the review
+          judges it against.
+          Schema (the foreman's; do not edit): :ha/style-point,
+          :ha/mark-kind, :ha/word-cue's :source :board, :ha/direction.
+          halfahead.lab.board (.cljc, pure):
+          pads -> the board's pads in order, data: [{:id :stress :label
+            \"STRESS\" :key \"1\"} {:id :hold ..\"2\"} {:id :aside ..\"3\"}
+            {:id :turn ..\"4\"} {:id :doubt ..\"5\"} {:id :land ..\"6\"}
+            {:id :boom :label \"BOOM\" :key \"7\"}].
+          (target text selection) -> the [from to) span a pad acts on, in
+            UTF-16 units, or nil when there is nothing to mark: the
+            selection {:from :to} when it is not empty (trimmed of
+            whitespace at both ends); else the last phrase: from the end
+            of the previous sentence (after . ! ? … or a newline, and any
+            spaces) to the end of the text without trailing whitespace,
+            and no more than its last 12 words.
+          (press pad point glyphs span t amount) -> what a pad adds to the
+            draft at time t, {:cues [...]} or {:directions [...]}: a mark
+            pad places one :ha/placed-cue on the glyphs in the span (as
+            lab.reading maps spans to glyphs) whose cue is (marks/
+            gesture-for point {:kind pad :amount amount ...}), forced to
+            perform even in a spare style (a pad is a deliberate act: if
+            gesture-for gives nil, use the gesture it would choose at
+            flourish 1), with :source :board and :word the span's text
+            (at most 64 chars); BOOM places a :ha/direction {:shot :card
+            :energy amount :source :rules} on those glyphs. amount is 0.7
+            for a tap and rises to 1.0 for a pad held 600 ms or longer.
+          (xy->point point x y) -> point with :energy x and :flourish y
+            (both kept in [0 1]); (point->xy point) -> [x y].
+          lab.pose: frame's :style-choice may also be a :ha/style-point;
+            then births and cues use (style/from-point point) and the
+            frame has no :style key. Everything else as before.
+          lab.main and index.html: a 'Board' toggle in the bar and Ctrl+B
+            show and hide the board (hidden on load; remembered per viewer
+            in localStorage, every access in try/catch). The board is
+            real buttons in a toolbar labelled 'Board', each with its
+            name and key, operable by Tab and Enter/Space, and by Alt+1 to
+            Alt+7 from the textarea without it losing focus or gaining a
+            character. Pressing a pad calls board/press on the board's
+            target with the style point in force, adds the result to the
+            draft (cues, or directions, exactly as typing would have) and
+            voices it when sound is on. A pad with nothing to mark does
+            nothing. Board cues survive like any cue: an edit that removes
+            their glyphs removes them.
+            The XY pad is a square with a dot: dragging or clicking sets
+            the point, arrow keys move it by 0.05 when it has the focus,
+            and it has an accessible name and value text ('Energy 60%,
+            flourish 40%'). Moving it makes the style 'Mine': the style
+            picker gains a Mine option that is selected then, and picking
+            a named style moves the dot to that style's point (style/
+            point). The point is remembered per viewer. With Mine picked,
+            frame gets the point as :style-choice.
+            window.__lab.board() -> {visible point target} as plain data.
+            The debug overlay shows 'style mine (e 0.60 f 0.40 s 0.50 w
+            0.50)' when a point is in force, and board cues read like any
+            other ('did it -> glow 0.7 (board)').
+          A fix to the tour (order 0056; its builder reported it, the
+          foreman's script caused it): started from the Tour button with
+          words already in the text box, the tour types after them and a
+          later scene clears them, so a visitor's draft is lost. When the
+          tour starts and the box is not empty, lab.main keeps that text;
+          the tour then begins on an empty box; and when the tour ends or
+          is stopped, the kept text is put back (through the same edit
+          path as typing, so it is the visitor's draft again, at rest).
+          When the box was empty at the start, behaviour is as now (on a
+          stop, what the tour typed stays).
+          REWORK, from the review of the first build (all required):
+          (1) An abandoned pad press must not fire later. Today
+          pointerdown records the pad as down and only click clears it,
+          so after a press dragged off the pad (or a pointercancel, or
+          Alt+digit keydown followed by the window losing focus), any
+          later DigitN keyup, with or without Alt, plays that pad at
+          full strength: type 'we did it', press STRESS and drag off,
+          release, type '1', and the box holds 'we did it1' with a (board)
+          cue nobody asked for. Clear a pad's hold on pointerup outside
+          it, pointercancel, pointerleave and window blur; a key release
+          plays only a pad that an Alt+digit keydown put down (keep key
+          holds apart from pointer holds).
+          (2) At 360 px wide the board must not cover the line being
+          written: below a width where it would, dock it as a row along
+          the bottom of the page (a media query), pads still reachable
+          and labelled.
+          (3) A pad held with Enter must count as held, as it does with
+          Space: play on key release for both, so 'a pad (or its key)
+          held 600 ms or longer' in docs/LAB.md is true.
+          And the foreman's answers to the builder's notes:
+          (4) Every motion still ends within 5000 ms, for any point: in
+          lab.style/from-point the tempo's curve is piecewise linear
+          through (0, 1.5) (0.2, 1.36) (0.5, 1.0) (1, 0.5). From energy
+          0.2 up it is the curve as it was, so every named style keeps its
+          tempo (a test outside this scope pins Elegant's at 1.36); below
+          0.2 it now flattens to 1.5 where it used to reach 1.6, so no
+          point is slower than 1.5. Put lab.pose's
+          bound and docstring back to 5000 ms for every style and point,
+          and update the tests that pinned 1.6.
+          (5) A pad press must be seen. On a fresh page the reveal level
+          is 0 and nothing performs. Pressing a mark pad first raises the
+          reveal level to at least 1 (through the wand's path, so it is
+          kept), and BOOM raises it to 3, since a card needs the stage;
+          then the cue or direction is placed.
+          Tests: target for a selection, for text ending mid-sentence,
+          after a full stop, with trailing spaces, over 12 words, empty;
+          press for each mark pad at Plain's and Caffeinated's points
+          (the forced gesture in a spare style), the amount from the hold,
+          BOOM's direction; xy round trip; pose with a point as
+          :style-choice equals pose with params from from-point, and
+          every existing pose test passes unchanged.
+          e2e/lab.mjs, a new step 'board' (?debug&reveal=3, Plain): the
+          board is hidden on load; Ctrl+B shows it; type 'we did it'; click
+          STRESS: the overlay shows a (board) cue on 'we did it' and a
+          sampled frame shows those letters moving; Alt+2: a swell on the
+          same phrase, and the textarea still has the focus and the same
+          text; select 'did' and press LAND: the cue's glyphs are those of
+          'did' only; BOOM places a :card direction (window.__lab
+          .directions()); click the XY pad's top right corner: board()
+          .point has energy and flourish above 0.9, the picker shows Mine,
+          and the next cue's gesture plays faster than the same one in
+          Plain (compare the time from its start to rest in sampled
+          frames, by data not by clock); reload: the board is still
+          shown and the point kept. Screenshot out/lab/board.png. And in
+          the tour step: type 'my own words', start the tour from the
+          button, stop it with a key in scene 2: the text box holds 'my
+          own words' again; start it again and let it finish: the same."
+ :acceptance
+ ["board, pose, style and debug tests as in the design, on both hosts"
+  "e2e, in the board step: an abandoned press (pointer down on STRESS,
+   moved off it, released) followed by typing '1' places no (board) cue
+   and types the digit; the same after Alt+1 keydown and a window blur"
+  "e2e: at a 360 x 640 viewport with the board shown and a line typed, the
+   board's box does not intersect the box of the line being written"
+  "e2e: a pad held with Enter for 800 ms gives amount 1.0, as with Space"
+  "e2e: on a fresh page at level 0, pressing STRESS brings the level to 1
+   and a sampled frame shows the phrase moving; BOOM brings it to 3"
+  "(style/from-point {:energy 0 :flourish 0 :softness 0.5 :warmth 0.5})
+   has tempo 1.5, and pose's settle bound is 5000 ms for every point"
+  "`bb lab:e2e` passes with the board step and every existing step; `bb
+   test` stays green; out/lab/board.png for the foreman"]
+ :non-goals
+ ["No learning from choices (the flick is a later order); no dress"
+  "No change to marks, gestures, synth, pace, score, the renderer, the
+   director's rules, reveal or the stage; do not edit the schema"
+  "Do not run `bb e2e` or `bb play`"]
+ :context ["docs/product/score.md" "src/halfahead/schema.cljc"
+           "src/halfahead/lab/marks.cljc" "src/halfahead/lab/style.cljc"
+           "src/halfahead/lab/reading.cljc" "src/halfahead/lab/pose.cljc"
+           "src/halfahead/lab/director.cljc" "src/halfahead/lab/main.cljs"
+           "src/halfahead/lab/debug.cljc" "public/lab/index.html"
+           "e2e/lab.mjs" "docs/LAB.md" "DESIGN.md"]
+ :budget-usd 12.0}

@@ -78,3 +78,91 @@
                  t (gen/choose 0 4000)]
     (= (style/infer (glyphs-born borns) t)
        (style/infer (glyphs-born (shuffle borns)) t))))
+
+;; --- the style space ---------------------------------------------------------
+
+(defn- close-to? [a b] (< (Math/abs (- a b)) 1e-9))
+
+(defn- params-close?
+  "from-point's result against expected tempo, overshoot and amplitude."
+  [ps [tempo overshoot amplitude]]
+  (and (= #{:tempo :overshoot :amplitude :sway :steps} (set (keys ps)))
+       (close-to? tempo (:tempo ps))
+       (close-to? overshoot (:overshoot ps))
+       (close-to? amplitude (:amplitude ps))
+       (nil? (:sway ps))
+       (nil? (:steps ps))))
+
+(deftest point-for-every-style
+  (is (= {:plain       {:energy 0.5  :flourish 0.35 :softness 0.5 :warmth 0.5}
+          :elegant     {:energy 0.2  :flourish 0.45 :softness 0.9 :warmth 0.7}
+          :caffeinated {:energy 0.95 :flourish 0.75 :softness 0.2 :warmth 0.5}
+          :drunken     {:energy 0.4  :flourish 0.65 :softness 0.8 :warmth 0.6}
+          :coarse      {:energy 0.8  :flourish 0.55 :softness 0.0 :warmth 0.15}}
+         (into {} (map (juxt identity style/point)) style/styles)))
+  (doseq [s style/styles]
+    (is (schema/valid? :ha/style-point (style/point s)) (str s)))
+  (is (= :ha/unknown-style
+         (try (style/point :wild) nil
+              (catch #?(:clj Exception :cljs :default) e (:type (ex-data e)))))))
+
+(deftest as-point-test
+  (let [p {:energy 0.1 :flourish 0.2 :softness 0.3 :warmth 0.4}]
+    (is (= p (style/as-point p)) "a point is itself"))
+  (doseq [s style/styles]
+    (is (= (style/point s) (style/as-point s)) (str s))))
+
+(deftest from-point-at-named-points
+  (is (= {:tempo 1.0 :overshoot 1.0 :amplitude 1.0 :sway nil :steps nil}
+         (style/params :plain)
+         (style/from-point (style/point :plain)))
+      "the middle of the space is the lab's unstyled motion exactly, whatever Plain's flourish")
+  (doseq [[s expected] {:plain       [1.0 1.0 1.0]
+                        :elegant     [1.36 0.2 0.85]
+                        :caffeinated [0.55 1.6 1.225]
+                        :drunken     [1.12 0.4 0.95]
+                        :coarse      [0.7 2.0 1.15]}]
+    (is (params-close? (style/from-point (style/point s)) expected) (str s)))
+  (testing "the named styles keep their own params"
+    (is (= {:tempo 1.5 :overshoot 0.0 :amplitude 0.8 :sway nil :steps nil}
+           (style/params :elegant)))
+    (is (= {:tempo 0.6 :overshoot 1.8 :amplitude 1.15
+            :sway {:amp 0.03 :period-ms 45} :steps nil}
+           (style/params :caffeinated)))
+    (is (= {:tempo 1.4 :overshoot 1.6 :amplitude 1.1
+            :sway {:amp 0.12 :period-ms 900} :steps nil}
+           (style/params :drunken)))
+    (is (= {:tempo 0.5 :overshoot 1.0 :amplitude 1.25 :sway nil :steps 3}
+           (style/params :coarse)))))
+
+(deftest from-point-at-corners
+  (doseq [energy [0.0 1.0] softness [0.0 1.0] flourish [0.0 1.0] warmth [0.0 1.0]]
+    (is (= {:tempo (if (zero? energy) 1.5 0.5)
+            :overshoot (if (zero? softness) 2.0 0.0)
+            :amplitude (if (zero? energy) 0.75 1.25)
+            :sway nil
+            :steps nil}
+           (style/from-point {:energy energy :flourish flourish
+                              :softness softness :warmth warmth}))
+        (str [energy flourish softness warmth]))))
+
+;; Order 0051: the calmest point is as slow as Elegant and no slower, so
+;; every motion still ends within lab.pose's 5000 ms.
+(deftest calmest-point-is-as-slow-as-elegant
+  (is (= 1.5 (:tempo (style/from-point {:energy 0 :flourish 0 :softness 0.5 :warmth 0.5}))))
+  (is (= (:tempo (style/params :elegant))
+         (:tempo (style/from-point {:energy 0 :flourish 0 :softness 0.5 :warmth 0.5})))))
+
+(def ^:private gen-unit
+  (gen/double* {:min 0.0 :max 1.0 :NaN? false :infinite? false}))
+
+(defspec from-point-shape 200
+  (prop/for-all [point (gen/hash-map :energy gen-unit :flourish gen-unit
+                                     :softness gen-unit :warmth gen-unit)]
+    (let [{:keys [tempo overshoot amplitude sway steps] :as ps} (style/from-point point)]
+      (and (= #{:tempo :overshoot :amplitude :sway :steps} (set (keys ps)))
+           (<= 0.5 tempo 1.5)
+           (<= 0.75 amplitude 1.25)
+           (<= 0.0 overshoot 2.0)
+           (nil? sway)
+           (nil? steps)))))

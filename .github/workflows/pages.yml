@@ -1,0 +1,57 @@
+# Publishes the site (a landing page and the typing lab's release build,
+# assembled by `bb site`) to GitHub Pages when main changes.
+#
+# It does nothing until the repository variable PAGES is set to "on"
+# (Settings → Secrets and variables → Actions → Variables), and Pages'
+# source is "GitHub Actions" (Settings → Pages). Setting PAGES to anything
+# else stops deploys again. See docs/PROD.md.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: vars.PAGES == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install Babashka
+        run: |
+          curl -sSLo /tmp/install-bb https://raw.githubusercontent.com/babashka/babashka/master/install
+          sudo bash /tmp/install-bb
+      - run: npm ci --no-audit --no-fund
+      - run: bb site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

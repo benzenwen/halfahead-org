@@ -1,7 +1,7 @@
 (ns halfahead.lab.debug
   "The numbers behind the lab's ?debug overlay: frame timing over the last
-  second, the cues and directions an edit just placed, and short logs of
-  recent ones, so a screen recording read frame by frame ties what was
+  second, the cues and directions an edit just placed, short logs of
+  recent ones, and the dress the draft wears, so a screen recording read frame by frame ties what was
   felt to what the code did. Pure: the shell passes the clock in as now-ms. Display only;
   nothing here is logged or stored anywhere."
   (:require [clojure.string :as str]))
@@ -116,13 +116,19 @@
            (apply str (repeat (- places (count frac)) "0")) frac))))
 
 (defn- style-text
-  "The style in force, and (auto) when the rhythm chose it."
+  "The style in force, and (auto) when the rhythm chose it; the writer's
+  own point (the board's XY pad) reads as mine with its four axes."
   [style style-choice]
-  (str "style " (name style) (when (= :auto style-choice) " (auto)")))
+  (if (map? style-choice)
+    (let [{:keys [energy flourish softness warmth]} style-choice]
+      (str "style mine (e " (fixed energy 2) " f " (fixed flourish 2)
+           " s " (fixed softness 2) " w " (fixed warmth 2) ")"))
+    (str "style " (name style) (when (= :auto style-choice) " (auto)"))))
 
 (defn overlay-text
   "The overlay: a timing line, a backend line naming the motion style in
-  force, then one line per cue log entry and one per direction log entry,
+  force (:style-choice may be a :ha/style-point, the writer's own), then
+  one line per cue log entry and one per direction log entry,
   each newest first."
   [{:keys [summary t-ms backend glyphs style style-choice log directions]}]
   (let [{:keys [frame fps mean-ms worst-ms]} summary]
@@ -141,3 +147,27 @@
                (map (fn [{:keys [phrase shot energy]}]
                       (str phrase " -> " (name shot) " " (fixed energy 1)))
                     directions)))))
+
+(defn reading-text
+  "The overlay's lines while a read-back plays: whether the :ha/reading is
+  paced (the head stops on every word) or only highlights, how long it
+  lasts and its beat, then one line per mark it performs, given as cues
+  [{:word :effect :intensity} ...] in the order they begin."
+  [{:keys [stops duration-ms beat-ms]} cues]
+  (str/join "\n"
+            (into [(str "reading " (if (seq stops) "paced" "highlights")
+                        " · " duration-ms " ms"
+                        " · beat " (fixed beat-ms 0) " ms")]
+                  (map (fn [{:keys [word effect intensity]}]
+                         (str word " -> " (name effect) " " (fixed intensity 1) " (reading)")))
+                  cues)))
+
+(defn dress-text
+  "The overlay's line for the dress placed on glyphs (lab.dress/placed):
+  each dress and the text it is on, cut like a directed phrase; nil when
+  the draft wears none."
+  [placed glyphs]
+  (when (seq placed)
+    (str "dress: "
+         (str/join " · " (map #(str (name (:as %)) " \"" (phrase-text {:glyphs glyphs} %) "\"")
+                              placed)))))

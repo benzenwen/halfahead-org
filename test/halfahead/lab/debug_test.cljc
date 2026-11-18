@@ -208,3 +208,83 @@
       (is (= "WebGL2 · 3 glyphs · style elegant" (backend-line :elegant :elegant))))
     (testing "a style inferred from the rhythm says so"
       (is (= "WebGL2 · 3 glyphs · style drunken (auto)" (backend-line :drunken :auto))))))
+
+;; Order 0051: the board's XY pad puts a point in force, and its pads place
+;; cues that read like any other.
+(deftest overlay-names-a-point-as-mine
+  (is (= "WebGL2 · 3 glyphs · style mine (e 0.60 f 0.40 s 0.50 w 0.50)"
+         (second (str/split-lines
+                  (debug/overlay-text
+                   {:summary (debug/summary nil) :t-ms 0 :backend "WebGL2" :glyphs 3
+                    :style nil
+                    :style-choice {:energy 0.6 :flourish 0.4 :softness 0.5 :warmth 0.5}
+                    :log []})))))
+  (is (= "WebGL2 · 3 glyphs · style mine (e 0.00 f 1.00 s 0.25 w 0.05)"
+         (second (str/split-lines
+                  (debug/overlay-text
+                   {:summary (debug/summary nil) :t-ms 0 :backend "WebGL2" :glyphs 3
+                    :style-choice {:energy 0 :flourish 1 :softness 0.25 :warmth 0.049}
+                    :log []}))))))
+
+(deftest a-board-cue-reads-like-any-other
+  (let [old {:glyphs [] :cues []}
+        placed {:glyph-ids [3 4 5 6 7 8]
+                :cue {:word "did it" :effect :glow :intensity 0.7 :source :board}
+                :at-ms 2000}
+        new {:glyphs [] :cues [placed]}
+        log (debug/cue-log [] (debug/new-cues old new) 2000)]
+    (is (= [{:word "did it" :effect :glow :intensity 0.7 :source :board :at-ms 2000}] log))
+    (is (= "did it -> glow 0.7 (board)"
+           (nth (str/split-lines
+                 (debug/overlay-text {:summary (debug/summary nil) :t-ms 2000
+                                      :backend "WebGL2" :glyphs 9
+                                      :style :plain :style-choice :plain :log log}))
+                2)))))
+
+;; --- a read-back --------------------------------------------------------------
+
+(deftest the-overlay-says-what-a-reading-performs
+  (is (= (str "reading paced · 4483 ms · beat 240 ms\n"
+              "loooove -> swell 0.7 (reading)\n"
+              "honestly -> hush 0.6 (reading)")
+         (debug/reading-text {:duration-ms 4483 :beat-ms 240.0
+                              :stops [{:span [0 1] :at-ms 0 :ms 240}]
+                              :entries [{:mark 0 :at-ms 240 :ms 4243}
+                                        {:mark 1 :at-ms 888 :ms 2040}]}
+                             [{:word "loooove" :effect :swell :intensity 0.7 :source :score}
+                              {:word "honestly" :effect :hush :intensity 0.6 :source :score}])))
+  (testing "a reading with no stops shows highlights; the beat is in whole ms"
+    (is (= "reading highlights · 2700 ms · beat 133 ms\nwow -> slam 1.0 (reading)"
+           (debug/reading-text {:duration-ms 2700 :beat-ms (/ 60000.0 450) :stops []
+                                :entries [{:mark 0 :at-ms 0 :ms 2700}]}
+                               [{:word "wow" :effect :slam :intensity 1}]))))
+  (testing "a style that performs nothing has the one line"
+    (is (= "reading paced · 2592 ms · beat 240 ms"
+           (debug/reading-text {:duration-ms 2592 :beat-ms 240.0
+                                :stops [{:span [0 1] :at-ms 0 :ms 240}] :entries []}
+                               [])))))
+
+;; --- dress -------------------------------------------------------------------
+
+(defn- glyphs-of [chars]
+  (vec (map-indexed (fn [i c] {:id (+ 10 i) :char (str c) :born-ms 0}) chars)))
+
+(deftest dress-text-names-each-dress-and-its-words
+  (let [text "This is *the one thing* that matters (trust me)."
+        glyphs (glyphs-of text)
+        ids (fn [word] (let [i (str/index-of text word)]
+                         (mapv #(+ 10 %) (range i (+ i (count word))))))]
+    (is (= "dress: gilt \"the one thing\" · whisper \"trust me\""
+           (debug/dress-text [{:as :gilt :glyph-ids (ids "the one thing")}
+                              {:as :whisper :glyph-ids (ids "trust me")}]
+                             glyphs)))
+    (is (= "dress: versal \"T\"" (debug/dress-text [{:as :versal :glyph-ids [10]}] glyphs)))
+    (is (= "dress: strong \"This is *the one…\""
+           (debug/dress-text [{:as :strong :glyph-ids (ids text)}] glyphs))
+        "a long phrase is cut to 16 characters"))
+  (testing "an emoji is one glyph"
+    (is (= "dress: rubric \"🚀 go\""
+           (debug/dress-text [{:as :rubric :glyph-ids [10 11 12 13]}] (glyphs-of ["🚀" " " "g" "o"])))))
+  (testing "no dress, no line"
+    (is (nil? (debug/dress-text [] (glyphs-of "plain"))))
+    (is (nil? (debug/dress-text nil [])))))

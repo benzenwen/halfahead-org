@@ -202,3 +202,58 @@ Caffeinated):
   stays 1.0 per the charter: nothing records review outcomes yet, so
   nothing has earned darkness; "dark" here means Ben is not watching each
   tick, not that review is skipped.
+
+### H21 ★ The score: marks, styles, gestures, patches, channels, and a clock — foreman, for Ben to review
+Ben (2026-11-17): "we didn't really do much design around a DSL… What would
+a rich, capable, creative description of animated text look like?", the
+full language for agents, people with "relatively little patience for
+tweaking", a subtle read (the Music app's held syllable), pacing that
+varies by reader, and "the modern equivalent of the illuminated
+manuscript". The design is `docs/product/score.md`; every choice made
+without Ben is in `docs/product/open-questions.md`; what is measured goes
+in `docs/product/lab-notebook.md`.
+- **The first tier is rhetorical**: eight marks (stress, hold, aside,
+  turn, doubt, build, land, voice) with an amount and an affect (energy,
+  warmth). A style turns a mark into a gesture; a gesture is a patch; a
+  patch modulates channels. Music's structure, on purpose.
+- **One engine**: a text synthesizer (`lab.synth`). Patches are data, and
+  are checked to end at rest and stay in bounds, so any agent may write
+  one.
+- **Time is counted in the reader's beats**, with a reading head and the
+  5 s cap; while typing, the clock stays the keystrokes.
+- **Dress** is what a mark leaves at rest (versal, rubric, gilt, strong,
+  whisper); inks are a closed palette.
+- **People get two instruments, no parameters**: the flick (an A/B that
+  moves a style point) and a small board.
+- **Autonomy** (Ben: "a little darker… run more autonomously… low
+  stakes"): the foreman now chooses and keeps going, logging choices. The
+  review rate stays 1.0 (review catches about half of known defects, so
+  nothing has earned less). Merging to main and deploying still need
+  Ben's words, because the charter says so; `docs/PROD.md` lists exactly
+  what to grant.
+- Main is merged with merge commits only: Lupa reads `factory(<id>)`
+  commits to know what is merged, and a squash would strand the graph.
+- 2026-11-17, later: Ben raised the spend cap to $250 ("keep going") and
+  asked for a demo to look at. The foreman made the Q30 choice (Plain
+  keeps a flourish of 0.35; dress and readings keep the style they began
+  in; order 0055) and queued a self-playing tour (0056), then the board
+  and the flick.
+- 2026-11-18: the board (0051) took four runs and $26.87. The charter's
+  $12 an order no longer fits a page-sized order on this model, and
+  basefactory discards a halted order's built work when the order runs
+  again. The foreman kept the cap (it is Ben's), resumed the board from
+  its saved diff with the plan station replaced by a note, and split the
+  flick into a pure order and a page order. Orders are now sized to one
+  module and its tests, or one page change and its browser check, never
+  both.
+- 2026-11-18, later: the flick is in (0053 the exam as data, 0059 after
+  the H8 measurement, 0058 the page). The container restarted three times
+  under running orders. Each time the builder's files survived on disk;
+  for the flick page, as for the board, the foreman saved the diff, ran
+  both gates on it, and had the order's next run apply it, so the review
+  station judged work already paid for. A killed run leaves no row in the
+  ledger: recorded spend is $204.15, and the four killed builds cost about
+  $11 to $16 more by an estimate from their transcripts
+  (`open-questions.md`, Q36). The factory is stopped with its queue
+  empty.
+

@@ -33,7 +33,17 @@
    :fuse    {:notes [[0 0] [7 70]] :ms 100 :gain 0.045}
    :jitter  {:notes [[0 0] [1 25] [0 50] [1 75]] :ms 25 :gain 0.04}
    :glow    {:notes [[0 0] [7 0] [12 0]] :ms 300 :gain 0.04}
-   :wobble  {:notes [[0 0] [2 90] [0 180]] :ms 120 :gain 0.045}})
+   :wobble  {:notes [[0 0] [2 90] [0 180]] :ms 120 :gain 0.045}
+   ;; the gestures added with the score (docs/product/score.md): first
+   ;; figures from the foreman, to be tuned by ear
+   :swell   {:notes [[0 0] [7 100] [12 200]] :ms 200 :gain 0.04}
+   :bloom   {:notes [[0 0] [4 0] [7 60]] :ms 240 :gain 0.038}
+   :slam    {:notes [[-12 0] [-24 20]] :ms 120 :gain 0.07}
+   :hush    {:notes [[12 0] [7 80]] :ms 80 :gain 0.03}
+   :lean    {:notes [[0 0] [-1 70]] :ms 110 :gain 0.04}
+   :nod     {:notes [[4 0] [0 90]] :ms 90 :gain 0.04}
+   :shiver  {:notes [[11 0] [12 20] [11 40] [12 60]] :ms 20 :gain 0.035}
+   :draw    {:notes [[0 0] [2 40] [4 80] [7 120]] :ms 50 :gain 0.035}})
 
 ;; --- palettes ----------------------------------------------------------------
 
