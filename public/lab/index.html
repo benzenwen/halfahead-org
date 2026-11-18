@@ -101,6 +101,62 @@
     }
     #tour-stop[hidden] { display: none; }
     #tour-stop:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* The board: hidden until asked for (the Board button, Ctrl+B). Wide, a
+       column in the margin beside the text, which fills the middle 70%. */
+    #board {
+      position: fixed; right: 0.5rem; top: 3.25rem; width: 6.25rem; box-sizing: border-box;
+      max-height: calc(100vh - 6.5rem); overflow-y: auto;
+      display: grid; gap: 0.3rem; font-family: var(--condensed); font-size: 0.8125rem;
+      text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+    }
+    #board[hidden] { display: none; }
+    .pad {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 0.25rem;
+      min-height: 2rem; margin: 0; padding: 0.2rem 0.45rem; font: inherit; text-transform: inherit;
+      letter-spacing: inherit; color: var(--text); background: var(--bg);
+      border: 1px solid rgba(185, 173, 154, 0.5); border-radius: 0.25rem; cursor: pointer;
+      touch-action: manipulation; user-select: none; -webkit-user-select: none;
+    }
+    .pad kbd { font: inherit; color: var(--muted); }
+    .pad[data-pad="boom"] { border-color: var(--signal); }
+    .pad:active { background: var(--signal); color: var(--bg); }
+    .pad:active kbd { color: var(--bg); }
+    .pad:focus-visible, #xy:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+    /* The XY pad: energy across, flourish up; the dot is the writer's style. */
+    #xy {
+      position: relative; aspect-ratio: 1; box-sizing: border-box; background: var(--bg);
+      border: 1px solid rgba(185, 173, 154, 0.5); border-radius: 0.25rem; cursor: crosshair;
+      touch-action: none; user-select: none; -webkit-user-select: none; overflow: hidden;
+    }
+    #xy .axis { position: absolute; font-size: 0.625rem; letter-spacing: 0.06em; pointer-events: none; }
+    #xy .axis.up { left: 0.25rem; top: 0.15rem; }
+    #xy .axis.across { right: 0.25rem; bottom: 0.15rem; }
+    #xy-dot {
+      position: absolute; left: 50%; bottom: 35%; width: 0.75rem; height: 0.75rem; margin: -0.375rem;
+      border-radius: 50%; background: var(--signal); pointer-events: none;
+    }
+    /* Narrower than this the margin has no room for the column, and it
+       would cover the line being written: the board docks as a band along
+       the bottom, pads in two rows and the XY pad beside them, and what
+       lives at the bottom of the page moves up above it. */
+    @media (max-width: 900px) {
+      :root { --board-band: 7.25rem; }
+      #board {
+        left: 0; right: 0; top: auto; bottom: 0; width: auto; height: var(--board-band);
+        max-height: none; overflow: visible; padding: 0.5rem;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) 6.25rem; grid-template-rows: 1fr 1fr;
+        background: var(--bg); border-top: 1px solid rgba(185, 173, 154, 0.5);
+        font-size: 0.6875rem; letter-spacing: 0.04em;
+      }
+      .pad {
+        flex-direction: column; justify-content: center; align-items: center; gap: 0;
+        min-height: 0; padding: 0.1rem;
+      }
+      #xy { grid-column: 5; grid-row: 1 / span 2; height: 100%; width: auto; justify-self: end; }
+      :root[data-board="shown"] .styles,
+      :root[data-board="shown"] #debug { bottom: calc(var(--board-band) + 0.5rem); }
+      :root[data-board="shown"] #tour-bar { bottom: calc(var(--board-band) + 5.5rem); }
+    }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -115,7 +171,19 @@
     <p id="status" role="status">Starting the renderer…</p>
     <button id="read" type="button" aria-keyshortcuts="Control+Enter" title="Ctrl+Enter">Read back</button>
     <button id="tour" type="button">Tour</button>
+    <button id="board-toggle" type="button" aria-pressed="false" aria-controls="board"
+            aria-keyshortcuts="Control+B" title="Ctrl+B">Board</button>
     <a href="../">Back to Half Ahead</a>
+  </div>
+  <!-- The pads are made by the shell from lab.board's pads, before the XY pad. -->
+  <div id="board" role="toolbar" aria-label="Board" hidden>
+    <div id="xy" role="slider" tabindex="0" aria-label="Style: energy across, flourish up"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"
+         aria-valuetext="Energy 50%, flourish 35%" title="Your style: drag, or use the arrow keys">
+      <span class="axis up" aria-hidden="true">Flourish</span>
+      <span class="axis across" aria-hidden="true">Energy</span>
+      <span id="xy-dot" aria-hidden="true"></span>
+    </div>
   </div>
   <div class="styles">
     <label for="style">Motion style</label>
@@ -127,6 +195,7 @@
       <option value="caffeinated">Caffeinated</option>
       <option value="drunken">Drunken</option>
       <option value="coarse">Coarse</option>
+      <option value="mine">Mine</option>
     </select>
     <span class="pace">
       <label for="pace">Pace</label>

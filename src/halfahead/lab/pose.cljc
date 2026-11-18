@@ -4,7 +4,7 @@
   bright and wobbly it is. Every frame is computed from scratch, never
   simulated, so a renderer may ask for any moment in any order, and every
   motion ends exactly on the layout within 5000 ms of its cause, in every
-  style (plain births take 400 ms, ghosts 600 ms, and a cue as long as its
+  style and at any style point (plain births take 400 ms, ghosts 600 ms, and a cue as long as its
   gesture's patch plays, at most 2400 ms plus a 900 ms stagger, see
   lab.gestures; a style stretches or squeezes births and cues by its tempo,
   at most 1.5, see lab.style, and a cue's own :tempo only hurries it), and
@@ -214,6 +214,8 @@
                    ps age dur id)))))
 
 (def ^:private slowest-tempo
+  "The slowest any style plays: the named styles' and, by lab.style's
+  curve, any point's (from-point never exceeds Elegant's 1.5)."
   (reduce max (map (comp :tempo style/params) style/styles)))
 
 (defn- cue-ms
@@ -229,11 +231,11 @@
 
 (defn- cue-deltas
   "id -> [delta ...] for every glyph a cue is moving at time t: the cue's
-  gesture played by lab.synth, each cue performed in the style style-of
+  gesture played by lab.synth, each cue performed with the params params-of
   gives for its firing time, which also stretches the stagger. A cue's
   own :tempo multiplies the style's, for the stagger, the duration and the
   progress alike, so a hurried gesture is the same motion played faster."
-  [cues t style-of]
+  [cues t params-of]
   (reduce
    (fn [acc {:keys [glyph-ids cue at-ms] hurry :tempo}]
      (let [since (- t (double at-ms))
@@ -246,7 +248,7 @@
        ;; (a cue's own :tempo is at most 1, so it only ends sooner)
        (if (or (neg? since) (>= since (* slowest-tempo total)))
          acc
-         (let [{:keys [tempo] :as ps} (cond-> (style/params (style-of at-ms))
+         (let [{:keys [tempo] :as ps} (cond-> (params-of at-ms)
                                         hurry (update :tempo * hurry))
                ms (:ms patch)
                dur (* ms tempo)]
@@ -648,6 +650,15 @@
     #(style/infer glyphs %)
     (constantly style-choice)))
 
+(defn- params-of
+  "fn from a time to the motion parameters in force then: a point's own
+  (lab.style/from-point) when the choice is a :ha/style-point, else those
+  of the named style in force."
+  [style-choice glyphs]
+  (if (map? style-choice)
+    (constantly (style/from-point style-choice))
+    (comp style/params (style-of style-choice glyphs))))
+
 (defn- birth-styles
   "born-ms -> params for the glyphs still being born at t: the style in
   force at each birth, read (for :auto) from the glyphs born strictly
@@ -660,7 +671,7 @@
                 (distinct)
                 (map (fn [b]
                        (let [before (filterv #(< (:born-ms %) b) glyphs)]
-                         [b (style/params ((style-of style-choice before) b))]))))
+                         [b ((params-of style-choice before) b)]))))
           glyphs)))
 
 (def ^:private flat-births
@@ -718,7 +729,9 @@
   camera, the :style in force at t, and the :reveal level and house
   lights. opts: {:advance fn :width-em n :aspect n :reduced-motion? b
   :style-choice c :reveal-opts r :fills m :dress d}, aspect being the
-  viewport's width over its height, c a :ha/style-choice (default :plain),
+  viewport's width over its height, c a :ha/style-choice (default :plain)
+  or a :ha/style-point (then births and cues move by lab.style/from-point
+  of it, and the frame has no :style),
   r the opts for lab.reveal (default {:start-level 3}, the full stage), m
   a map glyph-id -> how much of the glyph a reading head has inked (see
   lab.reading; absent or nil when nothing is being read) and d the
@@ -767,7 +780,7 @@
                 worn (dressed worn sizes advance (:light draft-dress)))
         live (if reduced-motion?
                bases
-               (let [cue-style (style-of style-choice glyphs)
+               (let [cue-style (params-of style-choice glyphs)
                      cues-at (group-by #(min 2 (level-when (:at-ms %))) cues)
                      moving (merge-with into
                                         (update-vals (cue-deltas (cues-at 1 []) t cue-style)
@@ -791,9 +804,10 @@
                      [live cam]
                      (perform-shot live cam staged positions t {:advance advance :width-em width-em}))
         live (if (and fills (not reduced-motion?)) (inked live fills) live)]
-    {:t-ms t-ms
-     :poses (into live embers)
-     :caret end
-     :camera cam
-     :style ((style-of style-choice glyphs) t)
-     :reveal {:level level :lights lights}}))
+    (cond-> {:t-ms t-ms
+             :poses (into live embers)
+             :caret end
+             :camera cam
+             :reveal {:level level :lights lights}}
+      ;; a point has no name to report
+      (not (map? style-choice)) (assoc :style ((style-of style-choice glyphs) t)))))

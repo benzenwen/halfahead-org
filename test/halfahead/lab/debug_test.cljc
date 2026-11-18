@@ -209,6 +209,38 @@
     (testing "a style inferred from the rhythm says so"
       (is (= "WebGL2 · 3 glyphs · style drunken (auto)" (backend-line :drunken :auto))))))
 
+;; Order 0051: the board's XY pad puts a point in force, and its pads place
+;; cues that read like any other.
+(deftest overlay-names-a-point-as-mine
+  (is (= "WebGL2 · 3 glyphs · style mine (e 0.60 f 0.40 s 0.50 w 0.50)"
+         (second (str/split-lines
+                  (debug/overlay-text
+                   {:summary (debug/summary nil) :t-ms 0 :backend "WebGL2" :glyphs 3
+                    :style nil
+                    :style-choice {:energy 0.6 :flourish 0.4 :softness 0.5 :warmth 0.5}
+                    :log []})))))
+  (is (= "WebGL2 · 3 glyphs · style mine (e 0.00 f 1.00 s 0.25 w 0.05)"
+         (second (str/split-lines
+                  (debug/overlay-text
+                   {:summary (debug/summary nil) :t-ms 0 :backend "WebGL2" :glyphs 3
+                    :style-choice {:energy 0 :flourish 1 :softness 0.25 :warmth 0.049}
+                    :log []}))))))
+
+(deftest a-board-cue-reads-like-any-other
+  (let [old {:glyphs [] :cues []}
+        placed {:glyph-ids [3 4 5 6 7 8]
+                :cue {:word "did it" :effect :glow :intensity 0.7 :source :board}
+                :at-ms 2000}
+        new {:glyphs [] :cues [placed]}
+        log (debug/cue-log [] (debug/new-cues old new) 2000)]
+    (is (= [{:word "did it" :effect :glow :intensity 0.7 :source :board :at-ms 2000}] log))
+    (is (= "did it -> glow 0.7 (board)"
+           (nth (str/split-lines
+                 (debug/overlay-text {:summary (debug/summary nil) :t-ms 2000
+                                      :backend "WebGL2" :glyphs 9
+                                      :style :plain :style-choice :plain :log log}))
+                2)))))
+
 ;; --- a read-back --------------------------------------------------------------
 
 (deftest the-overlay-says-what-a-reading-performs

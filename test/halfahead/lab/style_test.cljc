@@ -137,7 +137,7 @@
 
 (deftest from-point-at-corners
   (doseq [energy [0.0 1.0] softness [0.0 1.0] flourish [0.0 1.0] warmth [0.0 1.0]]
-    (is (= {:tempo (if (zero? energy) 1.6 0.5)
+    (is (= {:tempo (if (zero? energy) 1.5 0.5)
             :overshoot (if (zero? softness) 2.0 0.0)
             :amplitude (if (zero? energy) 0.75 1.25)
             :sway nil
@@ -145,6 +145,13 @@
            (style/from-point {:energy energy :flourish flourish
                               :softness softness :warmth warmth}))
         (str [energy flourish softness warmth]))))
+
+;; Order 0051: the calmest point is as slow as Elegant and no slower, so
+;; every motion still ends within lab.pose's 5000 ms.
+(deftest calmest-point-is-as-slow-as-elegant
+  (is (= 1.5 (:tempo (style/from-point {:energy 0 :flourish 0 :softness 0.5 :warmth 0.5}))))
+  (is (= (:tempo (style/params :elegant))
+         (:tempo (style/from-point {:energy 0 :flourish 0 :softness 0.5 :warmth 0.5})))))
 
 (def ^:private gen-unit
   (gen/double* {:min 0.0 :max 1.0 :NaN? false :infinite? false}))
@@ -154,7 +161,7 @@
                                      :softness gen-unit :warmth gen-unit)]
     (let [{:keys [tempo overshoot amplitude sway steps] :as ps} (style/from-point point)]
       (and (= #{:tempo :overshoot :amplitude :sway :steps} (set (keys ps)))
-           (<= 0.5 tempo 1.6)
+           (<= 0.5 tempo 1.5)
            (<= 0.75 amplitude 1.25)
            (<= 0.0 overshoot 2.0)
            (nil? sway)

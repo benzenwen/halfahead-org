@@ -1108,3 +1108,110 @@
            ;; dressed glyphs only
            (let [dressed-ids (set (mapcat :glyph-ids (:placed wearing)))]
              (every? #(or (nil? (:ink %)) (dressed-ids (:id %))) (live f)))))))
+
+;; --- a style point as the choice (order 0051) ---------------------------------
+
+(def ^:private gen-unit
+  (gen/double* {:min 0.0 :max 1.0 :NaN? false :infinite? false}))
+
+(def ^:private gen-point
+  (gen/hash-map :energy gen-unit :flourish gen-unit :softness gen-unit :warmth gen-unit))
+
+(def ^:private displaced
+  "The displacements pose never clamps, so a style's amplitude shows whole."
+  [:y :z :rx :ry :rz])
+
+(defn- near-poses?
+  "Whether poses as and bs agree: ids and chars exactly; the free
+  displacements and the channels no style scales, closely."
+  [as bs]
+  (and (= (map (juxt :id :char :ghost?) as) (map (juxt :id :char :ghost?) bs))
+       (every? true?
+               (for [[a b] (map vector as bs)
+                     k (into displaced [:opacity :glow :wobble])]
+                 (< (abs (- (double (a k)) (double (b k)))) 1e-6)))))
+
+(defn- scaled-about
+  "pose with its displacement from base multiplied by amplitude."
+  [amplitude base pose]
+  (reduce (fn [p k] (assoc p k (+ (base k) (* amplitude (- (pose k) (base k))))))
+          pose
+          displaced))
+
+(defspec a-point-validates-and-has-no-style 200
+  (prop/for-all [[draft opts t] gen-case
+                 point gen-point]
+    (let [f (pose/frame draft t (assoc opts :style-choice point))]
+      (and (schema/valid? :ha/glyph-frame f)
+           (not (contains? f :style))
+           (= (dissoc (pose/frame draft t (assoc opts :style-choice :plain)) :poses :style)
+              (dissoc f :poses))
+           (= (:text draft) (str/join (map :char (live f))))))))
+
+(defspec the-middle-point-is-plain 200
+  ;; from-point of the middle is (params :plain) exactly, so the frames are
+  ;; equal, whatever the axes that motion does not read
+  (prop/for-all [[draft opts t] gen-case
+                 flourish gen-unit
+                 warmth gen-unit]
+    (= (dissoc (pose/frame draft t (assoc opts :style-choice :plain)) :style)
+       (pose/frame draft t (assoc opts :style-choice {:energy 0.5 :softness 0.5
+                                                      :flourish flourish :warmth warmth})))))
+
+(defspec a-point-moves-by-from-point 200
+  ;; With softness 0.5 from-point keeps the whole overshoot, so its params
+  ;; are a tempo and an amplitude around the plain motion: u ms into the
+  ;; plain motion is tempo * u ms into the point's, displaced amplitude
+  ;; times as far from rest. One birth time and one cue, so one clock.
+  (prop/for-all [energy gen-unit
+                 flourish gen-unit
+                 warmth gen-unit
+                 effect (gen/elements effects)
+                 u (gen/choose 0 4000)]
+    (let [point {:energy energy :flourish flourish :softness 0.5 :warmth warmth}
+          {:keys [tempo amplitude]} (style/from-point point)
+          cue {:glyph-ids (vec (range 8))
+               :cue {:word "w" :effect effect :intensity 0.8 :source :board}
+               :at-ms 1000}
+          draft (draft-of "xxxxxxxx" 1000 [cue])
+          base (rest-poses draft {:advance pose/default-advance :width-em 40})
+          plain (live (pose/frame draft (+ 1000 u) {:style-choice :plain}))
+          mine (live (pose/frame draft (+ 1000 (* tempo u)) {:style-choice point}))]
+      (near-poses? (mapv #(scaled-about amplitude %1 %2) base plain) mine))))
+
+(deftest a-soft-point-glides-like-from-point-says
+  (let [draft (draft-of "a" 1000 [])
+        point {:energy 0.0 :flourish 0.3 :softness 1.0 :warmth 0.5}
+        scale #(:scale (first (live (pose/frame draft % {:style-choice point}))))
+        scales (map scale (range 1000 1600 5))]
+    (is (= 0.0 (:overshoot (style/from-point point))))
+    (is (every? #(<= % (+ 1.0 1e-9)) scales) "no overshoot at softness 1")
+    (is (apply <= scales))
+    (is (< (scale 1590) 1.0) "tempo 1.5: the birth is still under way just before 600 ms")
+    (is (= 1.0 (scale 1600)))))
+
+(defspec every-point-settles-within-5000-ms 60
+  ;; pose's bound, for any point: 30 letters and every effect, the longest
+  ;; stagger there is
+  (prop/for-all [point gen-point
+                 effect (gen/elements effects)
+                 k (gen/choose 0 2000)]
+    (let [cue {:glyph-ids (vec (range 30))
+               :cue {:word "w" :effect effect :intensity 1 :source :board}
+               :at-ms 5000}
+          draft (draft-of (apply str (repeat 30 "x")) 5000 [cue])
+          base (rest-poses draft {:advance pose/default-advance :width-em 40})]
+      (and (= base (live (pose/frame draft (+ 10000 k) {:style-choice point})))
+           (some true? (for [dt [50 150 300 500 800]]
+                         (not= base (live (pose/frame draft (+ 5000 dt) {:style-choice point})))))))))
+
+(deftest the-calmest-point-settles-within-5000-ms
+  (doseq [effect effects]
+    (let [point {:energy 0 :flourish 0 :softness 0.5 :warmth 0.5}
+          cue {:glyph-ids (vec (range 30))
+               :cue {:word "w" :effect effect :intensity 1 :source :board}
+               :at-ms 5000}
+          draft (draft-of (apply str (repeat 30 "x")) 5000 [cue])]
+      (is (= (rest-poses draft {:advance pose/default-advance :width-em 40})
+             (live (pose/frame draft 10000 {:style-choice point})))
+          (str effect)))))

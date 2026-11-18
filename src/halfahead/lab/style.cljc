@@ -70,10 +70,16 @@
 (defn from-point
   "Motion parameters, in the shape params returns, for any
   :ha/style-point: energy sets tempo and amplitude, softness takes away
-  overshoot. The middle of the space is (params :plain) exactly; the named
-  styles keep their own params, which have traits no axis covers."
+  overshoot. The middle of the space is (params :plain) exactly; the
+  calmest point is as slow as Elegant (tempo 1.5) and no slower, so
+  lab.pose's bound on every motion holds for any point. The tempo's knot
+  at Elegant's energy (0.2, 1.36) keeps every point from there up at the
+  tempo it has always had (lab.reading's grants are pinned to it); only
+  the calmer points below it changed, from a line to 1.6 to one to 1.5.
+  The named styles keep their own params, which have traits no axis
+  covers."
   [{:keys [energy softness]}]
-  {:tempo     (through [[0.0 1.6] [0.5 1.0] [1.0 0.5]] energy)
+  {:tempo     (through [[0.0 1.5] [0.2 1.36] [0.5 1.0] [1.0 0.5]] energy)
    :overshoot (* 2.0 (- 1 softness))
    :amplitude (through [[0.0 0.75] [0.5 1.0] [1.0 1.25]] energy)
    :sway      nil

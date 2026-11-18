@@ -25,9 +25,15 @@
   misbehaves. With ?tour, or from the Tour button, it plays lab.tour's
   script on a timer of its own through these same paths (the textarea's
   input event, the picker, the wand, the read-back, the light), until the
-  script ends or the visitor touches a key or the page."
+  script ends or the visitor touches a key or the page; a draft the
+  visitor had when it began is kept aside and put back when it ends. It
+  also wires the board (lab.board): a toolbar of pads, hidden until asked
+  for, and an XY pad whose point is the writer's own style, Mine. The
+  shell turns pointer and key events into lab.board's hold events and adds
+  what a completed press gives to the draft; it decides nothing itself."
   (:require [clojure.string :as str]
             [halfahead.lab.audio :as audio]
+            [halfahead.lab.board :as board]
             [halfahead.lab.cues :as cues]
             [halfahead.lab.debug :as debug]
             [halfahead.lab.director :as director]
@@ -46,7 +52,8 @@
             [halfahead.lab.specimen :as specimen]
             [halfahead.lab.stage :as stage]
             [halfahead.lab.style :as style]
-            [halfahead.lab.tour :as tour]))
+            [halfahead.lab.tour :as tour]
+            [halfahead.schema :as schema]))
 
 (defn- start-level
   "?reveal=N, 0 to 3: the reveal level the lab starts at; 0 when absent."
@@ -71,8 +78,9 @@
   ;; :moment-ctx, the last tick's {:draft :frame} that moments are counted
   ;; from; :last-moment, the newest of them, for the overlay;
   ;; :pace, the viewer's words a minute; :reading, the read-back playing, if
-  ;; any: {:plan (lab.reading's) :style (the named style it was planned in
-  ;; and plays in) :t0 :cues (its placed cues) :voiced-to (the time up to
+  ;; any: {:plan (lab.reading's) :style (the named style, or under Mine the
+  ;; point, it was planned in and plays in) :t0 :cues (its placed cues)
+  ;; :voiced-to (the time up to
   ;; which its cues' sounds were played)};
   ;; :dress, what the draft wears: {:point (the style point that decided
   ;; it) :placed :seen (both lab.dress's)}; :light-px, where the
@@ -83,9 +91,14 @@
   ;; over and the next waits for the read-back) :scene :typing (the :type
   ;; step under way: {:base (the text before it) :typed (keys so far)})
   ;; :lit? (a :light step holds the light) :before (the visitor's {:style
-  ;; :pace}) :timer :on-touch}; :caption-timer, the timeout that will take
-  ;; the caption away
+  ;; :pace}) :kept (the visitor's text when it began, if any) :timer
+  ;; :on-touch}; :caption-timer, the timeout that will take
+  ;; the caption away;
+  ;; :style-choice, the picker's: a :ha/style-choice, or :mine for the
+  ;; board's point; :board, {:visible? :point (the XY pad's :ha/style-point)
+  ;; :holds (lab.board/hold's: the pads held down)}
   (atom {:draft (draft/empty-draft) :last-frame nil :style-choice :auto
+         :board {:visible? false :point (style/point :plain) :holds nil}
          :pace 250 :reading nil
          :dress {:point nil :placed [] :seen {}} :light-px nil
          :tour nil :caption-timer nil
@@ -100,6 +113,11 @@
 
 ;; Only this viewer's choice of Sound, on this device; never sent anywhere.
 (def ^:private sound-key "halfahead.lab.sound")
+
+;; Likewise whether this viewer has the board out, and their own style
+;; point on its XY pad.
+(def ^:private board-key "halfahead.lab.board")
+(def ^:private point-key "halfahead.lab.board.point")
 
 ;; Likewise this viewer's reading pace.
 (def ^:private pace-key "halfahead.lab.pace")
@@ -145,12 +163,23 @@
   [{:keys [draft style-choice]} t]
   (if (= :auto style-choice) (style/infer (:glyphs draft) t) style-choice))
 
+(defn- own-choice
+  "The picker's choice as lab.pose takes it: Mine is the board's point."
+  [{:keys [style-choice board]}]
+  (if (= :mine style-choice) (:point board) style-choice))
+
+(defn- point-at
+  "The :ha/style-point in force at t: the board's under Mine, else where
+  the named style in force sits."
+  [{:keys [style-choice board] :as s} t]
+  (if (= :mine style-choice) (:point board) (style/point (style-at s t))))
+
 (defn- choice-in-force
   "What the frame performs in: the style of the reading playing, if any,
   so its gestures keep the lengths they were granted; else the picker's
-  choice."
-  [{:keys [reading style-choice]}]
-  (if reading (:style reading) style-choice))
+  choice, or under Mine the board's point."
+  [{:keys [reading] :as s}]
+  (if reading (:style reading) (own-choice s)))
 
 (defn- seen
   "state with each dress's first sighting brought up to t."
@@ -163,7 +192,7 @@
   stays as it is, whatever :auto makes of the silence."
   [{:keys [draft] :as s} t]
   (let [{:keys [text glyphs]} draft
-        point (style/point (style-at s t))]
+        point (point-at s t)]
     (-> s
         (update :dress assoc
                 :point point
@@ -192,8 +221,12 @@
 (defn- voiced
   "s with the sounds of newly placed entries of a kind logged and queued."
   [s kind entries]
-  (let [played (sound/sounds {:sound? (:sound? s)
-                              :style (sound/style-in-force (choice-in-force s) (:last-frame s))}
+  (let [choice (choice-in-force s)
+        played (sound/sounds {:sound? (:sound? s)
+                              ;; sound has no voice for a point yet: Mine sounds plain
+                              :style (if (map? choice)
+                                       :plain
+                                       (sound/style-in-force choice (:last-frame s)))}
                              kind entries)]
     (-> s
         (update :sound-log sound/log played)
@@ -230,7 +263,7 @@
 
 (defn- show-debug! [r t f]
   (let [{:keys [stats cue-log direction-log style-choice sound? last-moment reading draft]
-         worn :dress}
+         worn :dress :as s}
         (swap! state #(-> %
                           (update :stats debug/record t)
                           (update :cue-log debug/cue-log [] t)
@@ -238,7 +271,10 @@
     (set! (.-textContent (by-id "debug"))
           (str (debug/overlay-text {:summary (debug/summary stats) :t-ms t
                                     :backend (render/backend r) :glyphs (render/drawn r)
-                                    :style (:style f) :style-choice style-choice
+                                    :style (:style f)
+                                    :style-choice (if (map? (choice-in-force s))
+                                                    (choice-in-force s)
+                                                    style-choice)
                                     :log cue-log :directions direction-log})
                "\n" (camera-line (:camera f))
                "\n" (let [{:keys [level lights]} (:reveal f)]
@@ -332,12 +368,33 @@
     (when debug? (show-debug! r t f))
     (js/requestAnimationFrame #(loop! r motion-query))))
 
+(defn- text-box
+  "The box in CSS pixels around the live letters as last drawn, as #js
+  {:x0 :y0 :x1 :y1}; nil when there are none."
+  [r]
+  (let [indexes (keep-indexed (fn [i p] (when-not (:ghost? p) i))
+                              (:poses (:last-frame @state)))]
+    (when (and (seq indexes) (< (reduce max indexes) (render/drawn r)))
+      (let [[x0 y0 x1 y1] (render/glyph-box r indexes)]
+        #js {:x0 x0 :y0 y0 :x1 x1 :y1 y1}))))
+
 (defn- expose! [r]
   (set! (.-__lab js/window)
         #js {:backend (render/backend r)
+             ;; the board as plain data: whether it is out, the XY pad's
+             ;; point, and the span a pad would act on now (nil for none)
+             :board #(let [{:keys [board draft]} @state
+                           ^js input (by-id "type")]
+                       (clj->js {:visible (:visible? board)
+                                 :point (:point board)
+                                 :target (board/target (:text draft)
+                                                       {:from (.-selectionStart input)
+                                                        :to (.-selectionEnd input)})}))
+             :textBox #(text-box r)
              :liveText #(apply str (map :char (remove :ghost? (:poses (:last-frame @state)))))
              :lastFrame #(clj->js (:last-frame @state))
              :directions #(clj->js (:directions (:draft @state)))
+             :cues #(clj->js (:cues (:draft @state)))
              :drawn #(render/drawn r)
              :lean #(render/lean r %)
              :blockCentre #(render/block-centre r)
@@ -400,14 +457,18 @@
     (let [t (now-ms)]
       (swap! state
              (fn [{:keys [draft pace] :as s}]
-               (let [named (style-at s t)
+               (let [mine? (= :mine (:style-choice s))
+                     in-force (if mine? (get-in s [:board :point]) (style-at s t))
                      ;; the tempo lab.pose plays a named style at is its
-                     ;; params', not its point's
-                     plan (reading/plan (:text draft) (style/point named)
-                                        (style/params named) {:wpm pace})]
+                     ;; params', not its point's; a point has only its own
+                     plan (reading/plan (:text draft) (point-at s t)
+                                        (if mine?
+                                          (style/from-point in-force)
+                                          (style/params in-force))
+                                        {:wpm pace})]
                  (assoc s :reading (when plan
                                      {:plan plan
-                                      :style named
+                                      :style in-force
                                       :t0 t
                                       :cues (reading/cues plan (:glyphs draft) t)
                                       :voiced-to (dec t)}))))))))
@@ -446,15 +507,27 @@
     (set-pace! wpm)
     (remember-pace! wpm)))
 
+(defn- wanded
+  "state after the writer's wand at t: one level more, from then."
+  [s t]
+  (cond-> s
+    (< (level s t) 3) (-> (update-in [:reveal :wands] conj t)
+                          (directed t))))
+
 (defn- wand!
   "The writer's wand: one level more, from now."
   []
   (let [t (now-ms)]
-    (swap! state (fn [s]
-                   (cond-> s
-                     (< (level s t) 3) (-> (update-in [:reveal :wands] conj t)
-                                           (directed t)))))
+    (swap! state wanded t)
     (play-queued!)))
+
+(defn- raised
+  "state with the reveal level at least n at t, by as many wands as that
+  takes, so the level is kept like any the wand reached."
+  [s t n]
+  (if (< (level s t) n)
+    (recur (wanded s t) t n)
+    s))
 
 (def ^:private flick-window-ms
   "How much recent mouse motion is kept to look for a flick in."
@@ -485,6 +558,263 @@
   (swap! state #(-> % (assoc :style-choice choice) (redressed (now-ms))))
   (set! (.-value picker) (name choice))
   (.focus input))
+
+;; --- the board ----------------------------------------------------------------
+
+(defn- remembered-board?
+  "Whether this viewer had the board out here before; hidden when storage
+  is empty, blocked or throws."
+  []
+  (try (= "shown" (.getItem js/localStorage board-key))
+       (catch :default _ false)))
+
+(defn- remembered-point
+  "The style point this viewer left the XY pad at, or nil when storage is
+  empty, blocked, throws or holds anything that is not a :ha/style-point."
+  []
+  (try (let [point (-> (.getItem js/localStorage point-key)
+                       js/JSON.parse
+                       (js->clj :keywordize-keys true))]
+         (when (schema/valid? :ha/style-point point) point))
+       (catch :default _ nil)))
+
+(defn- remember! [k v]
+  (try (.setItem js/localStorage k v)
+       (catch :default _ nil)))
+
+(defn- show-board!
+  "The board is out or away, and the toggle and the page's layout say so."
+  []
+  (let [visible? (get-in @state [:board :visible?])]
+    (set! (.-hidden (by-id "board")) (not visible?))
+    (.setAttribute (by-id "board-toggle") "aria-pressed" (str visible?))
+    (set! (.. js/document.documentElement -dataset -board) (if visible? "shown" "hidden"))))
+
+(defn- toggle-board!
+  "Show or hide the board, remembered on this device. Whatever was held
+  on it is let go."
+  []
+  (let [visible? (not (get-in @state [:board :visible?]))]
+    (swap! state update :board assoc :visible? visible? :holds nil)
+    (remember! board-key (if visible? "shown" "hidden"))
+    (show-board!)))
+
+(defn- percent [v] (js/Math.round (* 100 v)))
+
+(defn- show-point!
+  "The XY pad's dot and its value text follow the board's point."
+  []
+  (let [[x y] (board/point->xy (get-in @state [:board :point]))
+        ^js pad (by-id "xy")
+        ^js dot (by-id "xy-dot")]
+    (set! (.. dot -style -left) (str (* 100 x) "%"))
+    (set! (.. dot -style -bottom) (str (* 100 y) "%"))
+    (.setAttribute pad "aria-valuenow" (str (percent x)))
+    (.setAttribute pad "aria-valuetext"
+                   (str "Energy " (percent x) "%, flourish " (percent y) "%"))))
+
+(defn- place-point!
+  "The board's point is point from now on, shown and remembered on this
+  device."
+  [point]
+  (swap! state assoc-in [:board :point] point)
+  (remember! point-key (js/JSON.stringify (clj->js point)))
+  (show-point!))
+
+(defn- move-point!
+  "The writer moved the XY pad to x, y: that point is their style, Mine,
+  from now on."
+  [x y ^js picker]
+  (place-point! (board/xy->point (get-in @state [:board :point]) x y))
+  (swap! state #(-> % (assoc :style-choice :mine) (redressed (now-ms))))
+  (set! (.-value picker) "mine"))
+
+(defn- press-pad!
+  "A completed press of pad, held for held-ms: what lab.board makes of it
+  on the board's target, added to the draft as typing adds its own cues
+  and directions, and voiced, with the reveal level raised by the wand's
+  path to where the press can be seen from the moment it is placed: at
+  least 1 for a mark, 3 for BOOM, whose card needs the stage. Nothing
+  when there is nothing to mark, or on the specimen."
+  [^js input pad held-ms]
+  (when-not specimen?
+    (let [t (now-ms)
+          selection {:from (.-selectionStart input) :to (.-selectionEnd input)}]
+      (swap! state
+             (fn [s]
+               (if-let [span (board/target (get-in s [:draft :text]) selection)]
+                 (let [old (:draft s)
+                       {:keys [cues directions]} (board/press pad (point-at s t) (:glyphs old)
+                                                              span t (board/amount held-ms))
+                       new (-> old
+                               (update :cues into cues)
+                               (update :directions (fnil into []) directions))
+                       log? (or debug? (:sound? s))
+                       new-cues (when log? (debug/new-cues old new))
+                       new-shots (when log? (debug/new-directions old new))]
+                   ;; The press is in the draft before the level is looked
+                   ;; at: a cue is use, and may reach level 1 itself at t.
+                   ;; A wand as well would then raise it to 2.
+                   (cond-> (-> (assoc s :draft new)
+                               (revealed t)
+                               (raised t (if (= :boom pad) 3 1)))
+                     debug? (update :cue-log debug/cue-log new-cues t)
+                     debug? (update :direction-log debug/cue-log new-shots t)
+                     true (voiced :cue new-cues)
+                     true (voiced :shot new-shots)
+                     true (directed t)))
+                 s)))
+      (play-queued!))))
+
+(defn- hold!
+  "Hand one of lab.board's hold events on, and play the press it
+  completes, if any."
+  [input event]
+  (let [[old _] (swap-vals! state update-in [:board :holds] #(:holds (board/hold % event)))]
+    (when-let [{:keys [pad ms]} (:play (board/hold (get-in old [:board :holds]) event))]
+      (press-pad! input pad ms))))
+
+(defn- press-key? [^js e]
+  (and (contains? #{"Enter" " "} (.-key e))
+       (not (or (.-ctrlKey e) (.-altKey e) (.-metaKey e)))))
+
+(defn- make-pad!
+  "A pad's button, wired: a press plays when it is released on the pad,
+  by pointer or by Enter or Space, and never if it is abandoned. A hold
+  is timed by the events' own timestamps: when the finger moved, not when
+  a busy frame let the handler run."
+  [^js input {:keys [id label key]}]
+  (let [^js el (js/document.createElement "button")
+        ^js hint (js/document.createElement "kbd")]
+    (set! (.-type el) "button")
+    (set! (.-className el) "pad")
+    (.setAttribute el "data-pad" (name id))
+    (.setAttribute el "aria-keyshortcuts" (str "Alt+" key))
+    (set! (.-title el) (str "Alt+" key))
+    (.append el label)
+    (set! (.-textContent hint) key)
+    (.append el hint)
+    ;; a pointer on a pad never takes the focus from the text box
+    (.addEventListener el "mousedown" #(.preventDefault %))
+    (.addEventListener el "pointerdown"
+                       (fn [^js e]
+                         (when (zero? (.-button e))
+                           ;; a finger captures its target: let go, so sliding
+                           ;; off the pad is seen as leaving it
+                           (when (.hasPointerCapture el (.-pointerId e))
+                             (.releasePointerCapture el (.-pointerId e)))
+                           (hold! input [:pointer-down id (.-timeStamp e)]))))
+    (.addEventListener el "pointerup" #(hold! input [:pointer-up id (.-timeStamp %)]))
+    (.addEventListener el "pointerleave" #(hold! input [:pointer-gone]))
+    (.addEventListener el "pointercancel" #(hold! input [:pointer-gone]))
+    ;; Enter and Space are held like a pointer: down here, played on release,
+    ;; and the browser's own click of them is not a second press
+    (.addEventListener el "keydown"
+                       (fn [^js e]
+                         (when (press-key? e)
+                           (.preventDefault e)
+                           (hold! input [:key-down id (.-timeStamp e)]))))
+    (.addEventListener el "keyup"
+                       (fn [^js e]
+                         (when (press-key? e)
+                           (.preventDefault e)
+                           (hold! input [:key-up id (.-timeStamp e)]))))
+    (.addEventListener el "blur" #(hold! input [:key-gone id]))
+    ;; a click with no pointer under it (a screen reader's) is a tap
+    (.addEventListener el "click"
+                       (fn [^js e]
+                         (when (zero? (.-detail e))
+                           (hold! input [:click id (.-timeStamp e)]))))
+    el))
+
+(def ^:private pad-codes
+  "KeyboardEvent.code -> pad: Alt+1 to Alt+7, wherever the layout puts the
+  digits' characters."
+  (into {} (map (fn [{:keys [id key]}] [(str "Digit" key) id])) board/pads))
+
+(defn- on-pad-key-down
+  "Alt+1 to Alt+7 put a pad down from anywhere, the text box included,
+  which keeps its focus and gains no character."
+  [input ^js e]
+  (when-let [pad (and (.-altKey e) (not (.-ctrlKey e)) (not (.-metaKey e))
+                      (get-in @state [:board :visible?])
+                      (pad-codes (.-code e)))]
+    (.preventDefault e)
+    (hold! input [:key-down pad (.-timeStamp e)])))
+
+(defn- on-pad-key-up
+  "A digit released plays its pad only if Alt+digit put it down: a plain
+  1 is just a 1."
+  [input ^js e]
+  (when-let [pad (pad-codes (.-code e))]
+    (hold! input [:key-up pad (.-timeStamp e)])))
+
+(def ^:private xy-step 0.05)
+
+(defn- stepped
+  "v moved by n steps of the XY pad, without the float's dust."
+  [v n]
+  (/ (js/Math.round (* 100 (+ v (* n xy-step)))) 100))
+
+(defn- wire-xy!
+  "The XY pad: a click or a drag puts the dot under the pointer, the arrow
+  keys move it a step when it has the focus."
+  [^js picker]
+  (let [^js pad (by-id "xy")
+        to-pointer (fn [^js e]
+                     (let [box (.getBoundingClientRect pad)]
+                       (move-point! (/ (- (.-clientX e) (.-left box)) (max 1 (.-width box)))
+                                    (- 1 (/ (- (.-clientY e) (.-top box)) (max 1 (.-height box))))
+                                    picker)))]
+    (.addEventListener pad "mousedown" #(.preventDefault %))
+    (.addEventListener pad "pointerdown"
+                       (fn [^js e]
+                         (when (zero? (.-button e))
+                           (.setPointerCapture pad (.-pointerId e))
+                           (to-pointer e))))
+    (.addEventListener pad "pointermove"
+                       (fn [^js e]
+                         (when (.hasPointerCapture pad (.-pointerId e))
+                           (to-pointer e))))
+    (.addEventListener pad "keydown"
+                       (fn [^js e]
+                         (when-let [[dx dy] ({"ArrowRight" [1 0] "ArrowLeft" [-1 0]
+                                              "ArrowUp" [0 1] "ArrowDown" [0 -1]} (.-key e))]
+                           (.preventDefault e)
+                           (let [[x y] (board/point->xy (get-in @state [:board :point]))]
+                             (move-point! (stepped x dx) (stepped y dy) picker)))))))
+
+(defn- wire-board!
+  "Make the pads, wire them, the XY pad and the toggle, and bring back
+  what this viewer left: whether the board was out, and their point."
+  [^js input ^js picker]
+  (let [^js el (by-id "board")
+        ^js xy (by-id "xy")]
+    (doseq [pad board/pads]
+      (.insertBefore el (make-pad! input pad) xy))
+    (wire-xy! picker)
+    (.addEventListener (by-id "board-toggle") "click"
+                       (fn [_] (toggle-board!) (.focus input)))
+    (.addEventListener js/window "keydown" #(on-pad-key-down input %))
+    (.addEventListener js/window "keyup" #(on-pad-key-up input %))
+    ;; a press is abandoned when the pointer comes up anywhere else (the
+    ;; pad's own pointerup has run by now) or the window loses the focus
+    (.addEventListener js/window "pointerup" #(hold! input [:pointer-gone]))
+    (.addEventListener js/window "blur" #(hold! input [:blur]))
+    (swap! state update :board assoc
+           :visible? (remembered-board?)
+           :point (or (remembered-point) (get-in @state [:board :point])))
+    (show-board!)
+    (show-point!)))
+
+(defn- pick-style!
+  "The visitor's own pick of a style, from the picker or Ctrl+1..6: as
+  choose-style!, and a named style moves the XY pad's dot to where that
+  style sits, so the pad starts from it."
+  [choice picker input]
+  (when (some #{choice} style/styles)
+    (place-point! (style/point choice)))
+  (choose-style! choice picker input))
 
 (defn- remembered-sound?
   "Whether this viewer turned Sound on here before; off when storage is
@@ -523,8 +853,9 @@
     (and (.-ctrlKey e) (not (.-altKey e)) (not (.-metaKey e)))
     (if-let [choice (style-keys (.-key e))]
       (do (.preventDefault e)
-          (choose-style! choice picker input))
+          (pick-style! choice picker input))
       (case (.-key e)
+        ("b" "B") (do (.preventDefault e) (toggle-board!))
         "." (do (.preventDefault e) (wand!))
         "Enter" (do (.preventDefault e) (read-back! motion-query))
         nil))))
@@ -603,9 +934,11 @@
 
 (defn- stop-tour!
   "The tour is over, by its script or by the visitor's hand: what is on
-  the page stays and is theirs, with the style and pace they had."
-  [{:keys [picker input]}]
-  (when-let [{:keys [timer on-touch before lit?]} (:tour @state)]
+  the page stays and is theirs, with the style and pace they had. If they
+  had a draft when it began, the page is theirs as it was: that text goes
+  back into the box, by the path typing takes, with the caret at its end."
+  [{:keys [picker ^js input]}]
+  (when-let [{:keys [timer on-touch before lit? kept]} (:tour @state)]
     (js/clearInterval timer)
     (.removeEventListener js/window "keydown" on-touch true)
     (.removeEventListener js/window "pointerdown" on-touch true)
@@ -613,6 +946,9 @@
                     lit? (assoc :light-px nil)))
     (choose-style! (:style before) picker input)
     (set-pace! (:pace before))
+    (when kept
+      (enter! input kept "insertText")
+      (.setSelectionRange input (count kept) (count kept)))
     (set! (.-hidden (by-id "tour-stop")) true)
     (show-caption-for! your-turn your-turn-ms)))
 
@@ -648,8 +984,10 @@
 (defn- start-tour!
   "Play the tour from its first scene; nothing on the specimen or while it
   is already playing. With reduced motion there is no tour: the caption
-  says so until the visitor's next key or click."
-  [{:keys [^js motion-query] :as ctx}]
+  says so until the visitor's next key or click. Words already in the text
+  box are the visitor's draft: they are kept aside and the tour begins on
+  an empty box (stop-tour! puts them back)."
+  [{:keys [^js motion-query ^js input] :as ctx}]
   (cond
     (or specimen? (:tour @state)) nil
 
@@ -662,12 +1000,15 @@
 
     :else
     (let [{:keys [style-choice pace]} @state
+          kept (not-empty (.-value input))
           ;; any key, click or tap is the visitor taking over; the event
           ;; goes on to do whatever it does
           on-touch (fn [_] (stop-tour! ctx))]
+      (when kept (enter! input "" "deleteContentBackward"))
       (swap! state assoc :tour {:segments (tour/plan tour/script) :segment 0 :t0 (now-ms)
                                 :done #{} :awaiting-read? false :scene nil :typing nil :lit? false
                                 :before {:style style-choice :pace pace}
+                                :kept kept
                                 :timer (js/setInterval #(tour-tick! ctx) 16)
                                 :on-touch on-touch})
       (.addEventListener js/window "keydown" on-touch true)
@@ -712,7 +1053,8 @@
     (when-not specimen? (.addEventListener input "input" on-input))
     (set! (.-value picker) (name (:style-choice @state)))
     (.addEventListener picker "change"
-                       #(choose-style! (keyword (.-value picker)) picker input))
+                       #(pick-style! (keyword (.-value picker)) picker input))
+    (when-not specimen? (wire-board! input picker))
     (.addEventListener js/window "keydown" #(on-key picker input motion-query %))
     (.addEventListener (by-id "read") "click"
                        (fn [_] (read-back! motion-query) (.focus input)))

@@ -1725,6 +1725,308 @@ try {
     done(`${proved}; not blank and silent: ${outcome}; ?webgl starts on WebGL2 without asking WebGPU for anything and draws "${word}" (${glPixels} inked px)`);
   }
 
+  // The board (order 0051): pads that mark the phrase just written, and an
+  // XY pad for the writer's own style. Everything is read as data: the
+  // draft's cues and directions, and every frame drawn, each with its own
+  // t-ms, so a check holds at 3 frames a second as at 60.
+  begin('board', null);
+  {
+    const boardUrl = (params) => {
+      const u = new URL(url);
+      for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+      return u.href;
+    };
+    const phrase = 'we did it';
+    // Every frame drawn from now on: its t-ms, level, and each live pose as
+    // a string, so a letter off its rest is one whose string differs.
+    const record = (p) => p.evaluate(() => {
+      const rec = window.__rec = { frames: [] };
+      const sample = () => {
+        const f = window.__lab.lastFrame();
+        const last = rec.frames[rec.frames.length - 1];
+        if (f && (!last || last.t !== f['t-ms'])) {
+          const live = f.poses.filter((q) => !q['ghost?']);
+          rec.frames.push({ t: f['t-ms'], level: f.reveal.level, ids: live.map((q) => q.id), poses: live.map((q) => JSON.stringify(q)) });
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    // The poses of the letters at rest: those of the first frame drawn a
+    // second (of the lab's clock) after the newest frame now, births over.
+    const restOf = async (p) => {
+      const from = await p.evaluate(() => window.__rec.frames[window.__rec.frames.length - 1].t);
+      await p.waitForFunction((t) => window.__rec.frames[window.__rec.frames.length - 1].t >= t + 1000, from, { timeout: 20000 });
+      return p.evaluate(() => { const f = window.__rec.frames[window.__rec.frames.length - 1]; return { ids: f.ids, poses: f.poses }; });
+    };
+    // Wait until a frame newer than `after` shows every letter at rest.
+    const atRest = (p, rest, after = 0) => p.waitForFunction(([poses, t]) => {
+      const f = window.__rec.frames[window.__rec.frames.length - 1];
+      return f.t > t && f.poses.length === poses.length && f.poses.every((q, i) => q === poses[i]);
+    }, [rest.poses, after], { timeout: 30000 }).catch(() => { throw new Error('the letters never came back to rest'); });
+    // The frames drawn at or after t, each as { t, level, moving: ids off rest }.
+    const framesFrom = (p, rest, t) => p.evaluate(([poses, t]) =>
+      window.__rec.frames.filter((f) => f.t >= t).map((f) => ({
+        t: f.t, level: f.level, moving: f.ids.filter((_, i) => f.poses[i] !== poses[i]),
+      })), [rest.poses, t]);
+    // Wait for a frame at or after t with a letter off rest; its moving ids.
+    const moved = async (p, rest, t, what) => {
+      await p.waitForFunction(([poses, t]) => window.__rec.frames.some((f) =>
+        f.t >= t && f.poses.some((q, i) => q !== poses[i])), [rest.poses, t], { timeout: 15000 })
+        .catch(() => { throw new Error(`no sampled frame shows ${what} moving`); });
+      return (await framesFrom(p, rest, t)).find((f) => f.moving.length);
+    };
+    const boardCues = (p) => p.evaluate(() => window.__lab.cues().filter((c) => c.cue.source === 'board'));
+    // Do `act`, and return the one board cue it placed.
+    const pressed = async (p, act, what) => {
+      const before = await boardCues(p);
+      await act();
+      const after = await boardCues(p);
+      if (after.length !== before.length + 1)
+        throw new Error(`${what} placed ${after.length - before.length} board cues, not 1`);
+      return after[after.length - 1];
+    };
+    const pad = (p, id) => p.locator(`#board [data-pad="${id}"]`);
+    const typed = (p) => p.evaluate(() => {
+      const el = document.getElementById('type');
+      return { value: el.value, focused: document.activeElement === el };
+    });
+    const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+    const page = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = page;
+    const boardBackend = await open(page, boardUrl({ debug: '', reveal: '3' }));
+    console.log(`board: on ${boardBackend}`);
+    const hiddenAtFirst = await page.evaluate(() => ({
+      hidden: document.getElementById('board').hidden, visible: window.__lab.board().visible,
+      pressed: document.getElementById('board-toggle').getAttribute('aria-pressed'),
+    }));
+    if (!hiddenAtFirst.hidden || hiddenAtFirst.visible !== false || hiddenAtFirst.pressed !== 'false' || await page.locator('#board').isVisible())
+      throw new Error(`on load the board is not hidden: ${JSON.stringify(hiddenAtFirst)}`);
+    await page.selectOption('#style', 'plain');
+    await page.keyboard.press('Control+b');
+    if (!(await page.getByRole('toolbar', { name: 'Board' }).isVisible())) throw new Error('Ctrl+B did not show a toolbar named Board');
+    const names = await page.locator('#board button').evaluateAll((els) => els.map((el) =>
+      `${el.textContent}|${el.getAttribute('aria-keyshortcuts')}`));
+    const wanted = ['STRESS', 'HOLD', 'ASIDE', 'TURN', 'DOUBT', 'LAND', 'BOOM'].map((n, i) => `${n}${i + 1}|Alt+${i + 1}`);
+    if (!same(names, wanted)) throw new Error(`the board's buttons are ${names.join(', ')}`);
+    if ((await page.locator('#board-toggle').getAttribute('aria-pressed')) !== 'true' || !(await typed(page)).focused)
+      throw new Error('after Ctrl+B the toggle is not pressed, or the textarea lost the focus');
+
+    await record(page);
+    await page.keyboard.type(phrase, { delay: 70 });
+    const rest = await restOf(page);
+    if (rest.ids.length !== phrase.length) throw new Error(`${rest.ids.length} letters at rest for "${phrase}"`);
+    const target = await page.evaluate(() => window.__lab.board().target);
+    if (!same(target, [0, 9])) throw new Error(`the board's target is ${target}, not the phrase`);
+
+    // click STRESS: a (board) cue on the whole phrase, and its letters move
+    const stress = await pressed(page, () => pad(page, 'stress').click(), 'a click on STRESS');
+    if (stress.cue.word !== phrase || stress.cue.effect !== 'glow' || stress.cue.intensity !== 0.7 || !same(stress['glyph-ids'], rest.ids))
+      throw new Error(`STRESS placed ${JSON.stringify(stress)}`);
+    const stressLine = `${phrase} -> glow 0.7 (board)`;
+    await page.waitForFunction((line) => document.getElementById('debug').textContent.includes(line), stressLine, { timeout: 5000 })
+      .catch(() => { throw new Error(`the overlay never showed "${stressLine}"`); });
+    const stressed = await moved(page, rest, stress['at-ms'], `"${phrase}"`);
+    const clicked = await typed(page);
+    if (!clicked.focused || clicked.value !== phrase) throw new Error(`after a click on a pad: ${JSON.stringify(clicked)}`);
+    await atRest(page, rest, stress['at-ms']);
+
+    // Alt+2 from the textarea: a swell on the same phrase, focus and text kept
+    const plainSwell = await pressed(page, () => page.keyboard.press('Alt+2'), 'Alt+2');
+    if (plainSwell.cue.effect !== 'swell' || plainSwell.cue.word !== phrase || !same(plainSwell['glyph-ids'], rest.ids))
+      throw new Error(`Alt+2 placed ${JSON.stringify(plainSwell)}`);
+    const alted = await typed(page);
+    if (!alted.focused || alted.value !== phrase) throw new Error(`after Alt+2: ${JSON.stringify(alted)}`);
+    await moved(page, rest, plainSwell['at-ms'], 'the swell');
+    await atRest(page, rest, plainSwell['at-ms']);
+    const plainFrames = await framesFrom(page, rest, plainSwell['at-ms']);
+    const plainMovingFor = Math.max(...plainFrames.filter((f) => f.moving.length).map((f) => f.t)) - plainSwell['at-ms'];
+
+    // select "did", press LAND: only those letters
+    await page.evaluate(() => document.getElementById('type').setSelectionRange(3, 6));
+    const did = rest.ids.slice(3, 6);
+    const land = await pressed(page, () => pad(page, 'land').click(), 'LAND on a selection');
+    if (land.cue.word !== 'did' || !same(land['glyph-ids'], did)) throw new Error(`LAND on "did" placed ${JSON.stringify(land)}`);
+    await moved(page, rest, land['at-ms'], '"did"');
+    await atRest(page, rest, land['at-ms']);
+    const strays = (await framesFrom(page, rest, land['at-ms'])).flatMap((f) => f.moving).filter((id) => !did.includes(id));
+    if (strays.length) throw new Error(`LAND on "did" moved other letters: ${[...new Set(strays)]}`);
+    await page.evaluate(() => document.getElementById('type').setSelectionRange(9, 9));
+
+    // BOOM: a card
+    const cardsBefore = await page.evaluate(() => window.__lab.directions().filter((d) => d.shot === 'card').length);
+    await pad(page, 'boom').click();
+    const cards = await page.evaluate(() => window.__lab.directions().filter((d) => d.shot === 'card'));
+    const card = cards[cards.length - 1];
+    if (cards.length !== cardsBefore + 1 || card.energy !== 0.7 || card.source !== 'rules' || !same(card['glyph-ids'], rest.ids))
+      throw new Error(`BOOM placed ${JSON.stringify(cards)}`);
+    await moved(page, rest, card['at-ms'], 'the card');
+    await atRest(page, rest, card['at-ms']);
+
+    // An abandoned press never plays: down on STRESS, off it, up, then a 1.
+    const countBefore = (await boardCues(page)).length;
+    const box = await pad(page, 'stress').boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(500, 320, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.type('1');
+    const afterDrag = { ...(await typed(page)), cues: (await boardCues(page)).length };
+    if (afterDrag.value !== `${phrase}1` || afterDrag.cues !== countBefore)
+      throw new Error(`after a press dragged off STRESS and a 1: ${JSON.stringify(afterDrag)} (${countBefore} board cues before)`);
+    // The same after Alt+1 goes down and the window loses the focus.
+    await page.keyboard.down('Alt');
+    await page.keyboard.down('Digit1');
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    await page.keyboard.up('Digit1');
+    await page.keyboard.up('Alt');
+    await page.keyboard.type('1');
+    const afterBlur = { ...(await typed(page)), cues: (await boardCues(page)).length };
+    if (afterBlur.value !== `${phrase}11` || afterBlur.cues !== countBefore)
+      throw new Error(`after Alt+1 down, a blur and a 1: ${JSON.stringify(afterBlur)} (${countBefore} board cues before)`);
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    if ((await typed(page)).value !== phrase) throw new Error('the two 1s did not delete');
+    await atRest(page, rest);
+
+    // A pad held with Enter counts as held, as with Space; a quick Enter is a tap.
+    const holds = [];
+    for (const key of ['Enter', 'Space']) {
+      await pad(page, 'doubt').focus();
+      const held = await pressed(page, async () => {
+        await page.keyboard.down(key);
+        await page.waitForTimeout(800);
+        await page.keyboard.up(key);
+      }, `DOUBT held with ${key}`);
+      if (held.cue.intensity !== 1) throw new Error(`DOUBT held 800 ms with ${key} has amount ${held.cue.intensity}`);
+      holds.push(`${key} ${held.cue.intensity.toFixed(1)}`);
+      await atRest(page, rest, held['at-ms']);
+    }
+    const tap = await pressed(page, () => page.keyboard.press('Enter'), 'a quick Enter on DOUBT');
+    if (tap.cue.intensity !== 0.7) throw new Error(`a quick Enter on DOUBT has amount ${tap.cue.intensity}`);
+    await page.locator('#type').focus();
+    await atRest(page, rest, tap['at-ms']);
+
+    // The XY pad: its top right corner is all energy and all flourish, Mine.
+    const xy = page.getByRole('slider', { name: 'Style: energy across, flourish up' });
+    const xyBox = await xy.boundingBox();
+    await page.mouse.click(xyBox.x + xyBox.width - 3, xyBox.y + 3);
+    const mine = await page.evaluate(() => ({
+      point: window.__lab.board().point, picker: document.getElementById('style').value,
+      text: document.getElementById('xy').getAttribute('aria-valuetext'),
+    }));
+    if (!(mine.point.energy > 0.9 && mine.point.flourish > 0.9) || mine.picker !== 'mine')
+      throw new Error(`after a click in the XY pad's top right: ${JSON.stringify(mine)}`);
+    if (!/^Energy 9\d%, flourish 9\d%$/.test(mine.text)) throw new Error(`the XY pad's value text reads "${mine.text}"`);
+    await page.waitForFunction(() => /style mine \(e 0\.9\d f 0\.9\d s 0\.50 w 0\.50\)/.test(document.getElementById('debug').textContent),
+      null, { timeout: 5000 }).catch(() => { throw new Error('the overlay does not name the style mine with its point'); });
+    // the arrow keys move it by 0.05
+    await xy.focus();
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowDown');
+    const nudged = await page.evaluate(() => window.__lab.board().point);
+    const step = (a, b) => Math.abs(a - b - 0.05) < 0.006;
+    if (!step(mine.point.energy, nudged.energy) || !step(mine.point.flourish, nudged.flourish))
+      throw new Error(`ArrowLeft and ArrowDown moved the point from ${JSON.stringify(mine.point)} to ${JSON.stringify(nudged)}`);
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowUp');
+    await page.locator('#type').focus();
+    const point = await page.evaluate(() => window.__lab.board().point);
+    if (!(point.energy > 0.9 && point.flourish > 0.9)) throw new Error(`back in the corner the point is ${JSON.stringify(point)}`);
+
+    // The same swell in Mine is over sooner than Plain's was still going:
+    // each measured from the cue's own at-ms on the frames' own clock.
+    const mineSwell = await pressed(page, () => page.keyboard.press('Alt+2'), 'Alt+2 in Mine');
+    if (mineSwell.cue.effect !== 'swell') throw new Error(`Alt+2 in Mine placed ${JSON.stringify(mineSwell)}`);
+    await moved(page, rest, mineSwell['at-ms'], 'the swell in Mine');
+    await page.screenshot({ path: `${out}/board.png` });
+    await atRest(page, rest, mineSwell['at-ms']);
+    const mineFrames = await framesFrom(page, rest, mineSwell['at-ms']);
+    const lastMoving = Math.max(...mineFrames.filter((f) => f.moving.length).map((f) => f.t));
+    const mineRestAfter = mineFrames.find((f) => f.t > lastMoving).t - mineSwell['at-ms'];
+    if (!(mineRestAfter < plainMovingFor))
+      throw new Error(`the swell in Mine was at rest ${mineRestAfter} ms after its cue; in Plain it still moved at ${plainMovingFor} ms`);
+
+    // reload: the board is still out and the point kept
+    await open(page, boardUrl({ debug: '', reveal: '3' }));
+    const kept = await page.evaluate(() => ({ board: window.__lab.board(), hidden: document.getElementById('board').hidden }));
+    if (kept.hidden || kept.board.visible !== true || kept.board.point.energy !== point.energy || kept.board.point.flourish !== point.flourish)
+      throw new Error(`after a reload: ${JSON.stringify(kept)}; the point was ${JSON.stringify(point)}`);
+    await page.close();
+
+    // A fresh page is at level 0, where nothing performs: a pad raises it.
+    const fresh = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = fresh;
+    const freshBackend = await open(fresh, boardUrl({ debug: '' }), { plain: true });
+    await fresh.selectOption('#style', 'plain');
+    await fresh.keyboard.press('Control+b');
+    await record(fresh);
+    await fresh.keyboard.type(phrase, { delay: 70 });
+    const flat = await restOf(fresh);
+    const level0 = await revealLevel(fresh);
+    if (level0 !== 0) throw new Error(`a fresh page with "${phrase}" typed is at level ${level0}`);
+    const lifted = await pressed(fresh, () => pad(fresh, 'stress').click(), 'STRESS at level 0');
+    const seen = await moved(fresh, flat, lifted['at-ms'], `"${phrase}" at level 1`);
+    if (seen.level !== 1) throw new Error(`after STRESS on a fresh page the phrase moved at level ${seen.level}`);
+    const level1 = await fresh.evaluate(() => window.__lab.lastFrame().reveal.level);
+    if (level1 !== 1) throw new Error(`after STRESS on a fresh page the level is ${level1}`);
+    await pad(fresh, 'boom').click();
+    const level3 = await revealLevel(fresh, 3);
+    const staged = await fresh.evaluate(() => window.__lab.directions().filter((d) => d.shot === 'card'));
+    if (level3 !== 3 || staged.length !== 1) throw new Error(`after BOOM the level is ${level3} with ${staged.length} cards`);
+    await moved(fresh, flat, staged[0]['at-ms'], 'the card from level 0');
+    await fresh.close();
+
+    // 360 px wide: the board docks along the bottom, clear of the writing.
+    const narrow = track(await browser.newPage({ viewport: { width: 360, height: 640 } }));
+    current = narrow;
+    const narrowBackend = await open(narrow, boardUrl({ reveal: '0' }));
+    await narrow.keyboard.press('Control+b');
+    await narrow.keyboard.type('we did it and then we did it again', { delay: 30 });
+    const boxes = async (p) => {
+      await nextFrame(p);
+      return p.evaluate(() => {
+        const b = document.getElementById('board').getBoundingClientRect();
+        const pads = [...document.querySelectorAll('#board button, #xy')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return { name: el.textContent.trim() || el.id, x0: r.left, y0: r.top, x1: r.right, y1: r.bottom };
+        });
+        return { board: { x0: b.left, y0: b.top, x1: b.right, y1: b.bottom }, text: window.__lab.textBox(), pads,
+                 width: innerWidth, height: innerHeight };
+      });
+    };
+    const apart = (a, b) => a.x1 <= b.x0 || b.x1 <= a.x0 || a.y1 <= b.y0 || b.y1 <= a.y0;
+    const clear = (m, where) => {
+      if (!m.text) throw new Error(`${where}: no text box`);
+      if (!apart(m.board, m.text))
+        throw new Error(`${where}: the board ${JSON.stringify(m.board)} covers the writing ${JSON.stringify(m.text)}`);
+      const off = m.pads.find((q) => !(q.x1 - q.x0 >= 24 && q.y1 - q.y0 >= 24 && q.x0 >= 0 && q.y0 >= 0 && q.x1 <= m.width && q.y1 <= m.height));
+      if (off) throw new Error(`${where}: ${off.name} is out of reach at ${JSON.stringify(off)}`);
+      if (m.pads.length !== 8) throw new Error(`${where}: ${m.pads.length} pads`);
+    };
+    const docked = await boxes(narrow);
+    clear(docked, 'at 360 x 640');
+    if (!(docked.board.y1 >= docked.height - 1 && docked.board.x0 <= 0 && docked.board.x1 >= docked.width))
+      throw new Error(`at 360 px the board is not a band along the bottom: ${JSON.stringify(docked.board)}`);
+    for (const id of ['stress', 'hold', 'aside', 'turn', 'doubt', 'land', 'boom'])
+      if (!(await pad(narrow, id).isVisible())) throw new Error(`at 360 px ${id} is not visible`);
+    // a pad still plays there
+    await pressed(narrow, () => pad(narrow, 'turn').click(), 'TURN at 360 px');
+    await narrow.screenshot({ path: `${out}/board-narrow.png` });
+    await narrow.setViewportSize({ width: 1000, height: 640 });
+    const beside = await boxes(narrow);
+    clear(beside, 'at 1000 x 640');
+    await narrow.close();
+
+    done(`on ${boardBackend}: hidden on load, Ctrl+B shows a toolbar of 7 named pads; STRESS -> "${stressLine}", ${stressed.moving.length} letters moving at t ${stressed.t}; `
+      + `Alt+2 a swell with the focus and text kept; LAND on a selection moved only "did"; BOOM a card; `
+      + `a press dragged off STRESS and Alt+1 lost to a blur placed nothing and the 1s typed; held 800 ms: ${holds.join(', ')}, a quick Enter 0.7; `
+      + `XY top right -> Mine (e ${point.energy.toFixed(2)} f ${point.flourish.toFixed(2)}), arrows step 0.05; the swell at rest ${mineRestAfter} ms after its cue in Mine, still moving at ${plainMovingFor} ms in Plain; `
+      + `kept over a reload; fresh page (${freshBackend}): level 0 -> 1 on STRESS with the phrase moving, 3 on BOOM; `
+      + `360 x 640 (${narrowBackend}): the board ${Math.round(docked.board.y0)}-${Math.round(docked.board.y1)} px down, the writing ends at ${Math.round(docked.text.y1)} px; clear of it at 1000 px too`);
+  }
+
   // The tour (?tour): the lab types into its own text box, a caption a
   // scene. Everything is waited for as data, never on the clock: a
   // recorder in the page notes each change of the caption with what the
@@ -1926,6 +2228,42 @@ try {
     if (appended !== stopped.value + 'x') throw new Error(`typing x after the stop gave "${appended}"`);
     await second2.close();
 
+    // A visitor's own draft is safe from the tour (order 0056's fault):
+    // started over words already in the box, the tour plays on an empty
+    // box and gives them back when it is stopped, and when it ends.
+    const own = 'my own words';
+    const third = track(await browser.newPage({ viewport: { width: 1000, height: 640 } }));
+    current = third;
+    await open(third, tourUrl(['debug']), { plain: true });
+    await third.keyboard.type(own, { delay: 40 });
+    const boxOf = (p) => p.evaluate(() => {
+      const el = document.getElementById('type');
+      return { value: el.value, live: window.__lab.tour() !== null, focused: document.activeElement === el,
+               caret: [el.selectionStart, el.selectionEnd] };
+    });
+    await third.locator('#tour').click();
+    await third.waitForFunction(() => window.__lab.tour()?.scene === 2 && document.getElementById('type').value.length >= 5,
+      null, { timeout: 60000 }).catch(() => { throw new Error('the tour over a draft never typed in scene 2'); });
+    const during = (await boxOf(third)).value;
+    if (!gilded.startsWith(during)) throw new Error(`in scene 2 of a tour over a draft the textarea holds "${during}"`);
+    await third.keyboard.press('Shift');
+    const givenBack = await boxOf(third);
+    if (givenBack.live || givenBack.value !== own || !givenBack.focused || givenBack.caret.join() !== `${own.length},${own.length}`)
+      throw new Error(`stopped in scene 2, a tour over "${own}" left ${JSON.stringify(givenBack)}`);
+    await third.waitForFunction((text) => window.__lab.liveText() === text, own, { timeout: 10000 })
+      .catch(() => { throw new Error(`the draft drawn after the stop is not "${own}"`); });
+    // again, and let it finish
+    await third.locator('#tour').click();
+    await third.waitForFunction(() => window.__lab.tour()?.scene >= 1 && document.getElementById('type').value.startsWith('Nothing'),
+      null, { timeout: 30000 }).catch(() => { throw new Error('the second tour over a draft did not begin on an empty box'); });
+    await third.waitForFunction(() => window.__lab.tour() === null, null, { timeout: 180000 })
+      .catch(() => { throw new Error('the second tour over a draft never ended'); });
+    const atTheEnd = await boxOf(third);
+    if (atTheEnd.value !== own || !atTheEnd.focused) throw new Error(`a tour over "${own}" ended with ${JSON.stringify(atTheEnd)}`);
+    await third.waitForFunction((text) => window.__lab.liveText() === text, own, { timeout: 10000 })
+      .catch(() => { throw new Error(`the draft drawn after the tour is not "${own}"`); });
+    await third.close();
+
     // With reduced motion there is no tour, and the caption says why.
     const still2 = track(await browser.newPage({ viewport: { width: 1000, height: 640 }, reducedMotion: 'reduce' }));
     current = still2;
@@ -1944,6 +2282,7 @@ try {
       + `a swell in scene 3; level 3 in scene 4 (scenes 2, 3 and 4 began at levels ${[2, 3, 4].map((n) => entered(n).level).join(', ')}); `
       + `read back in Elegant then Caffeinated at 200 wpm (${elegant.durationMs} and ${caffeinated.durationMs} ms); a card in scene 7; `
       + `then an empty focused textarea, Auto and pace 300 as before; from the button, a key in scene 2 stopped it at once with "${stopped.value}" kept and x appended, Drunken restored; `
+      + `over a draft "${own}": the tour played on an empty box and gave it back on a key in scene 2 and again at its end; `
       + `reduced motion: no tour, the caption says so`);
   }
 
@@ -1952,7 +2291,7 @@ try {
     if (errors.length) throw new Error(`console errors: ${errors.join(' | ')}`);
   }
   console.log(`screenshots: ${['typing-mid', 'embers', 'settled', 'wrapped', 'reveal-0', 'reveal-1', 'reveal-2', 'reveal-3',
-    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark', 'webgpu', 'tour-2', 'tour-5',
+    'crawl', 'steady', 'fuse', 'debug', 'stage-grid', 'swell', 'card', 'push', 'specimen-dark', 'specimen-paper', 'reading', 'dress-paper', 'dress-glint', 'dress-dark', 'webgpu', 'board', 'board-narrow', 'tour-2', 'tour-5',
     ...['elegant', 'caffeinated', 'drunken', 'coarse', 'plain', 'auto-fast', 'auto-slow'].map((n) => `style-${n}`)].map((n) => `${out}/${n}.png`).join(', ')}`);
 } catch (e) {
   code = 1;
